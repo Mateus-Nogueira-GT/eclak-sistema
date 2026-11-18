@@ -53,7 +53,14 @@ async function main() {
                   ${sql.json({ nome: nome.trim(), email, perfil: "diretor", filial: "Rondonópolis", ativo: true })})`;
       });
     } catch (e) {
-      await admin.auth.admin.deleteUser(data.user.id);
+      const [existe] = await sql`select 1 from usuarios where id = ${data.user.id}`;
+      if (!existe) {
+        try {
+          await admin.auth.admin.deleteUser(data.user.id);
+        } catch (e2) {
+          console.error("Falha ao remover usuário de auth na compensação", e2);
+        }
+      }
       throw e;
     }
     console.log(`Diretor criado. Convite enviado para ${email}.`);

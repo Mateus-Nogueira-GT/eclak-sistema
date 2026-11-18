@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
+import { supabaseAdmin } from "@/server/supabase";
 import { db } from "@/server/db/client";
 import { auditoria, usuarios } from "@/server/db/schema";
 import { alterarUsuario, criarUsuario } from "@/server/actions/usuarios";
@@ -99,5 +100,19 @@ describe("administração de usuários", () => {
     expect([r1.ok, r2.ok].filter(Boolean)).toHaveLength(1);
     const ativos = await db.select().from(usuarios).where(eq(usuarios.ativo, true));
     expect(ativos).toHaveLength(1);
+  });
+
+  it("convites simultâneos ao mesmo e-mail não apagam o usuário de auth já gravado", async () => {
+    const d = await criarUsuarioTeste("diretor");
+    const email = `race-${Date.now()}@eclak.test`;
+    const rs = await comSessao(d.id, () =>
+      Promise.all([criarUsuario(novo(email)), criarUsuario(novo(email))]),
+    );
+    expect(rs.filter((r) => r.ok)).toHaveLength(1);
+    const linhas = await db.select().from(usuarios).where(eq(usuarios.email, email));
+    expect(linhas).toHaveLength(1);
+    const { data, error } = await supabaseAdmin().auth.admin.getUserById(linhas[0].id);
+    expect(error).toBeNull();
+    expect(data.user?.id).toBe(linhas[0].id);
   });
 });

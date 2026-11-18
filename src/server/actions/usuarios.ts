@@ -99,8 +99,20 @@ export async function criarUsuario(dados: {
       });
     });
   } catch (e) {
-    // Compensação: não deixa usuário órfão em auth.users.
-    await admin.auth.admin.deleteUser(id);
+    // Compensação: só apaga o usuário de auth se nenhuma linha de `usuarios` o referencia
+    // (o convite devolve o usuário existente quando o e-mail já foi convidado).
+    const [linha] = await db
+      .select({ id: usuarios.id })
+      .from(usuarios)
+      .where(eq(usuarios.id, id))
+      .limit(1)
+      .catch(() => []);
+    if (linha) return { ok: false, erro: MSG_DUPLICADO };
+    try {
+      await admin.auth.admin.deleteUser(id);
+    } catch (e2) {
+      console.error("Falha ao remover usuário de auth na compensação", id, e2);
+    }
     if (typeof e === "object" && e && "code" in e && e.code === "23505") {
       return { ok: false, erro: MSG_DUPLICADO };
     }
