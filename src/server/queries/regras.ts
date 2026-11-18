@@ -8,6 +8,8 @@ import { regrasVersoes, usuarios } from "@/server/db/schema";
 export type RegrasVigentes = { versaoId: string; vigenteDesde: Date; valores: Regras };
 
 const TRAVA_PRIMEIRA_VERSAO = 7_350_001;
+/** A versão inicial representa as regras sempre em vigor, antes de qualquer alteração. */
+export const INICIO_DOS_TEMPOS = new Date(0);
 
 /**
  * Garante que exista ao menos uma versão. Race-safe: o lock consultivo serializa
@@ -16,12 +18,12 @@ const TRAVA_PRIMEIRA_VERSAO = 7_350_001;
 export async function garantirVersaoInicial(tx: Transacao): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(${TRAVA_PRIMEIRA_VERSAO})`);
   const [existe] = await tx.select({ id: regrasVersoes.id }).from(regrasVersoes).limit(1);
-  if (!existe) await tx.insert(regrasVersoes).values({ valores: REGRAS_INICIAIS });
+  if (!existe) await tx.insert(regrasVersoes).values({ valores: REGRAS_INICIAIS, vigenteDesde: INICIO_DOS_TEMPOS });
 }
 
 /**
  * Regras em vigor na data `em` (padrão: agora): a versão mais recente com vigente_desde <= em.
- * Se `em` é anterior à primeira versão, devolve a primeira. Exige apenas login.
+ * A versão inicial vale desde 1970, então sempre há resposta. Exige apenas login.
  */
 export async function regrasVigentes(em: Date = new Date()): Promise<RegrasVigentes> {
   await exigirPerfil();
@@ -32,13 +34,7 @@ export async function regrasVigentes(em: Date = new Date()): Promise<RegrasVigen
       .where(lte(regrasVersoes.vigenteDesde, em))
       .orderBy(desc(regrasVersoes.vigenteDesde), desc(regrasVersoes.seq))
       .limit(1);
-    if (v) return v;
-    const [primeira] = await db
-      .select()
-      .from(regrasVersoes)
-      .orderBy(asc(regrasVersoes.vigenteDesde), asc(regrasVersoes.seq))
-      .limit(1);
-    return primeira;
+    return v;
   };
   let linha = await buscar();
   if (!linha) {
@@ -68,12 +64,12 @@ export async function historicoRegras(): Promise<LinhaHistorico[]> {
     .orderBy(asc(regrasVersoes.vigenteDesde), asc(regrasVersoes.seq));
 
   const linhas: LinhaHistorico[] = [];
-  for (let i = 1; i < versoes.length; i++) {
+  for (let i = versoes.length - 1; i >= 1; i--) {
     const ant = RegrasSchema.parse(versoes[i - 1].valores);
     const cur = RegrasSchema.parse(versoes[i].valores);
     for (const d of diferencasRegras(ant, cur)) {
       linhas.push({ em: versoes[i].vigenteDesde, usuario: versoes[i].usuario ?? "Sistema", ...d });
     }
   }
-  return linhas.reverse().sort((a, b) => b.em.getTime() - a.em.getTime());
+  return linhas;
 }

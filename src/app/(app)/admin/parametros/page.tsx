@@ -20,7 +20,10 @@ function dataHora(d: Date): string {
 
 export default async function Pagina() {
   const [vigentes, historico] = await Promise.all([regrasVigentes(), historicoRegras()]);
-  const desde = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Cuiaba" }).format(vigentes.vigenteDesde);
+  const desde =
+    vigentes.vigenteDesde.getTime() === 0
+      ? "valores iniciais"
+      : new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Cuiaba" }).format(vigentes.vigenteDesde);
 
   return (
     <div className="mx-auto max-w-[1180px]">

@@ -145,7 +145,7 @@ export function Formulario({ valores, desde }: { valores: Regras; desde: string 
       )}
 
       <Card className="mb-5">
-        <CardHeader eyebrow={`Vigentes desde ${desde}`} title="Regras de precificação" />
+        <CardHeader eyebrow={desde === "valores iniciais" ? "Vigentes: valores iniciais" : `Vigentes desde ${desde}`} title="Regras de precificação" />
         <Grade
           className="mt-3"
           right={[1]}

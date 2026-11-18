@@ -115,4 +115,26 @@ describe("parâmetros versionados", () => {
     const h = await comSessao(d.id, () => historicoRegras());
     expect(h).toHaveLength(1);
   });
+
+  it("a versão inicial vale desde sempre; data anterior a um save devolve os valores iniciais", async () => {
+    const d = await criarUsuarioTeste("diretor");
+    const v = await comSessao(d.id, () => regrasVigentes());
+    expect(v.vigenteDesde.getTime()).toBe(0);
+    const antigo = await comSessao(d.id, () => regrasVigentes(new Date("2000-01-01")));
+    expect(antigo.valores).toEqual(REGRAS_INICIAIS);
+    await comSessao(d.id, () => salvarRegras(com({ margemReferenciaPct: "20.000" })));
+    const antes = await comSessao(d.id, () => regrasVigentes(new Date("2000-01-01")));
+    expect(antes.valores.margemReferenciaPct).toBe("19.000");
+    const agora = await comSessao(d.id, () => regrasVigentes());
+    expect(agora.valores.margemReferenciaPct).toBe("20.000");
+  });
+
+  it("campos de um mesmo save mantêm a ordem da tela no histórico", async () => {
+    const d = await criarUsuarioTeste("diretor");
+    await comSessao(d.id, () =>
+      salvarRegras(com({ margemAlvoPct: "18.000", margemReferenciaPct: "20.000", markupTremPct: "41.000" })),
+    );
+    const h = await comSessao(d.id, () => historicoRegras());
+    expect(h.map((l) => l.campo)).toEqual(["Margem líquida alvo da viagem", "Margem de referência", "Markup de trem"]);
+  });
 });
