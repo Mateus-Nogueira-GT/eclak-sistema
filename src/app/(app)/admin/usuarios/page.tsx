@@ -39,6 +39,7 @@ export default async function Pagina() {
     perfil: u.perfil,
     filial: u.filial,
     ativo: u.ativo,
+    convitePendente: u.convitePendente,
     cadastro: data.format(u.criadoEm),
   }));
 

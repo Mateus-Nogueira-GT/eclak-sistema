@@ -4,12 +4,12 @@ import { and, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { FILIAIS, PERFIS_VALORES, type Filial, type Perfil } from "@/domain/perfis";
-import { comPerfil } from "@/server/acesso";
+import { comPerfil, ehUuid } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db } from "@/server/db/client";
 import { usuarios } from "@/server/db/schema";
 import { urlConfirmacao } from "@/server/site";
-import { supabaseAdmin } from "@/server/supabase";
+import { supabaseAdmin, supabaseAnonimo } from "@/server/supabase";
 
 type Resultado<T = object> = ({ ok: true } & T) | { ok: false; erro: string };
 
@@ -180,6 +180,55 @@ async function alterar(diretorId: string, id: string, dados: unknown): Promise<R
     throw e;
   }
 
+  revalidatePath("/admin/usuarios");
+  return { ok: true };
+}
+
+/**
+ * Reenvia o convite a quem nunca entrou no sistema (o link anterior pode ter expirado). Só o Diretor.
+ * Se o e-mail já foi confirmado sem nunca ter havido login, manda o link de nova senha no lugar.
+ */
+export async function reenviarConvite(id: string): Promise<Resultado> {
+  return comPerfil(["diretor"], (diretor) => reenviar(diretor.id, id));
+}
+
+async function reenviar(diretorId: string, id: string): Promise<Resultado> {
+  const naoEncontrado = { ok: false as const, erro: "Usuário não encontrado" };
+  if (!ehUuid(id)) return naoEncontrado;
+  const [alvo] = await db
+    .select({ id: usuarios.id, email: usuarios.email })
+    .from(usuarios)
+    .where(eq(usuarios.id, id))
+    .limit(1);
+  if (!alvo) return naoEncontrado;
+
+  const admin = supabaseAdmin();
+  const { data, error } = await admin.auth.admin.getUserById(id);
+  if (error || !data.user) return naoEncontrado;
+  if (data.user.last_sign_in_at) return { ok: false, erro: "Este usuário já entrou no sistema" };
+
+  const redirectTo = urlConfirmacao();
+  const convite = await admin.auth.admin.inviteUserByEmail(alvo.email, { redirectTo });
+  if (convite.error) {
+    const jaConfirmado = /already (been )?registered|already exists/i.test(convite.error.message);
+    const reserva = jaConfirmado
+      ? await supabaseAnonimo().auth.resetPasswordForEmail(alvo.email, { redirectTo })
+      : convite;
+    if (reserva.error) {
+      console.error("Falha ao reenviar convite", id, reserva.error.message);
+      return { ok: false, erro: "Não foi possível reenviar o convite. Tente novamente" };
+    }
+  }
+
+  await db.transaction(async (tx) => {
+    await registrarAuditoria(tx, {
+      usuarioId: diretorId,
+      tabela: "usuarios",
+      registroId: id,
+      acao: "alterar",
+      depois: { conviteReenviadoEm: new Date() },
+    });
+  });
   revalidatePath("/admin/usuarios");
   return { ok: true };
 }

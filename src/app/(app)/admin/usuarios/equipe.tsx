@@ -5,7 +5,7 @@ import { Plus } from "lucide-react";
 import { Badge, Botao, Campo, Card, CardHeader, Select, inputCls } from "@/components/ui";
 import { Grade } from "@/components/kit";
 import { FILIAIS, PERFIS, PERFIS_VALORES, type Filial, type Perfil } from "@/domain/perfis";
-import { alterarUsuario, criarUsuario } from "@/server/actions/usuarios";
+import { alterarUsuario, criarUsuario, reenviarConvite } from "@/server/actions/usuarios";
 
 type Linha = {
   id: string;
@@ -14,6 +14,7 @@ type Linha = {
   perfil: Perfil;
   filial: Filial;
   ativo: boolean;
+  convitePendente: boolean;
   cadastro: string;
 };
 
@@ -56,6 +57,18 @@ export function Equipe({ usuarios }: { usuarios: Linha[] }) {
     setMsg(null);
     setEditando(u.id);
     setEd({ perfil: u.perfil, filial: u.filial, ativo: u.ativo });
+  }
+
+  function reenviar(u: Linha) {
+    setMsg(null);
+    iniciar(async () => {
+      const r = await reenviarConvite(u.id);
+      setMsg(
+        r.ok
+          ? { tipo: "ok", texto: `Convite reenviado para ${u.email}` }
+          : { tipo: "erro", texto: r.erro },
+      );
+    });
   }
 
   function salvar(id: string) {
@@ -137,7 +150,12 @@ export function Equipe({ usuarios }: { usuarios: Linha[] }) {
                   u.filial,
                   <Badge key="s" tom={u.ativo ? "agua" : "ouro"}>{u.ativo ? "Ativo" : "Inativo"}</Badge>,
                   <span key="c" className="text-cinza">{u.cadastro}</span>,
-                  <Botao key="b" variante="fantasma" onClick={() => editar(u)} className="!px-2 !py-1 !text-[13px]">Editar</Botao>,
+                  <span key="b" className="flex gap-1">
+                    <Botao variante="fantasma" onClick={() => editar(u)} className="!px-2 !py-1 !text-[13px]">Editar</Botao>
+                    {u.convitePendente && u.ativo && (
+                      <Botao variante="fantasma" onClick={() => reenviar(u)} disabled={pendente} className="!px-2 !py-1 !text-[13px]">Reenviar convite</Botao>
+                    )}
+                  </span>,
                 ],
           )}
         />

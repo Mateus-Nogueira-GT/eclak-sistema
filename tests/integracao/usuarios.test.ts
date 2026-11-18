@@ -5,9 +5,9 @@ vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSup
 import { supabaseAdmin } from "@/server/supabase";
 import { db } from "@/server/db/client";
 import { auditoria, usuarios } from "@/server/db/schema";
-import { alterarUsuario, criarUsuario } from "@/server/actions/usuarios";
+import { alterarUsuario, criarUsuario, reenviarConvite } from "@/server/actions/usuarios";
 import { listarUsuarios } from "@/server/queries/usuarios";
-import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
+import { anonClient, comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
 
 const novo = (email: string) => ({
   nome: "Fernanda",
@@ -114,5 +114,49 @@ describe("administração de usuários", () => {
     const { data, error } = await supabaseAdmin().auth.admin.getUserById(linhas[0].id);
     expect(error).toBeNull();
     expect(data.user?.id).toBe(linhas[0].id);
+  });
+});
+
+describe("reenviar convite", () => {
+  beforeEach(limparBanco);
+
+  it("consultor não reenvia: Sem permissão", async () => {
+    const c = await criarUsuarioTeste("consultor");
+    expect(await comSessao(c.id, () => reenviarConvite(c.id))).toEqual({ ok: false, erro: "Sem permissão" });
+  });
+
+  it("Diretor reenvia para quem nunca entrou; auditoria 'alterar' com conviteReenviadoEm", async () => {
+    const d = await criarUsuarioTeste("diretor");
+    await anonClient().auth.signInWithPassword({ email: d.email, password: d.senha });
+    const r = await comSessao(d.id, () => criarUsuario(novo(`reenvio-${Date.now()}@eclak.test`)));
+    if (!r.ok) throw new Error(r.erro);
+    const lista = await comSessao(d.id, () => listarUsuarios());
+    expect(lista.find((u) => u.id === r.id)?.convitePendente).toBe(true);
+    expect(lista.find((u) => u.id === d.id)?.convitePendente).toBe(false);
+
+    expect(await comSessao(d.id, () => reenviarConvite(r.id))).toEqual({ ok: true });
+    const aud = await db.select().from(auditoria).where(eq(auditoria.registroId, r.id));
+    expect(aud.map((a) => a.acao)).toEqual(["criar", "alterar"]);
+    const depois = aud.find((a) => a.acao === "alterar")!.depois as { conviteReenviadoEm: string };
+    expect(Number.isNaN(Date.parse(depois.conviteReenviadoEm))).toBe(false);
+  });
+
+  it("quem já entrou no sistema não recebe convite de novo", async () => {
+    const d = await criarUsuarioTeste("diretor");
+    const c = await criarUsuarioTeste("consultor");
+    const login = await anonClient().auth.signInWithPassword({ email: c.email, password: c.senha });
+    expect(login.error).toBeNull();
+    expect(await comSessao(d.id, () => reenviarConvite(c.id))).toEqual({
+      ok: false,
+      erro: "Este usuário já entrou no sistema",
+    });
+    expect(await db.select().from(auditoria).where(eq(auditoria.registroId, c.id))).toHaveLength(0);
+  });
+
+  it("id desconhecido ou inválido: Usuário não encontrado", async () => {
+    const d = await criarUsuarioTeste("diretor");
+    const msg = { ok: false, erro: "Usuário não encontrado" };
+    expect(await comSessao(d.id, () => reenviarConvite("nao-e-uuid"))).toEqual(msg);
+    expect(await comSessao(d.id, () => reenviarConvite("00000000-0000-4000-8000-000000000000"))).toEqual(msg);
   });
 });
