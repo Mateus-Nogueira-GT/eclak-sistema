@@ -101,10 +101,19 @@ export function hojeEmCuiaba(agora: Date = new Date()): string {
 export type AlertaCliente = {
   tipo: "sem_passaporte" | "passaporte_vencido" | "aniversario";
   pessoa: string;
+  /** Id da pessoa, quando ela já está gravada (a ficha destaca a linha por ele). */
+  pessoaId?: string;
   texto: string;
 };
 
-type PessoaAlerta = { nome: string; titular: boolean; nascimento: string | null; validadePassaporte: string | null };
+type PessoaAlerta = {
+  id?: string;
+  nome: string;
+  titular: boolean;
+  nascimento: string | null;
+  passaporte?: string | null;
+  validadePassaporte: string | null;
+};
 
 const JANELA_ANIVERSARIO_DIAS = 30;
 
@@ -133,14 +142,21 @@ export function alertasDoCliente(
 ): AlertaCliente[] {
   const alertas: AlertaCliente[] = [];
   for (const p of c.pessoas) {
+    const quem = { pessoa: p.nome, ...(p.id ? { pessoaId: p.id } : {}) };
     const checaDocumento = c.tipo !== "grupo" || p.titular;
     if (checaDocumento) {
       if (!p.validadePassaporte) {
-        alertas.push({ tipo: "sem_passaporte", pessoa: p.nome, texto: `${p.nome} não tem passaporte cadastrado.` });
+        alertas.push({
+          tipo: "sem_passaporte",
+          ...quem,
+          texto: p.passaporte?.trim()
+            ? `${p.nome} não tem a validade do passaporte cadastrada.`
+            : `${p.nome} não tem passaporte cadastrado.`,
+        });
       } else if (p.validadePassaporte < hoje) {
         alertas.push({
           tipo: "passaporte_vencido",
-          pessoa: p.nome,
+          ...quem,
           texto: `Passaporte de ${p.nome} venceu em ${dataBr(p.validadePassaporte)}.`,
         });
       }
@@ -150,7 +166,7 @@ export function alertasDoCliente(
       if (prox.dias <= JANELA_ANIVERSARIO_DIAS) {
         alertas.push({
           tipo: "aniversario",
-          pessoa: p.nome,
+          ...quem,
           texto: `${p.nome} faz aniversário em ${dois(prox.dia)}/${dois(prox.mes)}${prox.dias === 0 ? " (hoje)" : ""}.`,
         });
       }

@@ -52,7 +52,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<B
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Filtros busca={busca} tipo={tipo ?? ""} aviso={aviso ?? ""} />
+        <Filtros key={`${busca}|${tipo ?? ""}|${aviso ?? ""}`} busca={busca} tipo={tipo ?? ""} aviso={aviso ?? ""} />
         <span className="mx-1 hidden h-6 w-px bg-linha sm:block" />
         {chip("documentos", <><ShieldAlert size={14} /> Documentos pendentes</>, comDocumentos)}
         {chip("aniversario", <><Cake size={14} /> Aniversário em 30 dias</>, comAniversario)}

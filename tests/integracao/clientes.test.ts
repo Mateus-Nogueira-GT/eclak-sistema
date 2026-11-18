@@ -303,6 +303,30 @@ describe("clientes", () => {
     });
   });
 
+  it("busca por código do cliente", async () => {
+    const c = await criarUsuarioTeste("consultor");
+    await criar(c.id);
+    await criar(c.id, { ...ribeiro, titular: { nome: "Ana Souza" }, acompanhantes: [], telefone: "6633330002" });
+    const l = (busca: string) => comSessao(c.id, () => listarClientes({ busca })).then((x) => x.map((y) => y.grupo));
+    expect(await l("ECL-0002")).toEqual(["Família Souza"]);
+    expect(await l("ecl2")).toEqual(["Família Souza"]);
+    expect(await l(" ECL 1 ")).toEqual(["Família Ribeiro"]);
+    expect(await l("0002")).toEqual(["Família Souza"]); // dígitos soltos seguem buscando telefone
+  });
+
+  it("cliente desde é a data de Cuiabá", async () => {
+    const c = await criarUsuarioTeste("consultor");
+    const { id } = await criar(c.id);
+    expect((await obterCliente2(c.id, id))?.clienteDesde).toBe(hojeEmCuiaba());
+  });
+
+  it("alertas trazem o id da pessoa", async () => {
+    const c = await criarUsuarioTeste("consultor");
+    const { id } = await criar(c.id);
+    const f = (await obterCliente2(c.id, id))!;
+    expect(f.alertas.filter((a) => a.tipo === "sem_passaporte").map((a) => a.pessoaId)).toEqual(f.pessoas.map((p) => p.id));
+  });
+
   it("erros de acompanhante dizem de quem é", async () => {
     const c = await criarUsuarioTeste("consultor");
     await criar(c.id);

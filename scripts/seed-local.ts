@@ -1,5 +1,5 @@
 /**
- * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local) os fornecedores e os clientes fictícios do protótipo.
+ * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores e os clientes fictícios do protótipo.
  * Recusa rodar se DATABASE_URL ou NEXT_PUBLIC_SUPABASE_URL não forem locais. Idempotente: o que já existe é pulado.
  */
 import { config } from "dotenv";

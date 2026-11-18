@@ -15,7 +15,9 @@ import {
   TIPOS_CLIENTE,
 } from "@/domain/clientes";
 
-const pessoa = (o: Partial<{ nome: string; titular: boolean; nascimento: string | null; validadePassaporte: string | null }> = {}) => ({
+const pessoa = (
+  o: Partial<{ id: string; nome: string; titular: boolean; nascimento: string | null; passaporte: string | null; validadePassaporte: string | null }> = {},
+) => ({
   nome: "Ana Lima",
   titular: true,
   nascimento: null,
@@ -123,6 +125,26 @@ describe("alertasDoCliente", () => {
       "2026-11-18",
     );
     expect(a.filter((x) => x.tipo === "sem_passaporte")).toHaveLength(2);
+  });
+  it("número sem validade: pede a validade", () => {
+    const a = alertasDoCliente({ tipo: "individual", pessoas: [pessoa({ passaporte: "FX123", validadePassaporte: null })] }, "2026-11-18");
+    expect(a).toEqual([
+      { tipo: "sem_passaporte", pessoa: "Ana Lima", texto: "Ana Lima não tem a validade do passaporte cadastrada." },
+    ]);
+  });
+  it("sem número e sem validade: texto de sem passaporte", () => {
+    const a = alertasDoCliente({ tipo: "individual", pessoas: [pessoa({ passaporte: null, validadePassaporte: null })] }, "2026-11-18");
+    expect(a.map((x) => x.texto)).toEqual(["Ana Lima não tem passaporte cadastrado."]);
+  });
+  it("alerta leva o id da pessoa quando houver", () => {
+    const a = alertasDoCliente(
+      { tipo: "familia", pessoas: [pessoa({ id: "p1", validadePassaporte: null }), pessoa({ id: "p2", nome: "Ana Lima", titular: false, nascimento: "1980-11-18" })] },
+      "2026-11-18",
+    );
+    expect(a.map((x) => [x.tipo, x.pessoaId])).toEqual([
+      ["sem_passaporte", "p1"],
+      ["aniversario", "p2"],
+    ]);
   });
   it("passaporte vencido", () => {
     const a = alertasDoCliente({ tipo: "individual", pessoas: [pessoa({ validadePassaporte: "2026-11-17" })] }, "2026-11-18");

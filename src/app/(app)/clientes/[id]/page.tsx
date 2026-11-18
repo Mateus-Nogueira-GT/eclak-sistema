@@ -109,7 +109,7 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
               </thead>
               <tbody>
                 {c.pessoas.map((p) => {
-                  const aviso = docs.some((a) => a.pessoa === p.nome);
+                  const aviso = docs.some((a) => a.pessoaId === p.id);
                   return (
                     <tr key={p.id} className={`border-b border-linha/70 last:border-0 ${aviso ? "bg-ouro/15" : ""}`}>
                       <Td className="pl-6">

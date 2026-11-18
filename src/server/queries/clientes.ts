@@ -73,9 +73,13 @@ async function pessoasDe(ids: string[]) {
     .orderBy(asc(pessoas.clienteId), asc(pessoas.ordem));
 }
 
+/** `ECL-0002`, `ecl2`, `ECL 2`: busca pelo código do cliente. */
+const CODIGO = /^\s*ECL-?\s*(\d{1,6})\s*$/i;
+
 /**
- * Clientes não excluídos, por grupo. Busca sem acento e sem caixa em grupo, nome das pessoas e e-mail;
- * por dígitos em CPF e telefone (com 3 dígitos ou mais). Pessoas removidas não contam. Exige login.
+ * Clientes não excluídos, por grupo. Busca pelo código (`ECL-0002`); ou sem acento e sem caixa em grupo,
+ * nome das pessoas e e-mail, e por dígitos em CPF e telefone (com 3 dígitos ou mais). Pessoas removidas
+ * não contam. Exige login.
  */
 export async function listarClientes(
   filtro: { busca?: string; tipo?: TipoCliente; aviso?: "documentos" | "aniversario" } = {},
@@ -83,7 +87,10 @@ export async function listarClientes(
   await exigirPerfil();
   const condicoes = [isNull(clientes.excluidoEm)];
   const busca = filtro.busca?.trim();
-  if (busca) {
+  const codigo = busca ? CODIGO.exec(busca) : null;
+  if (codigo) {
+    condicoes.push(eq(clientes.codigo, Number(codigo[1])));
+  } else if (busca) {
     const padrao = `%${literal(busca)}%`;
     const digitos = busca.replace(/\D/g, "");
     const partes = [
