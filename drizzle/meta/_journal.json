@@ -43,6 +43,20 @@
       "when": 1794987192620,
       "tag": "0005_rls_fornecedores",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795002160938,
+      "tag": "0006_mixed_leader",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795002161675,
+      "tag": "0007_rls_clientes",
+      "breakpoints": true
     }
   ]
 }

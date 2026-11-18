@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
 import { db } from "@/server/db/client";
-import { auditoria } from "@/server/db/schema";
+import { auditoria, clientes, pessoas } from "@/server/db/schema";
 import { criarUsuarioTeste, limparBanco } from "../helpers/db";
 
 const anon = () =>
@@ -22,9 +22,14 @@ describe("RLS: anon não lê nada", () => {
       acao: "criar",
       depois: { ok: true },
     });
+    const [c] = await db
+      .insert(clientes)
+      .values({ grupo: "Família Teste", tipo: "familia", filial: "Rondonópolis", telefone: "66999999999" })
+      .returning();
+    await db.insert(pessoas).values({ clienteId: c.id, titular: true, ordem: 1, nome: "Titular Teste" });
   });
 
-  for (const tabela of ["usuarios", "auditoria"]) {
+  for (const tabela of ["usuarios", "auditoria", "clientes", "pessoas"]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
       expect(error ? [] : data).toEqual([]);
