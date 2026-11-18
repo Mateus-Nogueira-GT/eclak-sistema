@@ -151,7 +151,7 @@ export function alertasDoCliente(
         alertas.push({
           tipo: "aniversario",
           pessoa: p.nome,
-          texto: `${p.nome} faz aniversário em ${dois(prox.dia)}/${dois(prox.mes)}.${prox.dias === 0 ? " (hoje)" : ""}`,
+          texto: `${p.nome} faz aniversário em ${dois(prox.dia)}/${dois(prox.mes)}${prox.dias === 0 ? " (hoje)" : ""}.`,
         });
       }
     }

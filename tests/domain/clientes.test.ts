@@ -97,7 +97,7 @@ describe("alertasDoCliente", () => {
   });
   it("hoje", () => {
     const a = alertasDoCliente({ tipo: "individual", pessoas: [pessoa({ nascimento: "1980-11-18" })] }, "2026-11-18");
-    expect(a[0].texto.endsWith("(hoje)")).toBe(true);
+    expect(a[0].texto).toBe("Ana Lima faz aniversário em 18/11 (hoje).");
   });
   it("31 dias fica de fora, 30 entra", () => {
     expect(alertasDoCliente({ tipo: "individual", pessoas: [pessoa({ nascimento: "1980-12-19" })] }, "2026-11-18")).toEqual([]);
