@@ -1,6 +1,7 @@
 import "server-only";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { TipoServico } from "@/domain/fornecedores";
+import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
 import { fornecedores } from "@/server/db/schema";
@@ -46,7 +47,7 @@ export async function listarFornecedores(
 /** Inclui excluídos (com `excluidoEm` preenchido). Exige login. */
 export async function obterFornecedor(id: string): Promise<Fornecedor | null> {
   await exigirPerfil();
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
+  if (!ehUuid(id)) return null;
   const [f] = await db.select().from(fornecedores).where(eq(fornecedores.id, id)).limit(1);
   return f ?? null;
 }

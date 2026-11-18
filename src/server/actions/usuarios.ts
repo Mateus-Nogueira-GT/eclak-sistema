@@ -4,7 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { FILIAIS, PERFIS_VALORES, type Filial, type Perfil } from "@/domain/perfis";
-import { ErroAcesso, exigirPerfil } from "@/server/auth";
+import { comPerfil } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db } from "@/server/db/client";
 import { usuarios } from "@/server/db/schema";
@@ -37,24 +37,16 @@ const esquemaAlterar = z.object({
   }),
 });
 
-async function comoDiretor() {
-  try {
-    return { usuario: await exigirPerfil("diretor") };
-  } catch (e) {
-    if (e instanceof ErroAcesso) return { erro: "Sem permissão" };
-    throw e;
-  }
-}
-
 export async function criarUsuario(dados: {
   nome: string;
   email: string;
   perfil: Perfil;
   filial: Filial;
 }): Promise<Resultado<{ id: string }>> {
-  const acesso = await comoDiretor();
-  if (!acesso.usuario) return { ok: false, erro: acesso.erro };
+  return comPerfil(["diretor"], (diretor) => criar(diretor.id, dados));
+}
 
+async function criar(diretorId: string, dados: unknown): Promise<Resultado<{ id: string }>> {
   const p = esquemaNovo.safeParse(dados);
   if (!p.success) return { ok: false, erro: p.error.issues[0].message };
   const { nome, email, perfil, filial } = p.data;
@@ -91,7 +83,7 @@ export async function criarUsuario(dados: {
           ativo: usuarios.ativo,
         });
       await registrarAuditoria(tx, {
-        usuarioId: acesso.usuario.id,
+        usuarioId: diretorId,
         tabela: "usuarios",
         registroId: id,
         acao: "criar",
@@ -127,9 +119,10 @@ export async function alterarUsuario(
   id: string,
   dados: { perfil?: Perfil; filial?: Filial; ativo?: boolean },
 ): Promise<Resultado> {
-  const acesso = await comoDiretor();
-  if (!acesso.usuario) return { ok: false, erro: acesso.erro };
+  return comPerfil(["diretor"], (diretor) => alterar(diretor.id, id, dados));
+}
 
+async function alterar(diretorId: string, id: string, dados: unknown): Promise<Resultado> {
   const p = esquemaAlterar.safeParse({ id, dados });
   if (!p.success) return { ok: false, erro: p.error.issues[0].message };
   const alvoId = p.data.id;
@@ -171,7 +164,7 @@ export async function alterarUsuario(
         .set({ ...depois, atualizadoEm: new Date() })
         .where(eq(usuarios.id, alvoId));
       await registrarAuditoria(tx, {
-        usuarioId: acesso.usuario.id,
+        usuarioId: diretorId,
         tabela: "usuarios",
         registroId: alvoId,
         acao: antes.ativo && !depois.ativo ? "desativar" : "alterar",
