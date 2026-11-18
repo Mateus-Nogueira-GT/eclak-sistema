@@ -15,6 +15,20 @@
       "when": 1794985492289,
       "tag": "0001_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794986842429,
+      "tag": "0002_chemical_black_panther",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794986846352,
+      "tag": "0003_rls_regras",
+      "breakpoints": true
     }
   ]
 }
