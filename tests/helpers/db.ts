@@ -12,6 +12,15 @@ function adminClient() {
   );
 }
 
+/** Cliente anônimo sem sessão persistida (como o navegador de quem abre o link do e-mail). */
+export function anonClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } },
+  );
+}
+
 export { garantirBancoLocal };
 
 function exigirLocal() {
@@ -77,9 +86,18 @@ export function mockSupabase() {
           sessaoDeTeste
             ? { data: { user: { id: sessaoDeTeste } }, error: null }
             : { data: { user: null }, error: { message: "sem sessão" } },
+        // Sem cookies: valida o token num cliente anônimo descartável.
+        verifyOtp: (p: Parameters<ReturnType<typeof anonClient>["auth"]["verifyOtp"]>[0]) =>
+          anonClient().auth.verifyOtp(p),
+        // Troca a senha do usuário da sessão de teste pela service role.
+        updateUser: async ({ password }: { password: string }) => {
+          if (!sessaoDeTeste) return { data: { user: null }, error: { message: "sem sessão" } };
+          return adminClient().auth.admin.updateUserById(sessaoDeTeste, { password });
+        },
       },
     }),
     supabaseAdmin: () => adminClient(),
+    supabaseAnonimo: () => anonClient(),
   };
 }
 

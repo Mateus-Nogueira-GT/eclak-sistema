@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { deveProteger, MATCHER_PROXY } from "@/server/proxy-caminhos";
 
-const ex = ["/login", "/login/", "/logo-eclak.png", "/favicon.ico", "/_next/static/a.js", "/_next/image"];
-const guardados = ["/login-historico", "/loginx/a", "/logo-eclak.png.bak", "/fornecedores", "/", "/admin/usuarios"];
+const ex = ["/login", "/login/", "/auth/confirmar", "/auth/confirmar/", "/logo-eclak.png", "/favicon.ico", "/_next/static/a.js", "/_next/image"];
+const guardados = ["/auth/confirmarx", "/auth", "/definir-senha", "/login-historico", "/loginx/a", "/logo-eclak.png.bak", "/fornecedores", "/", "/admin/usuarios"];
 
 describe("exclusões do proxy", () => {
   const re = new RegExp("^" + MATCHER_PROXY + "$");

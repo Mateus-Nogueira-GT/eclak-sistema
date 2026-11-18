@@ -1,6 +1,8 @@
 /**
  * Cria o primeiro Diretor: npx tsx scripts/criar-diretor.ts "<nome>" <email>
- * Lê DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY de .env.local ou do ambiente.
+ * Lê DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY e NEXT_PUBLIC_SITE_URL do
+ * ambiente ou de .env.local. Variáveis passadas na linha de comando têm prioridade: o dotenv
+ * não sobrescreve o que já está definido.
  * Recusa se já existir Diretor ativo. Envia convite por e-mail (a pessoa define a senha pelo link).
  */
 import { config } from "dotenv";
@@ -20,11 +22,15 @@ async function main() {
     console.error("E-mail inválido");
     process.exit(1);
   }
-  const { DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY } = process.env;
-  if (!DATABASE_URL || !NEXT_PUBLIC_SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("Faltam DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY");
+  const { DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, NEXT_PUBLIC_SITE_URL } =
+    process.env;
+  if (!DATABASE_URL || !NEXT_PUBLIC_SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !NEXT_PUBLIC_SITE_URL) {
+    console.error(
+      "Faltam DATABASE_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY ou NEXT_PUBLIC_SITE_URL",
+    );
     process.exit(1);
   }
+  const redirectTo = `${NEXT_PUBLIC_SITE_URL.replace(/\/+$/, "")}/auth/confirmar`;
 
   const sql = postgres(DATABASE_URL, { prepare: false, max: 1 });
   const admin = createClient(NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -37,7 +43,7 @@ async function main() {
       console.error("Já existe um Diretor ativo. Novos usuários são criados pelo Diretor, na tela Usuários.");
       process.exit(1);
     }
-    const { data, error } = await admin.auth.admin.inviteUserByEmail(email);
+    const { data, error } = await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
     if (error || !data.user) {
       console.error(`Falha ao enviar o convite: ${error?.message}`);
       process.exit(1);

@@ -5,7 +5,7 @@ import { usuarioAtivoPorId } from "@/server/auth";
 import { deveProteger } from "@/server/proxy-caminhos";
 
 // Caminhos que qualquer usuário ativo acessa (a página "/" decide o destino por perfil).
-const LIVRES_LOGADO = new Set(["/", "/sem-acesso"]);
+const LIVRES_LOGADO = new Set(["/", "/sem-acesso", "/definir-senha"]);
 
 export async function proxy(request: NextRequest) {
   if (!deveProteger(request.nextUrl.pathname)) return NextResponse.next();
@@ -63,6 +63,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     // Literal exigido pelo Next; testado contra MATCHER_PROXY em tests/domain/proxy-caminhos.test.ts.
-    "/((?!_next/static|_next/image|favicon\\.ico$|logo-eclak\\.png$|login(?:/|$)).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico$|logo-eclak\\.png$|login(?:/|$)|auth/confirmar(?:/|$)).*)",
   ],
 };

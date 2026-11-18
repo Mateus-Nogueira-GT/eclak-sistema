@@ -8,6 +8,7 @@ import { comPerfil } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db } from "@/server/db/client";
 import { usuarios } from "@/server/db/schema";
+import { urlConfirmacao } from "@/server/site";
 import { supabaseAdmin } from "@/server/supabase";
 
 type Resultado<T = object> = ({ ok: true } & T) | { ok: false; erro: string };
@@ -59,7 +60,9 @@ async function criar(diretorId: string, dados: unknown): Promise<Resultado<{ id:
   if (existente) return { ok: false, erro: MSG_DUPLICADO };
 
   const admin = supabaseAdmin();
-  const { data, error } = await admin.auth.admin.inviteUserByEmail(email);
+  const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
+    redirectTo: urlConfirmacao(),
+  });
   if (error || !data.user) {
     const jaExiste = /already (been )?registered|already exists/i.test(error?.message ?? "");
     return {
