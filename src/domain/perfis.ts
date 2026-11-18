@@ -20,11 +20,11 @@ export const PERFIS: Record<Perfil, { nome: string }> = {
 
 // Fatias seguintes acrescentam rotas aqui.
 export const ROTAS_POR_PERFIL: Record<Perfil, string[]> = {
-  diretor: ["/fornecedores", "/admin/usuarios", "/admin/parametros"],
-  consultor: ["/fornecedores"],
-  operacional: ["/fornecedores"],
-  fin_operacional: ["/fornecedores"],
-  fin_estrategico: ["/fornecedores"],
+  diretor: ["/clientes", "/fornecedores", "/admin/usuarios", "/admin/parametros"],
+  consultor: ["/clientes", "/fornecedores"],
+  operacional: ["/clientes", "/fornecedores"],
+  fin_operacional: ["/clientes", "/fornecedores"],
+  fin_estrategico: ["/clientes", "/fornecedores"],
 };
 
 export function podeAcessar(perfil: Perfil, caminho: string): boolean {
