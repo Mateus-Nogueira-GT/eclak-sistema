@@ -12,3 +12,6 @@ if (process.env.NODE_ENV !== "production") globalParaDb.__sql = sql;
 
 export const db = drizzle(sql, { schema });
 export { sql };
+
+/** Tipo do `tx` recebido em `db.transaction(async (tx) => …)`. */
+export type Transacao = Parameters<Parameters<typeof db.transaction>[0]>[0];
