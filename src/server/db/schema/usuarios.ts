@@ -1,18 +1,9 @@
+import { FILIAIS, PERFIS_VALORES } from "@/domain/perfis";
 import { boolean, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
-export const PERFIS = [
-  "diretor",
-  "consultor",
-  "operacional",
-  "fin_operacional",
-  "fin_estrategico",
-] as const;
-export const FILIAIS = ["Rondonópolis", "RS"] as const;
+export type { Filial, Perfil } from "@/domain/perfis";
 
-export type Perfil = (typeof PERFIS)[number];
-export type Filial = (typeof FILIAIS)[number];
-
-export const perfilUsuario = pgEnum("perfil_usuario", PERFIS);
+export const perfilUsuario = pgEnum("perfil_usuario", PERFIS_VALORES);
 export const filialEnum = pgEnum("filial", FILIAIS);
 
 export const usuarios = pgTable("usuarios", {
