@@ -36,6 +36,10 @@ export async function limparBanco(): Promise<void> {
     const lista = tabelas.map((t) => `"public"."${t.tablename}"`).join(", ");
     await sql.unsafe(`truncate table ${lista} restart identity cascade`);
   }
+  // `restart identity` só reinicia sequências de colunas; reinicia também as avulsas (ex.: cliente_codigo_seq).
+  const sequencias = await sql<{ sequencename: string }[]>`
+    select sequencename from pg_sequences where schemaname = 'public'`;
+  for (const s of sequencias) await sql.unsafe(`alter sequence "public"."${s.sequencename}" restart`);
   await sql`delete from auth.users`;
 }
 
