@@ -12,7 +12,9 @@
     "test:integracao": "vitest run tests/integracao",
     "db:local": "supabase start -x studio,imgproxy,vector,logflare,edge-runtime,realtime,supavisor,postgres-meta",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "postbuild": "node scripts/postbuild.mjs",
+    "seed:local": "tsx scripts/seed-local.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
