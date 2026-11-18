@@ -4,12 +4,15 @@ Sistema financeiro e operacional da ECLAK Viagens (Next.js, TypeScript, Tailwind
 
 ## Como rodar
 
-```bash
-npm install
-npm run dev
-```
+1. Docker em execução (o Supabase local roda em contêineres).
+2. `npm install`
+3. `npm run db:local` (sobe o Supabase local; detalhes em [Banco local](#banco-local)).
+4. Crie `.env.local` com as variáveis de `.env.example` (valores locais em [Banco local](#banco-local)).
+5. `npm run db:migrate`
+6. `npm run seed:local` (usuários e fornecedores fictícios)
+7. `npm run dev` e abra http://127.0.0.1:3000.
 
-Abra http://localhost:3000.
+E-mails enviados localmente (convite, nova senha) chegam no Mailpit: http://127.0.0.1:54324.
 
 ## Scripts
 
@@ -22,14 +25,22 @@ Abra http://localhost:3000.
 - `npm run db:generate`: gera migração a partir do esquema Drizzle (`src/server/db/schema`).
 - `npm run db:migrate`: aplica as migrações em `drizzle/` no banco de `DATABASE_URL`.
 
-Copie `.env.example` para `.env` e preencha as variáveis quando existirem.
+As variáveis locais ficam em `.env.local`: é o arquivo lido pelos scripts, pelos testes e pelo `drizzle-kit` (não crie `.env`).
 
 ## Banco local
 
 1. Docker em execução. Na máquina de nuvem de desenvolvimento (Docker Hub limitado), exporte antes `SUPABASE_INTERNAL_IMAGE_REGISTRY=ghcr.io`; em máquina normal isso não é necessário.
 2. `npm run db:local`, depois `npx supabase status -o env` para ver as chaves.
-3. Crie `.env.local` (ignorado pelo git) com `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY` (nomes em `.env.example`). Os testes de integração leem `.env.local`.
+3. Crie `.env.local` (ignorado pelo git) com `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` e `NEXT_PUBLIC_SITE_URL=http://127.0.0.1:3000` (nomes em `.env.example`). Os testes de integração leem `.env.local`.
 4. `npm run db:migrate`.
+
+Os modelos de e-mail de convite e de nova senha ficam em `supabase/templates/` e são ligados em `supabase/config.toml`. Ao alterá-los, reinicie o Supabase local (`npx supabase stop && npm run db:local`).
+
+## Convite e senha
+
+- O Diretor cria o usuário em Admin › Usuários; o Supabase envia o convite. O link do e-mail abre `/auth/confirmar`, que valida o token e leva a `/definir-senha`, onde a pessoa cria a senha (mínimo 8 caracteres) e entra.
+- Se o convite expirar, o Diretor usa **Reenviar convite** na linha do usuário (aparece enquanto a pessoa nunca entrou).
+- Na tela de login, **Esqueci minha senha** envia um link de nova senha, que segue o mesmo caminho (`/auth/confirmar` e `/definir-senha`).
 
 ## Regra de RLS
 
@@ -47,35 +58,49 @@ Um único ambiente: um projeto Supabase e um serviço no Railway. Dados fictíci
 
 1. Crie o projeto no Supabase (região mais próxima do Brasil) e guarde a senha do banco.
 2. Authentication > Sign In / Providers > Email: desligue **Allow new users to sign up** (sem auto-cadastro; só o Diretor cria usuários).
-3. Authentication > URL Configuration: **Site URL** = domínio do Railway (por exemplo `https://eclak-sistema.up.railway.app`); inclua o mesmo domínio em Redirect URLs.
-4. Convites e redefinição de senha enviam e-mail: o SMTP padrão do Supabase tem limite baixo e só entrega a membros da equipe; configure um SMTP próprio em Authentication > SMTP Settings antes de convidar a equipe.
-5. Database > Backups: confirme que os backups diários estão ativos.
-6. Em Project Settings > Database > Connection string, copie:
-   - **Transaction pooler** (porta 6543) para `DATABASE_URL`, acrescentando `?pgbouncer=true`;
-   - **Direct connection** (porta 5432) para `DATABASE_URL_MIGRACAO`.
-7. Em Project Settings > API, copie a URL do projeto, a chave `anon` e a chave `service_role`.
+3. Authentication > URL Configuration: **Site URL** = domínio do Railway (por exemplo `https://eclak-sistema.up.railway.app`); em Redirect URLs, inclua `https://<domínio>/auth/confirmar`.
+4. Authentication > Email Templates: cole os modelos do repositório, que levam o link para `/auth/confirmar`:
+   - **Invite user**: assunto `Convite para o sistema da ECLAK`, corpo = conteúdo de `supabase/templates/invite.html`;
+   - **Reset password**: assunto `Crie uma nova senha no sistema da ECLAK`, corpo = conteúdo de `supabase/templates/recovery.html`.
+
+   Sem esses modelos o link do e-mail não abre a tela de definir senha.
+5. Convites e redefinição de senha enviam e-mail: o SMTP padrão do Supabase tem limite baixo e só entrega a membros da equipe; configure um SMTP próprio em Authentication > SMTP Settings antes de convidar a equipe.
+6. Database > Backups: confirme que os backups diários estão ativos.
+7. Em Connect (ou Project Settings > Database) > Connection string, copie:
+   - **Transaction pooler** (porta 6543) para `DATABASE_URL`, acrescentando `?sslmode=require`;
+   - **Session pooler** (porta 5432, mesmo host do pooler) para `DATABASE_URL_MIGRACAO`, acrescentando `?sslmode=require`.
+
+   Não use a **Direct connection** (`db.<projeto>.supabase.co`): ela é só IPv6, e muitas redes (inclusive a sua máquina, em geral) só saem por IPv4; o Session pooler é IPv4 e aceita DDL (migrações). Não acrescente `?pgbouncer=true`: esse parâmetro é só do Prisma e o driver usado aqui (postgres.js) o envia ao banco, que recusa a conexão (`unrecognized configuration parameter "pgbouncer"`).
+8. Em Project Settings > API, copie a URL do projeto, a chave `anon` e a chave `service_role`.
 
 ### 2. Railway
 
-1. Novo serviço a partir do repositório (raiz do repositório). O `railway.json` define: build `npm ci && npm run build`, pré-deploy `npm run db:migrate`, start `node .next/standalone/server.js` e healthcheck em `/login`. O script `postbuild` copia `public/` e `.next/static` para dentro de `.next/standalone`.
+1. Novo serviço a partir do repositório (raiz do repositório). O `railway.json` define: builder Railpack, build `npm run build` (a instalação `npm ci` é feita antes pelo próprio Railpack), pré-deploy `npm run db:migrate`, start `node .next/standalone/server.js` e healthcheck em `/login`. O script `postbuild` copia `public/` e `.next/static` para dentro de `.next/standalone`.
 2. Variáveis do serviço:
-   - `DATABASE_URL`: pooler de transação, com `?pgbouncer=true`
-   - `DATABASE_URL_MIGRACAO`: conexão direta (porta 5432), usada pelo pré-deploy
+   - `DATABASE_URL`: Transaction pooler (porta 6543), com `?sslmode=require`
+   - `DATABASE_URL_MIGRACAO`: Session pooler (porta 5432), com `?sslmode=require`, usada pelo pré-deploy
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - `NEXT_PUBLIC_SITE_URL`: o domínio público do serviço, sem barra no fim (por exemplo `https://eclak-sistema.up.railway.app`)
    - `TZ=America/Cuiaba`
    - `HOSTNAME=0.0.0.0`
+   - `RAILPACK_NODE_VERSION=22` (recomendado: fixa o Node; o `package.json` exige `>=20.9`, mínimo do Next 16)
 
-   `NEXT_PUBLIC_*` são embutidas no build; ao mudá-las, faça novo deploy. O Railway define `PORT` sozinho.
-3. Gere o domínio público do serviço e volte ao passo 1.3 para ajustar a Site URL do Supabase.
+   `NEXT_PUBLIC_*` são embutidas no build; ao mudá-las, faça novo deploy. O Railway define `PORT` sozinho. As variáveis precisam existir já no build (o build carrega os módulos do servidor).
+3. O pré-deploy roda `drizzle-kit` (dependência de desenvolvimento). No log do primeiro deploy, confirme que as devDependencies foram instaladas e mantidas na imagem (o `npm run db:migrate` precisa achar `drizzle-kit`). Se não estiverem, defina `NPM_CONFIG_PRODUCTION=false` no serviço.
+4. Gere o domínio público do serviço e volte aos passos 1.3 (Site URL e Redirect URLs) e 2.2 (`NEXT_PUBLIC_SITE_URL`, que exige novo deploy).
 
 ### 3. Primeiro Diretor
 
-Depois do primeiro deploy (migrações aplicadas), uma única vez, na sua máquina com `.env.local` apontando para produção (`DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`):
+Depois do primeiro deploy (migrações aplicadas), uma única vez, na sua máquina. Passe as variáveis de produção na própria linha de comando, sem editar o `.env.local` (o script lê `.env.local` só para o que não vier do ambiente; o que está na linha de comando prevalece):
 
 ```bash
+DATABASE_URL="<Session pooler, porta 5432, ?sslmode=require>" \
+NEXT_PUBLIC_SUPABASE_URL="https://<projeto>.supabase.co" \
+SUPABASE_SERVICE_ROLE_KEY="<service_role>" \
+NEXT_PUBLIC_SITE_URL="https://<domínio do Railway>" \
 npx tsx scripts/criar-diretor.ts "<nome>" <email>
 ```
 
-A pessoa recebe o convite por e-mail e define a senha pelo link. Novos usuários são criados pelo Diretor em Usuários e acessos.
+Use o Session pooler também aqui: a Direct connection é só IPv6. A pessoa recebe o convite por e-mail, abre o link, define a senha em `/definir-senha` e entra. Novos usuários são criados pelo Diretor em Usuários e acessos.
