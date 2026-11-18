@@ -61,15 +61,15 @@ describe("rota /auth/confirmar", () => {
   it("token válido de convite redireciona para /definir-senha", async () => {
     const token = await tokenDe("invite", `rota-${randomUUID()}@eclak.test`);
     const r = await confirmar(req(`?token_hash=${token}&type=invite`));
-    expect(r.status).toBe(307);
-    expect(new URL(r.headers.get("location")!).pathname).toBe("/definir-senha");
+    expect(r.status).toBe(303);
+    expect(r.headers.get("location")).toBe("/definir-senha");
   });
 
   it("token válido de recuperação redireciona para /definir-senha", async () => {
     const t = await criarUsuarioTeste("consultor");
     const token = await tokenDe("recovery", t.email);
     const r = await confirmar(req(`?token_hash=${token}&type=recovery`));
-    expect(new URL(r.headers.get("location")!).pathname).toBe("/definir-senha");
+    expect(r.headers.get("location")).toBe("/definir-senha");
   });
 
   it.each([
@@ -79,17 +79,30 @@ describe("rota /auth/confirmar", () => {
     "",
   ])("link inválido (%s) volta para /login?erro=link", async (q) => {
     const r = await confirmar(req(q));
-    expect(r.status).toBe(307);
-    const destino = new URL(r.headers.get("location")!);
-    expect(destino.pathname).toBe("/login");
-    expect(destino.searchParams.get("erro")).toBe("link");
+    expect(r.status).toBe(303);
+    expect(r.headers.get("location")).toBe("/login?erro=link");
+  });
+
+  it("servidor ligado em 0.0.0.0: Location relativo, sem host", async () => {
+    const token = await tokenDe("invite", `bind-${randomUUID()}@eclak.test`);
+    const ok = await confirmar(
+      new NextRequest(`http://0.0.0.0:3995/auth/confirmar?token_hash=${token}&type=invite`),
+    );
+    const erro = await confirmar(
+      new NextRequest("http://0.0.0.0:3995/auth/confirmar?token_hash=x&type=invite"),
+    );
+    for (const r of [ok, erro]) {
+      const loc = r.headers.get("location")!;
+      expect(loc.startsWith("/")).toBe(true);
+      expect(loc).not.toContain("0.0.0.0");
+    }
   });
 
   it("o mesmo link não serve duas vezes", async () => {
     const token = await tokenDe("invite", `duas-${randomUUID()}@eclak.test`);
     await confirmar(req(`?token_hash=${token}&type=invite`));
     const r = await confirmar(req(`?token_hash=${token}&type=invite`));
-    expect(new URL(r.headers.get("location")!).pathname).toBe("/login");
+    expect(r.headers.get("location")).toBe("/login?erro=link");
   });
 });
 
@@ -158,6 +171,6 @@ describe("pedirNovaSenha", () => {
     expect(url.pathname).toBe("/auth/confirmar");
     expect(url.searchParams.get("type")).toBe("recovery");
     const r = await confirmar(new NextRequest(`http://localhost:3000${url.pathname}${url.search}`));
-    expect(new URL(r.headers.get("location")!).pathname).toBe("/definir-senha");
+    expect(r.headers.get("location")).toBe("/definir-senha");
   });
 });

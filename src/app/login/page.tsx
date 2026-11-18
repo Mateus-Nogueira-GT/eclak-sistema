@@ -1,7 +1,7 @@
 import { FormularioLogin } from "./formulario";
 
 const ERROS: Record<string, string> = {
-  link: "Link inválido ou expirado. Peça um novo convite ao Diretor.",
+  link: "Link inválido ou expirado. Use “Esqueci minha senha” ou peça um novo convite ao Diretor.",
 };
 
 export default async function Login({
