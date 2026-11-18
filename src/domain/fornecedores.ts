@@ -52,7 +52,8 @@ const lido = <T>(ler: (t: string) => T, vazio: T, valida: (v: T) => boolean) =>
 /** Entrada do formulário (textos). Whitelist: id, criado_em, excluido_em nunca entram. */
 export const FornecedorSchema = z.strictObject({
   nome: z.string().trim().min(1, "Informe o nome do fornecedor").max(200, "Texto muito longo"),
-  tipos: z.array(z.enum(TIPOS_SERVICO)).min(1, "Escolha ao menos um tipo de serviço"),
+  tipos: z.array(z.enum(TIPOS_SERVICO)).min(1, "Escolha ao menos um tipo de serviço")
+    .transform((t) => [...new Set(t)]),
   cidade: texto(120),
   modalidade: z.enum(MODALIDADES),
   comissaoPct: lido(lerPercentual, "0.000", (v) => Number(v) >= 0 && Number(v) <= 100),

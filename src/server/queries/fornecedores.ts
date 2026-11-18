@@ -24,7 +24,7 @@ export async function listarFornecedores(
   if (busca) {
     const padrao = `%${literal(busca)}%`;
     condicoes.push(
-      sql`(unaccent(${fornecedores.nome}) ilike unaccent(${padrao}) or unaccent(coalesce(${fornecedores.cidade}, '')) ilike unaccent(${padrao}))`,
+      sql`(extensions.unaccent(${fornecedores.nome}) ilike extensions.unaccent(${padrao}) or extensions.unaccent(coalesce(${fornecedores.cidade}, '')) ilike extensions.unaccent(${padrao}))`,
     );
   }
   if (filtro.tipo) condicoes.push(sql`${filtro.tipo} = any(${fornecedores.tipos})`);

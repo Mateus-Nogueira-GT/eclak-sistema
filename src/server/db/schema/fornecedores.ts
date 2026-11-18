@@ -5,6 +5,7 @@ import { MODALIDADES, TIPOS_SERVICO } from "@/domain/fornecedores";
 export const tipoServico = pgEnum("tipo_servico", TIPOS_SERVICO);
 export const modalidadeFornecedor = pgEnum("modalidade_fornecedor", MODALIDADES);
 
+// O CHECK (cardinality(tipos) > 0), o índice parcial por nome e o RLS estão na migração custom 0005_rls_fornecedores.sql (o drizzle não os conhece).
 export const fornecedores = pgTable("fornecedores", {
   id: uuid("id").primaryKey().defaultRandom(),
   nome: text("nome").notNull(),
