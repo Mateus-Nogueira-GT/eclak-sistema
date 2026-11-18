@@ -16,7 +16,8 @@ import { filialEnum } from "./usuarios";
 export const tipoCliente = pgEnum("tipo_cliente", TIPOS_CLIENTE);
 export const clienteCodigoSeq = pgSequence("cliente_codigo_seq", { startWith: 1 });
 
-// Os CHECKs (cpf, telefone), os índices parciais (pessoas_um_titular, cpf) e o RLS estão na migração custom 0007_rls_clientes.sql (o drizzle não os conhece).
+// Os CHECKs (cpf, telefone) e o RLS estão na migração custom 0007_rls_clientes.sql; os índices parciais de pessoas
+// (pessoas_um_titular, pessoas_cpf_idx, pessoas_cliente_idx, todos só das não removidas) na 0009 (o drizzle não os conhece).
 export const clientes = pgTable("clientes", {
   id: uuid("id").primaryKey().defaultRandom(),
   codigo: integer("codigo").notNull().unique().default(sql`nextval('cliente_codigo_seq')`),
@@ -48,4 +49,7 @@ export const pessoas = pgTable("pessoas", {
   cpf: text("cpf"), // só dígitos (11)
   passaporte: text("passaporte"),
   validadePassaporte: date("validade_passaporte"),
+  atualizadoEm: timestamp("atualizado_em", { withTimezone: true }).notNull().defaultNow(),
+  /** Remoção lógica: a pessoa saiu do cadastro, mas o id continua válido para viagens antigas. */
+  removidoEm: timestamp("removido_em", { withTimezone: true }),
 });

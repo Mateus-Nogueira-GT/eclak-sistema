@@ -57,6 +57,20 @@
       "when": 1795002161675,
       "tag": "0007_rls_clientes",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795003559409,
+      "tag": "0008_safe_stature",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795003560192,
+      "tag": "0009_pessoas_removidas",
+      "breakpoints": true
     }
   ]
 }

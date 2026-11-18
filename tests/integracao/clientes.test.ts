@@ -52,8 +52,8 @@ describe("clientes", () => {
       comSessao(d.id, () => salvarCliente({ ...ribeiro, titular: { nome: "Outro Nome" }, acompanhantes: [], ...x }));
     expect(await s({ acompanhantes: [{ nome: "Fulano", cpf: "52998224725" }] })).toEqual({
       ok: false,
-      erro: "CPF já cadastrado em Família Ribeiro",
-      campos: { acompanhantes: "CPF já cadastrado em Família Ribeiro" },
+      erro: "CPF já cadastrado em Família Ribeiro (Fulano)",
+      campos: { acompanhantes: "CPF já cadastrado em Família Ribeiro (Fulano)", "acompanhantes.0.cpf": "CPF já cadastrado em Família Ribeiro" },
     });
     expect(await s({ titular: { nome: "Outro", cpf: "52998224725" } })).toMatchObject({
       ok: false,
@@ -72,7 +72,7 @@ describe("clientes", () => {
       campos: { "titular.cpf": "CPF inválido" },
     });
     expect(await s({ acompanhantes: [{ nome: "F", cpf: "52998224724" }] })).toMatchObject({
-      campos: { acompanhantes: "CPF inválido" },
+      campos: { acompanhantes: "CPF inválido (F)" },
     });
     // o próprio cliente pode manter seu CPF ao editar
     const f = (await obterCliente2(d.id, a.id))!;
@@ -94,9 +94,10 @@ describe("clientes", () => {
     expect(await comSessao(c.id, () => salvarCliente({ ...ribeiro, telefone: "6655556666" }, id, a.atualizadoEm))).toEqual({
       ok: false,
       erro: msg,
+      conflito: true,
     });
-    expect(await comSessao(c.id, () => salvarCliente(ribeiro, id))).toEqual({ ok: false, erro: msg });
-    expect(await comSessao(c.id, () => salvarCliente(ribeiro, id, "não é data"))).toEqual({ ok: false, erro: msg });
+    expect(await comSessao(c.id, () => salvarCliente(ribeiro, id))).toEqual({ ok: false, erro: msg, conflito: true });
+    expect(await comSessao(c.id, () => salvarCliente(ribeiro, id, "não é data"))).toEqual({ ok: false, erro: msg, conflito: true });
     const b = (await obterCliente2(c.id, id))!;
     expect(b.telefone).toBe("(66) 3333-4444");
     expect(b.atualizadoEm).not.toBe(a.atualizadoEm);
@@ -195,6 +196,135 @@ describe("clientes", () => {
     const rs = await Promise.all([um("Ana A"), um("Bia B"), um("Cris C")]);
     expect(rs.filter((r) => r.ok)).toHaveLength(1);
     expect(await db.select().from(pessoas)).toHaveLength(1);
+  });
+
+  describe("pessoas com id estável", () => {
+    const ficha = (uid: string, id: string) => comSessao(uid, () => obterCliente(id)).then((f) => f!);
+    const entradaDe = (f: Awaited<ReturnType<typeof obterCliente>> & object): ClienteEntrada => {
+      const pe = (p: (typeof f.pessoas)[number]) => ({
+        id: p.id,
+        nome: p.nome,
+        parentesco: p.parentesco ?? undefined,
+        nascimento: p.nascimento ?? undefined,
+        cpf: p.cpf ?? undefined,
+        passaporte: p.passaporte ?? undefined,
+        validadePassaporte: p.validadePassaporte ?? undefined,
+      });
+      const tit = f.pessoas.find((p) => p.titular)!;
+      return {
+        tipo: f.tipo,
+        filial: f.filial,
+        telefone: f.telefone,
+        titular: pe(tit),
+        acompanhantes: f.pessoas.filter((p) => !p.titular).map(pe),
+      };
+    };
+
+    it("editar só o telefone mantém os ids das pessoas", async () => {
+      const c = await criarUsuarioTeste("consultor");
+      const { id } = await criar(c.id);
+      const f = await ficha(c.id, id);
+      const r = await comSessao(c.id, () => salvarCliente({ ...entradaDe(f), telefone: "6633334444" }, id, f.atualizadoEm));
+      expect(r).toMatchObject({ ok: true });
+      const g = await ficha(c.id, id);
+      expect(g.pessoas.map((p) => p.id)).toEqual(f.pessoas.map((p) => p.id));
+      expect(g.telefone).toBe("(66) 3333-4444");
+      expect(await db.select().from(pessoas)).toHaveLength(3);
+      const aud = await db.select().from(auditoria).where(eq(auditoria.registroId, id)).orderBy(auditoria.id);
+      const idsDepois = (aud[1].depois as { pessoas: { id: string }[] }).pessoas.map((p) => p.id);
+      expect(idsDepois).toEqual(f.pessoas.map((p) => p.id));
+    });
+
+    it("remover acompanhante é lógico: a linha fica com removido_em", async () => {
+      const c = await criarUsuarioTeste("consultor");
+      const { id } = await criar(c.id);
+      const f = await ficha(c.id, id);
+      const e = entradaDe(f);
+      const pedro = e.acompanhantes[1].id!;
+      const r = await comSessao(c.id, () => salvarCliente({ ...e, acompanhantes: [e.acompanhantes[0]] }, id, f.atualizadoEm));
+      expect(r).toMatchObject({ ok: true });
+      const [linha] = await db.select().from(pessoas).where(eq(pessoas.id, pedro));
+      expect(linha.removidoEm).toBeInstanceOf(Date);
+      const g = await ficha(c.id, id);
+      expect(g.pessoas.map((p) => p.nome)).toEqual(["Carlos Ribeiro", "Lúcia Ribeiro"]);
+      const [item] = await comSessao(c.id, () => listarClientes({ busca: "Pedro" }));
+      expect(item).toBeUndefined();
+      expect((await comSessao(c.id, () => listarClientes()))[0].acompanhantes).toBe(1);
+      const aud = await db.select().from(auditoria).where(eq(auditoria.registroId, id)).orderBy(auditoria.id);
+      const ids = (x: unknown) => (x as { pessoas: { id: string }[] }).pessoas.map((p) => p.id);
+      expect(ids(aud[1].antes)).toContain(pedro);
+      expect(ids(aud[1].depois)).not.toContain(pedro);
+    });
+
+    it("acompanhante vira titular mantendo o id", async () => {
+      const c = await criarUsuarioTeste("consultor");
+      const { id } = await criar(c.id);
+      const f = await ficha(c.id, id);
+      const e = entradaDe(f);
+      const [lucia, pedro] = e.acompanhantes;
+      const r = await comSessao(c.id, () =>
+        salvarCliente({ ...e, titular: { ...lucia, parentesco: undefined }, acompanhantes: [e.titular, pedro] }, id, f.atualizadoEm),
+      );
+      expect(r).toMatchObject({ ok: true });
+      const g = await ficha(c.id, id);
+      expect(g.pessoas.map((p) => [p.id, p.nome, p.titular])).toEqual([
+        [lucia.id, "Lúcia Ribeiro", true],
+        [e.titular.id, "Carlos Ribeiro", false],
+        [pedro.id, "Pedro Ribeiro", false],
+      ]);
+    });
+
+    it("id de pessoa de outro cliente (ou inexistente) é recusado", async () => {
+      const c = await criarUsuarioTeste("consultor");
+      const a = await criar(c.id);
+      const b = await criar(c.id, { ...ribeiro, titular: { nome: "Ana Souza" }, acompanhantes: [] });
+      const fa = await ficha(c.id, a.id);
+      const fb = await ficha(c.id, b.id);
+      const msg = { ok: false, erro: "Pessoa não encontrada neste cliente" };
+      const alheio = { ...entradaDe(fb), acompanhantes: [{ id: fa.pessoas[1].id, nome: "Lúcia Ribeiro" }] };
+      expect(await comSessao(c.id, () => salvarCliente(alheio, b.id, fb.atualizadoEm))).toEqual(msg);
+      expect(await comSessao(c.id, () => salvarCliente(alheio))).toEqual(msg);
+      const repetido = { ...entradaDe(fa), acompanhantes: [entradaDe(fa).acompanhantes[0], entradaDe(fa).acompanhantes[0]] };
+      expect(await comSessao(c.id, () => salvarCliente(repetido, a.id, fa.atualizadoEm))).toEqual(msg);
+      expect((await ficha(c.id, a.id)).pessoas).toHaveLength(3);
+      expect((await ficha(c.id, b.id)).pessoas).toHaveLength(1);
+    });
+
+    it("CPF de pessoa removida pode ser usado de novo", async () => {
+      const c = await criarUsuarioTeste("consultor");
+      const { id } = await criar(c.id, { ...ribeiro, acompanhantes: [{ nome: "Lúcia Ribeiro", cpf: "111.444.777-35" }] });
+      const f = await ficha(c.id, id);
+      const e = entradaDe(f);
+      expect(await comSessao(c.id, () => salvarCliente({ ...e, acompanhantes: [] }, id, f.atualizadoEm))).toMatchObject({ ok: true });
+      expect(
+        await comSessao(c.id, () => salvarCliente({ ...ribeiro, titular: { nome: "Lúcia Souza", cpf: "11144477735" }, acompanhantes: [] })),
+      ).toMatchObject({ ok: true });
+      expect((await comSessao(c.id, () => listarClientes({ busca: "111.444" }))).map((x) => x.grupo)).toEqual(["Família Souza"]);
+    });
+  });
+
+  it("erros de acompanhante dizem de quem é", async () => {
+    const c = await criarUsuarioTeste("consultor");
+    await criar(c.id);
+    const s = (acompanhantes: ClienteEntrada["acompanhantes"]) =>
+      comSessao(c.id, () => salvarCliente({ ...ribeiro, titular: { nome: "Ana Souza" }, acompanhantes }));
+    expect(await s([{ nome: "Lúcia Ribeiro", cpf: "52998224724" }])).toEqual({
+      ok: false,
+      erro: "CPF inválido (Lúcia Ribeiro)",
+      campos: { acompanhantes: "CPF inválido (Lúcia Ribeiro)", "acompanhantes.0.cpf": "CPF inválido" },
+    });
+    expect(await s([{ nome: "Bia" }, { nome: " " }])).toMatchObject({
+      erro: "Informe o nome do acompanhante (linha 2)",
+      campos: { acompanhantes: "Informe o nome do acompanhante (linha 2)", "acompanhantes.1.nome": "Informe o nome do acompanhante" },
+    });
+    expect(await s([{ nome: "Lúcia Ribeiro", cpf: "52998224725" }])).toEqual({
+      ok: false,
+      erro: "CPF já cadastrado em Família Ribeiro (Lúcia Ribeiro)",
+      campos: {
+        acompanhantes: "CPF já cadastrado em Família Ribeiro (Lúcia Ribeiro)",
+        "acompanhantes.0.cpf": "CPF já cadastrado em Família Ribeiro",
+      },
+    });
   });
 
   it("grupo informado prevalece", async () => {

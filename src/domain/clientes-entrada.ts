@@ -49,9 +49,14 @@ const cpf = z
     return d;
   });
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const MSG_PESSOA_ALHEIA = "Pessoa não encontrada neste cliente";
+
 const pessoa = (msgNome: string, hoje: string, msgAusente?: string) =>
   z.strictObject(
     {
+      /** Id de uma pessoa já gravada deste cliente (edição); sem id, é pessoa nova. */
+      id: z.string({ error: MSG_PESSOA_ALHEIA }).regex(UUID, MSG_PESSOA_ALHEIA).optional(),
       nome: z.string({ error: msgNome }).trim().min(1, msgNome).max(200, "Texto muito longo"),
       parentesco: texto(80),
       nascimento: data(hoje),
@@ -92,7 +97,7 @@ const email = z
     return v;
   });
 
-/** Entrada do formulário. Whitelist: id, codigo, clienteDesde, excluidoEm nunca entram. */
+/** Entrada do formulário. Whitelist: id, codigo, clienteDesde, excluidoEm do cliente nunca entram. */
 export function clienteSchema(hoje: string = hojeEmCuiaba()) {
   return z.strictObject({
     tipo: z.enum(TIPOS_CLIENTE, { error: "Tipo inválido" }),

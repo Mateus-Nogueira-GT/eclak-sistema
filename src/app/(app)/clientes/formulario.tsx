@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, UserRoundCheck } from "lucide-react";
 import { Botao, Campo, Card, CardHeader, PageHeader, Select, inputCls } from "@/components/ui";
 import { NOMES_TIPO_CLIENTE, TIPOS_CLIENTE, nomeDoGrupo, type TipoCliente } from "@/domain/clientes";
 import { FILIAIS, type Filial } from "@/domain/perfis";
@@ -11,6 +11,10 @@ import { salvarCliente } from "@/server/actions/clientes";
 import { PESSOA_VAZIA, paraEntrada, type ValoresCliente, type ValoresPessoa } from "./valores";
 
 const PARENTESCOS = ["Cônjuge", "Filho(a)", "Pai", "Mãe", "Irmão(ã)", "Avô(ó)", "Amigo(a)", "Outro"];
+
+let proximaChave = 0;
+const novaChave = () => `nova-${++proximaChave}`;
+const chaveDe = (p: ValoresPessoa) => p.id ?? p.chave ?? "";
 
 export function FormularioCliente({
   inicial,
@@ -22,7 +26,10 @@ export function FormularioCliente({
   atualizadoEm?: string;
 }) {
   const router = useRouter();
-  const [v, setV] = useState(inicial);
+  const [v, setV] = useState<ValoresCliente>(() => ({
+    ...inicial,
+    acompanhantes: inicial.acompanhantes.map((p) => (p.id || p.chave ? p : { ...p, chave: novaChave() })),
+  }));
   const [erros, setErros] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
   const [conflito, setConflito] = useState(false);
@@ -50,6 +57,32 @@ export function FormularioCliente({
   function mudarAcompanhante(i: number, k: keyof ValoresPessoa, valor: string) {
     setV((x) => ({ ...x, acompanhantes: x.acompanhantes.map((p, n) => (n === i ? { ...p, [k]: valor } : p)) }));
     limpar("acompanhantes");
+    limpar(`acompanhantes.${i}.${k}`);
+  }
+
+  /** Mexer nas linhas muda os índices: os erros por linha deixam de valer. */
+  function limparErrosDeAcompanhantes() {
+    setErros((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !k.startsWith("acompanhantes"))));
+  }
+
+  function removerAcompanhante(i: number) {
+    setV((x) => ({ ...x, acompanhantes: x.acompanhantes.filter((_, n) => n !== i) }));
+    limparErrosDeAcompanhantes();
+  }
+
+  /** O acompanhante vira titular e o titular atual passa para o lugar dele; cada um mantém seu id. */
+  function tornarTitular(i: number) {
+    setV((x) => {
+      const novo = x.acompanhantes[i];
+      const antigo = { ...x.titular, parentesco: "", chave: x.titular.id ? undefined : novaChave() };
+      return {
+        ...x,
+        titular: { ...novo, parentesco: "" },
+        acompanhantes: x.acompanhantes.map((p, n) => (n === i ? antigo : p)),
+      };
+    });
+    limparErrosDeAcompanhantes();
+    setErros((e) => Object.fromEntries(Object.entries(e).filter(([k]) => !k.startsWith("titular"))));
   }
 
   function salvar() {
@@ -62,7 +95,7 @@ export function FormularioCliente({
         router.refresh();
       } else {
         setErros(r.campos ?? {});
-        setConflito(!r.campos && r.erro.includes("Recarregue"));
+        setConflito("conflito" in r && r.conflito === true);
         setMsg(r.campos ? "Corrija os campos indicados" : r.erro);
       }
     });
@@ -179,7 +212,7 @@ export function FormularioCliente({
             title="Quem viaja junto"
             eyebrow="O sistema avisa quando falta passaporte, quando está vencido e quando há aniversário chegando."
             right={
-              <Botao variante="secundario" onClick={() => mudar("acompanhantes", [...v.acompanhantes, { ...PESSOA_VAZIA }])}>
+              <Botao variante="secundario" onClick={() => mudar("acompanhantes", [...v.acompanhantes, { ...PESSOA_VAZIA, chave: novaChave() }])}>
                 <Plus size={15} /> Adicionar pessoa
               </Botao>
             }
@@ -197,21 +230,33 @@ export function FormularioCliente({
           <datalist id="parentescos">{PARENTESCOS.map((p) => <option key={p} value={p} />)}</datalist>
           <div className="mt-4 space-y-4 px-6">
             {v.acompanhantes.map((p, i) => (
-              <div key={i} className="grid grid-cols-1 gap-3 rounded-[6px] border border-linha p-4 sm:grid-cols-2 lg:grid-cols-[1.6fr_1fr_1fr_1fr_1fr_1fr_auto]">
-                {campoPessoa("Nome completo", p.nome, (x) => mudarAcompanhante(i, "nome", x), "")}
-                {campoPessoa("Parentesco", p.parentesco, (x) => mudarAcompanhante(i, "parentesco", x), "", { lista: "parentescos" })}
-                {campoPessoa("Nascimento", p.nascimento, (x) => mudarAcompanhante(i, "nascimento", x), "", { type: "date" })}
-                {campoPessoa("CPF", p.cpf, (x) => mudarAcompanhante(i, "cpf", x), "", { placeholder: "000.000.000-00" })}
-                {campoPessoa("Passaporte", p.passaporte, (x) => mudarAcompanhante(i, "passaporte", x), "")}
-                {campoPessoa("Validade", p.validadePassaporte, (x) => mudarAcompanhante(i, "validadePassaporte", x), "", { type: "date" })}
-                <button
-                  type="button"
-                  onClick={() => mudar("acompanhantes", v.acompanhantes.filter((_, n) => n !== i))}
-                  aria-label={`Remover ${p.nome || "pessoa"}`}
-                  className="cursor-pointer self-end rounded-[5px] p-2.5 text-cinza hover:bg-fundo hover:text-texto"
-                >
-                  <Trash2 size={17} />
-                </button>
+              <div key={chaveDe(p)} className="grid grid-cols-1 gap-3 rounded-[6px] border border-linha p-4 sm:grid-cols-2 lg:grid-cols-[1.6fr_1fr_1fr_1fr_1fr_1fr_auto]">
+                {campoPessoa("Nome completo", p.nome, (x) => mudarAcompanhante(i, "nome", x), `acompanhantes.${i}.nome`)}
+                {campoPessoa("Parentesco", p.parentesco, (x) => mudarAcompanhante(i, "parentesco", x), `acompanhantes.${i}.parentesco`, { lista: "parentescos" })}
+                {campoPessoa("Nascimento", p.nascimento, (x) => mudarAcompanhante(i, "nascimento", x), `acompanhantes.${i}.nascimento`, { type: "date" })}
+                {campoPessoa("CPF", p.cpf, (x) => mudarAcompanhante(i, "cpf", x), `acompanhantes.${i}.cpf`, { placeholder: "000.000.000-00" })}
+                {campoPessoa("Passaporte", p.passaporte, (x) => mudarAcompanhante(i, "passaporte", x), `acompanhantes.${i}.passaporte`)}
+                {campoPessoa("Validade", p.validadePassaporte, (x) => mudarAcompanhante(i, "validadePassaporte", x), `acompanhantes.${i}.validadePassaporte`, { type: "date" })}
+                <div className="flex items-end gap-1">
+                  <button
+                    type="button"
+                    onClick={() => tornarTitular(i)}
+                    aria-label={`Tornar ${p.nome || "pessoa"} ${v.tipo === "grupo" ? "o contato do grupo" : "titular"}`}
+                    title={v.tipo === "grupo" ? "Tornar contato do grupo" : "Tornar titular"}
+                    className="cursor-pointer rounded-[5px] p-2.5 text-cinza hover:bg-fundo hover:text-texto"
+                  >
+                    <UserRoundCheck size={17} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removerAcompanhante(i)}
+                    aria-label={`Remover ${p.nome || "pessoa"}`}
+                    title="Remover"
+                    className="cursor-pointer rounded-[5px] p-2.5 text-cinza hover:bg-fundo hover:text-texto"
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

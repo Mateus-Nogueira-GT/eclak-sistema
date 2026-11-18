@@ -69,13 +69,13 @@ async function pessoasDe(ids: string[]) {
   return db
     .select()
     .from(pessoas)
-    .where(inArray(pessoas.clienteId, ids))
+    .where(and(inArray(pessoas.clienteId, ids), isNull(pessoas.removidoEm)))
     .orderBy(asc(pessoas.clienteId), asc(pessoas.ordem));
 }
 
 /**
  * Clientes não excluídos, por grupo. Busca sem acento e sem caixa em grupo, nome das pessoas e e-mail;
- * por dígitos em CPF e telefone (com 3 dígitos ou mais). Exige login.
+ * por dígitos em CPF e telefone (com 3 dígitos ou mais). Pessoas removidas não contam. Exige login.
  */
 export async function listarClientes(
   filtro: { busca?: string; tipo?: TipoCliente; aviso?: "documentos" | "aniversario" } = {},
@@ -89,12 +89,12 @@ export async function listarClientes(
     const partes = [
       sql`extensions.unaccent(${clientes.grupo}) ilike extensions.unaccent(${padrao})`,
       sql`extensions.unaccent(coalesce(${clientes.email}, '')) ilike extensions.unaccent(${padrao})`,
-      sql`exists (select 1 from ${pessoas} p where p.cliente_id = ${clientes.id} and extensions.unaccent(p.nome) ilike extensions.unaccent(${padrao}))`,
+      sql`exists (select 1 from ${pessoas} p where p.cliente_id = ${clientes.id} and p.removido_em is null and extensions.unaccent(p.nome) ilike extensions.unaccent(${padrao}))`,
     ];
     if (digitos.length >= 3) {
       const d = `%${digitos}%`;
       partes.push(sql`${clientes.telefone} like ${d}`);
-      partes.push(sql`exists (select 1 from ${pessoas} p where p.cliente_id = ${clientes.id} and p.cpf like ${d})`);
+      partes.push(sql`exists (select 1 from ${pessoas} p where p.cliente_id = ${clientes.id} and p.removido_em is null and p.cpf like ${d})`);
     }
     condicoes.push(sql`(${sql.join(partes, sql` or `)})`);
   }

@@ -33,4 +33,9 @@ describe("clienteSchema: campos ausentes", () => {
   it("nome de acompanhante ausente", () => {
     expect(erros({ ...base, acompanhantes: [{}] })).toEqual(["Informe o nome do acompanhante"]);
   });
+  it("aceita id de pessoa (uuid) e recusa id inválido", () => {
+    const id = "6f1c2a7e-3b4d-4c5e-9f00-112233445566";
+    expect(erros({ ...base, titular: { id, nome: "Ana" }, acompanhantes: [{ id, nome: "Bia" }] })).toEqual([]);
+    expect(erros({ ...base, titular: { id: "x", nome: "Ana" } })).toEqual(["Pessoa não encontrada neste cliente"]);
+  });
 });
