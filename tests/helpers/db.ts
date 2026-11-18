@@ -70,3 +70,42 @@ export async function criarUsuarioTeste(
   });
   return { id: data.user.id, email, senha };
 }
+
+// ---------------------------------------------------------------------------
+// Sessão falsa para testes de integração (sem cookies).
+//
+// Padrão de uso (Tasks 6-8 repetem): em cada arquivo de teste que chama código
+// que usa `usuarioAtual()`/`exigirPerfil()`, registre o mock ANTES dos imports
+// do código sob teste (vi.mock é hoisted pelo vitest):
+//
+//   vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
+//
+// e então rode o código dentro de `comSessao(usuario.id, async () => { ... })`.
+// O `usuarioAtual()` real continua relendo `usuarios` no banco; só o
+// `supabase.auth.getUser()` é substituído. Fora de `comSessao` não há sessão.
+// ---------------------------------------------------------------------------
+let sessaoDeTeste: string | null = null;
+
+export function mockSupabase() {
+  return {
+    supabaseServidor: async () => ({
+      auth: {
+        getUser: async () =>
+          sessaoDeTeste
+            ? { data: { user: { id: sessaoDeTeste } }, error: null }
+            : { data: { user: null }, error: { message: "sem sessão" } },
+      },
+    }),
+    supabaseAdmin: () => adminClient(),
+  };
+}
+
+export async function comSessao<T>(usuarioId: string, fn: () => Promise<T>): Promise<T> {
+  const anterior = sessaoDeTeste;
+  sessaoDeTeste = usuarioId;
+  try {
+    return await fn();
+  } finally {
+    sessaoDeTeste = anterior;
+  }
+}
