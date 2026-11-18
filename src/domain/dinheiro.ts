@@ -2,10 +2,9 @@ export type Centavos = bigint;
 
 const ERRO = "Valor inválido";
 
-/** Lê "R$ 1.234,56" e devolve [inteiro, decimais] como texto. */
+/** Recebe o texto já sem símbolo; devolve [inteiro, decimais] como texto. */
 function partes(texto: string, maxDecimais: number): [string, string] {
-  const t = texto.trim().replace(/^R\$/, "").replace(/%$/, "").replace(/\s+/g, "");
-  const m = /^(\d+|\d{1,3}(?:\.\d{3})+)(?:,(\d+))?$/.exec(t);
+  const m = /^(\d+|\d{1,3}(?:\.\d{3})+)(?:,(\d+))?$/.exec(texto);
   if (!m) throw new Error(ERRO);
   const dec = m[2] ?? "";
   if (dec.length > maxDecimais) throw new Error(ERRO);
@@ -13,7 +12,7 @@ function partes(texto: string, maxDecimais: number): [string, string] {
 }
 
 export function lerReais(texto: string): Centavos {
-  const [inteiro, dec] = partes(texto, 2);
+  const [inteiro, dec] = partes(texto.trim().replace(/^R\$\s*/, ""), 2);
   return BigInt(inteiro) * 100n + BigInt(dec.padEnd(2, "0"));
 }
 
@@ -26,7 +25,7 @@ export function formatarReais(c: Centavos): string {
 }
 
 export function lerPercentual(texto: string): string {
-  const [inteiro, dec] = partes(texto, 3);
+  const [inteiro, dec] = partes(texto.trim().replace(/\s*%$/, ""), 3);
   return `${BigInt(inteiro)}.${dec.padEnd(3, "0")}`;
 }
 

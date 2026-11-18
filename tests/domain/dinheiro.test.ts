@@ -9,8 +9,10 @@ describe("lerReais", () => {
     expect(lerReais("20725,93")).toBe(2072593n);
     expect(lerReais("250")).toBe(25000n);
     expect(lerReais("  0,05 ")).toBe(5n);
+    expect(lerReais("R$ 10")).toBe(1000n);
+    expect(lerReais(" R$10 ")).toBe(1000n);
   });
-  it.each(["", "  ", "abc", "1,234", "-5", "1.23,45", "1,2,3", "12.34", ",5", "R$"])(
+  it.each(["", "  ", "abc", "1,234", "-5", "1.23,45", "1,2,3", "12.34", ",5", "R$", "5%", "10 5", "1 000", "R$ R$ 5"])(
     "recusa %j",
     (t) => {
       expect(() => lerReais(t)).toThrow("Valor inválido");
@@ -33,11 +35,12 @@ describe("percentual", () => {
     expect(lerPercentual("2,19%")).toBe("2.190");
     expect(lerPercentual("7")).toBe("7.000");
     expect(lerPercentual("0,125")).toBe("0.125");
+    expect(lerPercentual("2,19 %")).toBe("2.190");
     expect(formatarPercentual("2.190")).toBe("2,19%");
     expect(formatarPercentual("7.000")).toBe("7%");
     expect(formatarPercentual("0.125")).toBe("0,125%");
   });
-  it.each(["", "x", "1,2345", "-1"])("recusa %j", (t) => {
+  it.each(["", "x", "1,2345", "-1", "R$ 5", "1 2"])("recusa %j", (t) => {
     expect(() => lerPercentual(t)).toThrow("Valor inválido");
   });
 });
