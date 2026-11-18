@@ -49,18 +49,21 @@ const cpf = z
     return d;
   });
 
-const pessoa = (msgNome: string, hoje: string) =>
-  z.strictObject({
-    nome: z.string().trim().min(1, msgNome).max(200, "Texto muito longo"),
-    parentesco: texto(80),
-    nascimento: data(hoje),
-    cpf,
-    passaporte: texto(40),
-    validadePassaporte: data(),
-  });
+const pessoa = (msgNome: string, hoje: string, msgAusente?: string) =>
+  z.strictObject(
+    {
+      nome: z.string({ error: msgNome }).trim().min(1, msgNome).max(200, "Texto muito longo"),
+      parentesco: texto(80),
+      nascimento: data(hoje),
+      cpf,
+      passaporte: texto(40),
+      validadePassaporte: data(),
+    },
+    msgAusente ? { error: msgAusente } : undefined,
+  );
 
 const telefone = z
-  .string()
+  .string({ error: "Informe o telefone" })
   .trim()
   .transform((v, ctx) => {
     if (!v) {
@@ -101,9 +104,10 @@ export function clienteSchema(hoje: string = hojeEmCuiaba()) {
     prefAlimentacao: texto(500),
     prefAssento: texto(500),
     observacoes: texto(4000),
-    titular: pessoa("Informe o nome do titular", hoje),
+    titular: pessoa("Informe o nome do titular", hoje, "Informe o nome do titular"),
     acompanhantes: z
-      .array(pessoa("Informe o nome do acompanhante", hoje))
-      .max(MAX_ACOMPANHANTES, "Acompanhantes demais"),
+      .array(pessoa("Informe o nome do acompanhante", hoje), { error: "Acompanhantes inválidos" })
+      .max(MAX_ACOMPANHANTES, "Acompanhantes demais")
+      .default([]),
   });
 }

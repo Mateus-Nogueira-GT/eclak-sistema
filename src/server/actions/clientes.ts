@@ -112,7 +112,9 @@ async function salvar(
         .where(and(eq(clientes.id, id), isNull(clientes.excluidoEm)))
         .for("update");
       if (!atual) return NAO_ENCONTRADO;
-      if (!atualizadoEmEsperado || atual.atualizadoEm.toISOString() !== atualizadoEmEsperado) return CONCORRENCIA;
+      if (!atualizadoEmEsperado || new Date(atualizadoEmEsperado).getTime() !== atual.atualizadoEm.getTime()) {
+        return CONCORRENCIA;
+      }
       const psAntes = await tx.select().from(pessoas).where(eq(pessoas.clienteId, id)).orderBy(pessoas.ordem);
       antes = agregado(atual, psAntes);
     }
@@ -174,6 +176,7 @@ async function salvar(
   if ("ok" in r) return r;
 
   revalidatePath("/clientes");
+  revalidatePath(`/clientes/${r.id}`);
   return { ok: true, id: r.id, codigo: formatarCodigoCliente(r.codigo) };
 }
 
@@ -207,5 +210,6 @@ async function excluir(usuarioId: string, id: string): Promise<{ ok: true } | Fa
   });
   if (!ok) return NAO_ENCONTRADO;
   revalidatePath("/clientes");
+  revalidatePath(`/clientes/${id}`);
   return { ok: true };
 }

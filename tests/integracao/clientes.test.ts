@@ -96,6 +96,7 @@ describe("clientes", () => {
       erro: msg,
     });
     expect(await comSessao(c.id, () => salvarCliente(ribeiro, id))).toEqual({ ok: false, erro: msg });
+    expect(await comSessao(c.id, () => salvarCliente(ribeiro, id, "não é data"))).toEqual({ ok: false, erro: msg });
     const b = (await obterCliente2(c.id, id))!;
     expect(b.telefone).toBe("(66) 3333-4444");
     expect(b.atualizadoEm).not.toBe(a.atualizadoEm);
