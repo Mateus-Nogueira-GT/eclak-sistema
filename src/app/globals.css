@@ -79,3 +79,5 @@ input[type="number"] {
   main table { display: block; max-width: 100%; overflow-x: auto; }
 }
 
+
+::selection { background: #2E5C71; color: #fff; }
