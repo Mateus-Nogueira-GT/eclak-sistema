@@ -8,5 +8,8 @@ export default defineConfig({
   test: {
     environment: "node",
     passWithNoTests: true,
+    // Testes de integração compartilham um único banco: sem paralelismo entre arquivos.
+    fileParallelism: false,
+    setupFiles: ["./tests/setup-env.ts"],
   },
 });
