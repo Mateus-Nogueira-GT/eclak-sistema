@@ -30,6 +30,8 @@ export const clientes = pgTable("clientes", {
   prefAlimentacao: text("pref_alimentacao"),
   prefAssento: text("pref_assento"),
   observacoes: text("observacoes"),
+  /** Próximo número sequencial de viagem do cliente (ECL-0147-01); incrementado na criação da viagem. */
+  proximaViagem: integer("proxima_viagem").notNull().default(1),
   clienteDesde: date("cliente_desde").notNull().default(sql`current_date`),
   criadoEm: timestamp("criado_em", { withTimezone: true }).notNull().defaultNow(),
   atualizadoEm: timestamp("atualizado_em", { withTimezone: true }).notNull().defaultNow(),

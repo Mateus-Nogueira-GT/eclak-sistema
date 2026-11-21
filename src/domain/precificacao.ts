@@ -12,17 +12,19 @@ import type { Regras } from "./regras";
 // Contas de percentual em aritmética racional sobre `bigint` (multiplica antes, divide no fim),
 // com um único arredondamento meio para cima por valor de linha (`arredondar`).
 
-export type TipoItem =
-  | "Hotelaria"
-  | "Trem"
-  | "Transfer"
-  | "Carro"
-  | "Passeio"
-  | "Ingresso"
-  | "Seguro"
-  | "Outro"
-  | "Taxa"
-  | "Aéreo";
+export const TIPOS_ITEM = [
+  "Hotelaria",
+  "Trem",
+  "Transfer",
+  "Carro",
+  "Passeio",
+  "Ingresso",
+  "Seguro",
+  "Outro",
+  "Taxa",
+  "Aéreo",
+] as const;
+export type TipoItem = (typeof TIPOS_ITEM)[number];
 
 /** Item da precificação. `valorFornecedor` em centavos de real; `Taxa` = taxa de roteiro; `Aéreo` nunca entra no cálculo. */
 export type ItemCalc = {
