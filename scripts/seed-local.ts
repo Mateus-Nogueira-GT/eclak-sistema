@@ -1,11 +1,12 @@
 /**
- * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores e os clientes fictícios do protótipo.
+ * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores os clientes fictícios do protótipo e três orçamentos (aguardando, aprovado e devolvido).
  * Recusa rodar se DATABASE_URL ou NEXT_PUBLIC_SUPABASE_URL não forem locais. Idempotente: o que já existe é pulado.
  */
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import { garantirBancoLocal } from "./local-guard";
+import { semearOrcamentos } from "./seed-orcamentos";
 
 config({ path: ".env.local", quiet: true });
 
@@ -104,6 +105,7 @@ const CLIENTES: SeedLinha[] = [
   ["Família Carvalho", "Henrique Carvalho", "1977-09-17", "2029-09-17", "Dois quartos", "Sem restrições", "Corredor", "", [["Adriana Carvalho", "Esposa", "1979-01-01", "2029-09-17"], ["Pietro Carvalho", "Filho", "2011-03-03", "2027-12-01"], ["Giovana Carvalho", "Filha", "2014-06-06", "2027-12-01"]]],
   ["Casal Albuquerque", "Marcos Albuquerque", "1986-04-24", "2027-06-30", "King, bangalô", "Sem pimenta (Marcos)", "Janela", "Tailândia exige 6 meses de validade do passaporte.", [["Carolina Albuquerque", "Esposa", "1988-10-10", "2031-01-20"]]],
   ["Família Pacheco", "Rodrigo Pacheco", "1980-07-07", "2030-02-02", "Cabine com varanda", "Sem restrições", "Indiferente", "", [["Elaine Pacheco", "Esposa", "1982-03-25", "2030-02-02"], ["Igor Pacheco", "Filho", "2009-08-18", "2028-04-04"], ["Nina Pacheco", "Filha", "2013-01-13", "2028-04-04"], ["Sandra Pacheco", "Tia", "1960-10-10", "2030-02-02"]]],
+  ["Casal Souza", "Marina Souza", "1985-03-12", "2032-05-20", "King, vista mar", "Sem restrições", "Janela", "Roteiro de 19 dias pela Itália.", [["Rafael Souza", "Marido", "1983-09-02", "2032-05-20"]]],
 ];
 
 // Filial de cada cliente, como na viagem do protótipo; os demais são de Rondonópolis.
@@ -241,7 +243,8 @@ async function main() {
       });
       clientesNovos++;
     }
-    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es) e ${clientesNovos} cliente(s) criados.`);
+    const orcamentosNovos = await semearOrcamentos(sql);
+    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s) e ${orcamentosNovos} orçamento(s) criados.`);
     console.log(`Logins: ${USUARIOS.map((u) => u.email).join(", ")} (senha ${SENHA})`);
   } finally {
     await sql.end();

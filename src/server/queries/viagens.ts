@@ -675,6 +675,8 @@ export type Proposta = {
   }[];
   /** Preço do pacote + taxa de serviço (dias × taxa por dia das regras da versão), em centavos. */
   total: bigint;
+  /** Taxa de serviço (dias × taxa por dia), já incluída no total. */
+  taxaServico: bigint;
   /** total ÷ passageiros, meio para cima. */
   porPessoa: bigint;
   /** "Cartão em 6x". */
@@ -701,7 +703,8 @@ export async function obterProposta(viagemId: string): Promise<{ ok: true; propo
   const [ver] = await db.select().from(versoesPrecificacao).where(eq(versoesPrecificacao.id, l.v.versaoAprovadaId));
   const regras = await regrasDaVersao(ver.regrasVersaoId);
   const s = ver.snapshot as Snapshot;
-  const total = ver.preco + BigInt(ver.dias) * BigInt(regras.taxaServicoPorDia);
+  const taxaServico = BigInt(ver.dias) * BigInt(regras.taxaServicoPorDia);
+  const total = ver.preco + taxaServico;
   const n = BigInt(Math.max(s.passageiros.length, 1));
   return {
     ok: true,
@@ -723,6 +726,7 @@ export async function obterProposta(viagemId: string): Promise<{ ok: true; propo
             : { tipo: i.tipo, cidade: i.cidade, servico: i.servico, checkin: i.checkin, checkout: i.checkout, diarias: i.diarias },
         ),
       total,
+      taxaServico,
       porPessoa: arredondar(total, n),
       forma: rotuloForma(ver.forma as FormaPagamento),
       validade: VALIDADE_PROPOSTA,
