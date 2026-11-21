@@ -1,3 +1,4 @@
+import { arredondar, lerDecimal } from "./decimal";
 import type { Regras } from "./regras";
 
 // Fórmulas de precificação do terrestre (sem I/O).
@@ -54,28 +55,31 @@ export const FORMA_REFERENCIA = 2;
 /** 1 (100%) na escala dos percentuais: 1 unidade = 0,0001% = 10⁻⁶. */
 const E = 1_000_000n;
 
-/** numerador / denominador arredondado ao inteiro, meio para cima (afastando do zero), sinal respeitado. */
-export function arredondar(numerador: bigint, denominador: bigint): bigint {
-  if (denominador === 0n) throw new Error("Divisão por zero");
-  if (denominador < 0n) {
-    numerador = -numerador;
-    denominador = -denominador;
-  }
-  const neg = numerador < 0n;
-  const abs = neg ? -numerador : numerador;
-  const q = (2n * abs + denominador) / (2n * denominador);
-  return neg ? -q : q;
-}
-
-/** "7.7367" → 77367n com `casas` = 4 (inteiro na escala 10^casas). Aceita até `casas` decimais, sem sinal. */
-export function lerDecimal(texto: string, casas: number): bigint {
-  const m = /^(\d+)(?:\.(\d+))?$/.exec(texto);
-  if (!m || (m[2]?.length ?? 0) > casas) throw new Error("Valor inválido");
-  return BigInt(m[1]) * 10n ** BigInt(casas) + BigInt((m[2] ?? "").padEnd(casas, "0"));
-}
-
 /** Percentual em string → unidades de 10⁻⁶ (E = 100%). */
 const pct = (p: string) => lerDecimal(p, 4);
+
+/** Percentual de item (comissão, desconto à vista): de 0 a 100, até 4 casas. */
+function pctItem(p: string): bigint {
+  let u: bigint;
+  try {
+    u = pct(p);
+  } catch {
+    throw new Error("Percentual inválido");
+  }
+  if (u > E) throw new Error("Percentual inválido");
+  return u;
+}
+
+/** Valida diárias (inteiro ≥ 0 ou nulo) e percentuais do item; lança com mensagem clara. */
+function validarItem(i: ItemCalc): void {
+  if (i.diarias !== null && !(Number.isInteger(i.diarias) && i.diarias >= 0)) throw new Error("Diárias inválidas");
+  pctItem(i.comissaoPct);
+  if (i.descontoAVistaPct !== null) pctItem(i.descontoAVistaPct);
+}
+
+function validarDias(dias: number): void {
+  if (!Number.isInteger(dias) || dias < 1) throw new Error("Dias inválidos");
+}
 
 function formatarEscala(v: bigint, casas: number): string {
   const neg = v < 0n;
@@ -121,18 +125,20 @@ export function taxaDaForma(f: FormaPagamento, r: Regras): { pct: string; fixo: 
 
 /** valor × (1 − comissão), em centavos. */
 export function custoLiquido(i: ItemCalc): bigint {
-  return arredondar(i.valorFornecedor * (E - pct(i.comissaoPct)), E);
+  validarItem(i);
+  return arredondar(i.valorFornecedor * (E - pctItem(i.comissaoPct)), E);
 }
 
 /** custo líquido × (1 − desconto à vista); sem desconto = custo líquido. */
 export function custoAVista(i: ItemCalc): bigint {
   const cl = custoLiquido(i);
   if (i.descontoAVistaPct === null) return cl;
-  return arredondar(cl * (E - pct(i.descontoAVistaPct)), E);
+  return arredondar(cl * (E - pctItem(i.descontoAVistaPct)), E);
 }
 
 /** Venda do item pelas regras por item. Lança para `Aéreo`, que fica fora da precificação. */
 export function vendaDoItem(i: ItemCalc, r: Regras): bigint {
+  validarItem(i);
   const v = i.valorFornecedor;
   switch (i.tipo) {
     case "Aéreo":
@@ -249,6 +255,7 @@ function distribuir(total: bigint, pesos: bigint[], seNenhum: number): bigint[] 
 }
 
 export function precificar(itens: ItemCalc[], dias: number, r: Regras): Precificacao {
+  validarDias(dias);
   const lista = itens.filter((i) => i.tipo !== "Aéreo");
   const base = lista.map((i) => ({
     id: i.id,
@@ -348,6 +355,7 @@ export function margemDaAprovacao(
   finalPct: string;
   diasCobertos: string;
 } {
+  validarDias(dias);
   const res = resultadoDoPreco(precoP, custo, f, r);
   const mensal = BigInt(r.custoFixoMensal);
   const fixo =

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { REGRAS_INICIAIS as R } from "@/domain/regras";
+import { arredondar } from "@/domain/decimal";
 import {
   FORMAS_SIMULADOR,
-  arredondar,
   custoAVista,
   custoLiquido,
   margemDaAprovacao,
@@ -156,6 +156,7 @@ describe("precificar: caso Itália, 19 dias", () => {
     expect(f.slice(0, 4).map((x) => x.precoCliente)).toEqual([6667506n, 6862154n, 6981518n, 6926899n]);
     expect(f.map((x) => x.margemSemTaxaServicoPct)).toEqual(["22.2", "22.0", "21.9", "21.9", "21.5"]);
     expect(f.map((x) => x.compensacao)).toEqual(f.map((x) => x.preco - p.somaVendas));
+    expect(f.map((x) => x.compensacao)).toEqual([519078n, 713726n, 833090n, 778471n, 1264280n]);
   });
 
   it("à vista", () => {
@@ -165,6 +166,7 @@ describe("precificar: caso Itália, 19 dias", () => {
     expect(p.avista.opcaoAMargemPct).toEqual(["20.4", "20.4", "20.4", "20.4", "20.3"]);
     expect(p.avista.opcaoBPreco.slice(0, 4)).toEqual([6258035n, 6448888n, 6565924n, 6512370n]);
     expect(p.avista.opcaoBReducao).toEqual(p.porForma.map((x, i) => x.preco - p.avista.opcaoBPreco[i]));
+    expect(p.avista.opcaoBReducao).toEqual([124471n, 128266n, 130594n, 129529n, 139004n]);
   });
 
   it("compensação distribuída pelos itens sem Taxa, fechando no centavo", () => {
@@ -260,5 +262,111 @@ describe("margemDaAprovacao: pedidos do protótipo (aprovacoes/page.tsx)", () =>
     expect(m.imposto).toBe(0n);
     expect(m.antes).toBe(-20000n);
     expect(m.antesPct).toBe("-20.0");
+  });
+});
+
+const novo = (over: Partial<ItemCalc>): ItemCalc => ({
+  id: "n",
+  tipo: "Outro",
+  nome: "",
+  diarias: null,
+  valorFornecedor: 100000n,
+  comissaoPct: "0.000",
+  descontoAVistaPct: null,
+  ...over,
+});
+
+/** Soma dos preços por item = preço de cada forma; soma dos valores finais = preço da forma de referência. */
+function fechaNoCentavo(p: ReturnType<typeof precificar>) {
+  p.porForma.forEach((f, k) => {
+    expect(p.itens.reduce((a, x) => a + x.precoPorForma[k], 0n)).toBe(f.preco);
+  });
+  expect(p.itens.reduce((a, x) => a + x.valorFinal, 0n)).toBe(p.porForma[2].preco);
+  expect(p.itens.reduce((a, x) => a + x.compensacao, 0n)).toBe(p.porForma[2].compensacao);
+}
+
+describe("casos-limite", () => {
+  it("precoDoPacote recusa taxas e margem que somam 100% ou mais", () => {
+    const pix: FormaPagamento = { tipo: "pix", parcelas: 1 };
+    // imposto 7% + margem 93% = 100%
+    expect(() => precoDoPacote(100000n, pix, R, "93.000")).toThrow("Taxas e margem somam 100% ou mais");
+    expect(() => precoDoPacote(100000n, pix, R, "95.000")).toThrow("Taxas e margem somam 100% ou mais");
+    // 0,93 × 100000 / 0,00001 = 9.300.000.000
+    expect(precoDoPacote(100000n, pix, R, "92.999")).toBe(9300000000n);
+  });
+
+  it("compensação negativa ainda fecha no centavo", () => {
+    // Hotéis acima do limite vendem pelo valor; com 50% de comissão o preço fica abaixo da soma das vendas.
+    const p = precificar(
+      [
+        novo({ id: "a", tipo: "Hotelaria", diarias: 1, valorFornecedor: 1000000n, comissaoPct: "50.000" }),
+        novo({ id: "b", tipo: "Hotelaria", diarias: 1, valorFornecedor: 700001n, comissaoPct: "50.000" }),
+        novo({ id: "t", tipo: "Taxa", valorFornecedor: 25000n }),
+      ],
+      3,
+      R,
+    );
+    expect(p.porForma.every((f) => f.compensacao < 0n)).toBe(true);
+    expect(p.itens[2].precoPorForma.every((v) => v === 25000n)).toBe(true);
+    fechaNoCentavo(p);
+  });
+
+  it("um único item recebe toda a compensação", () => {
+    const p = precificar([novo({ valorFornecedor: 123457n })], 1, R);
+    expect(p.itens[0].precoPorForma).toEqual(p.porForma.map((f) => f.preco));
+    expect(p.itens[0].compensacao).toBe(p.porForma[2].compensacao);
+    fechaNoCentavo(p);
+  });
+
+  it("pesos empatados dividem a compensação com no máximo 1 centavo de diferença", () => {
+    const p = precificar(
+      [novo({ id: "a", valorFornecedor: 33333n }), novo({ id: "b", valorFornecedor: 33333n }), novo({ id: "c", valorFornecedor: 33333n })],
+      1,
+      R,
+    );
+    p.porForma.forEach((_, k) => {
+      const v = p.itens.map((x) => x.precoPorForma[k]);
+      const max = v.reduce((a, b) => (b > a ? b : a));
+      const min = v.reduce((a, b) => (b < a ? b : a));
+      expect(max - min <= 1n).toBe(true);
+    });
+    fechaNoCentavo(p);
+  });
+
+  it("Hotelaria: diárias 0 ou nulas e diária exatamente no limite usam o ganho mínimo", () => {
+    // 700000 / 0,88 = 795454,54… → 795455
+    const h = (diarias: number | null) => vendaDoItem(novo({ tipo: "Hotelaria", diarias, valorFornecedor: 700000n }), R);
+    expect(h(2)).toBe(795455n); // 700000 == 350000 × 2
+    expect(h(0)).toBe(795455n);
+    expect(h(null)).toBe(795455n);
+    expect(vendaDoItem(novo({ tipo: "Hotelaria", diarias: 2, valorFornecedor: 700001n }), R)).toBe(700001n);
+  });
+});
+
+describe("validação do domínio", () => {
+  it("diárias: inteiro não negativo ou nulo", () => {
+    for (const d of [-1, 1.5, Number.NaN]) {
+      const i = novo({ tipo: "Hotelaria", diarias: d });
+      expect(() => vendaDoItem(i, R)).toThrow("Diárias inválidas");
+      expect(() => custoLiquido(i)).toThrow("Diárias inválidas");
+      expect(() => precificar([i], 1, R)).toThrow("Diárias inválidas");
+    }
+  });
+
+  it("comissão e desconto à vista: de 0 a 100", () => {
+    for (const v of ["100.001", "-1.000", "abc", ""]) {
+      expect(() => custoLiquido(novo({ comissaoPct: v }))).toThrow("Percentual inválido");
+      expect(() => custoAVista(novo({ descontoAVistaPct: v }))).toThrow("Percentual inválido");
+      expect(() => vendaDoItem(novo({ descontoAVistaPct: v }), R)).toThrow("Percentual inválido");
+    }
+    expect(custoLiquido(novo({ comissaoPct: "100.000" }))).toBe(0n);
+    expect(custoAVista(novo({ descontoAVistaPct: "100.000" }))).toBe(0n);
+  });
+
+  it("dias: inteiro positivo", () => {
+    for (const d of [0, -1, 1.5]) {
+      expect(() => precificar([novo({})], d, R)).toThrow("Dias inválidos");
+      expect(() => margemDaAprovacao(100000n, 50000n, { tipo: "pix", parcelas: 1 }, d, "por_dia", R)).toThrow("Dias inválidos");
+    }
   });
 });

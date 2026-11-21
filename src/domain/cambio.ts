@@ -1,4 +1,4 @@
-import { arredondar, lerDecimal } from "./precificacao";
+import { arredondar, lerDecimal } from "./decimal";
 
 export const MOEDAS = ["BRL", "USD", "EUR", "GBP", "CHF"] as const;
 export type Moeda = (typeof MOEDAS)[number];
