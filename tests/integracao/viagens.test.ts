@@ -71,7 +71,7 @@ async function item(uid: string, viagemId: string, dados: Partial<ItemEntrada> =
 }
 
 async function cotacao(uid: string, itemId: string, dados: Record<string, unknown> = {}, cotacaoId?: string) {
-  const r = await comSessao(uid, () => salvarCotacao(itemId, { valor: "1.000,00", ...dados }, cotacaoId));
+  const r = await comSessao(uid, () => salvarCotacao(itemId, { moeda: "BRL", valor: "1.000,00", ...dados }, cotacaoId));
   if (!r.ok) throw new Error(r.erro);
   return r.id;
 }
@@ -146,7 +146,7 @@ describe("orçamentos", () => {
     expect(await alterarOrcamento(id, { destino: "X", inicio: "2027-01-01", fim: "2027-01-02", passageiros: pessoas }, "x")).toEqual(semPermissao);
     expect(await salvarItem(id, { tipo: "Passeio", servico: "X" })).toEqual(semPermissao);
     expect(await removerItem(id)).toEqual(semPermissao);
-    expect(await salvarCotacao(id, { valor: "1,00" })).toEqual(semPermissao);
+    expect(await salvarCotacao(id, { moeda: "BRL", valor: "1,00" })).toEqual(semPermissao);
     expect(await removerCotacao(id)).toEqual(semPermissao);
     expect(await escolherCotacao(id)).toEqual(semPermissao);
     await expect(listarOrcamentos()).rejects.toThrow("Sem permissão");
@@ -214,6 +214,11 @@ describe("itens e cotações", () => {
     await cotacao(u.id, i, { moeda: "EUR", valor: "1.000,00", comissao: "4" }, c1);
     const [editada] = await db.select().from(cotacoes).where(eq(cotacoes.id, c1));
     expect(editada).toMatchObject({ cambioAplicado: "6.1582", valorBrl: 615820n, comissaoPct: "4.000" });
+    // editar sem informar a moeda é recusado e nada muda (não vira reais)
+    const semMoeda = await comSessao(u.id, () => salvarCotacao(i, { valor: "2.000,00" } as never, c1));
+    expect(semMoeda).toMatchObject({ ok: false, erro: "Escolha a moeda", campos: { moeda: "Escolha a moeda" } });
+    const [intacta] = await db.select().from(cotacoes).where(eq(cotacoes.id, c1));
+    expect(intacta).toEqual(editada);
     // BRL grava câmbio nulo
     const c3 = await cotacao(u.id, i, { valor: "R$ 2.500,50" });
     const [brl] = await db.select().from(cotacoes).where(eq(cotacoes.id, c3));
@@ -235,9 +240,9 @@ describe("itens e cotações", () => {
     });
     const i = await item(u.id, id);
     for (const valor of ["", "abc", "-5,00", "1,234"]) {
-      expect(await comSessao(u.id, () => salvarCotacao(i, { valor }))).toMatchObject({ ok: false, erro: "Valor inválido" });
+      expect(await comSessao(u.id, () => salvarCotacao(i, { moeda: "BRL", valor }))).toMatchObject({ ok: false, erro: "Valor inválido" });
     }
-    expect(await comSessao(u.id, () => salvarCotacao("00000000-0000-0000-0000-000000000000", { valor: "1,00" }))).toEqual({
+    expect(await comSessao(u.id, () => salvarCotacao("00000000-0000-0000-0000-000000000000", { moeda: "BRL", valor: "1,00" }))).toEqual({
       ok: false,
       erro: "Item não encontrado",
     });
@@ -284,7 +289,7 @@ describe("itens e cotações", () => {
     expect(await taxa()).toHaveLength(1);
     expect(await comSessao(u.id, () => salvarItem(id, { tipo: "Outro", servico: "Mudar" }, t.id))).toEqual({ ok: false, erro: AUTOMATICA });
     expect(await comSessao(u.id, () => removerItem(t.id))).toEqual({ ok: false, erro: AUTOMATICA });
-    expect(await comSessao(u.id, () => salvarCotacao(t.id, { valor: "1,00" }))).toEqual({ ok: false, erro: AUTOMATICA });
+    expect(await comSessao(u.id, () => salvarCotacao(t.id, { moeda: "BRL", valor: "1,00" }))).toEqual({ ok: false, erro: AUTOMATICA });
     expect(await comSessao(u.id, () => removerCotacao(ct[0].id))).toEqual({ ok: false, erro: AUTOMATICA });
     // remove dois: fica com 5 → a taxa sai (exclusão lógica)
     expect(await comSessao(u.id, () => removerItem(ids[0]))).toEqual({ ok: true });
@@ -335,7 +340,7 @@ describe("itens e cotações", () => {
     expect(await comSessao(u.id, () => salvarItem(id, { tipo: "Passeio", servico: "Novo" }))).toEqual(recusa);
     expect(await comSessao(u.id, () => salvarItem(id, { tipo: "Passeio", servico: "Novo" }, i))).toEqual(recusa);
     expect(await comSessao(u.id, () => removerItem(i))).toEqual(recusa);
-    expect(await comSessao(u.id, () => salvarCotacao(i, { valor: "1,00" }))).toEqual(recusa);
+    expect(await comSessao(u.id, () => salvarCotacao(i, { moeda: "BRL", valor: "1,00" }))).toEqual(recusa);
     expect(await comSessao(u.id, () => removerCotacao(c))).toEqual(recusa);
     expect(await comSessao(u.id, () => escolherCotacao(c))).toEqual(recusa);
     const f = (await comSessao(u.id, () => obterPrecificacao(id)))!;
@@ -454,10 +459,23 @@ describe("precificação", () => {
 
     const doDiretor = await l(d.id);
     const ita = doDiretor.find((x) => x.codigo === "ECL-0001-01")!;
-    expect(ita.estrategico).toBeDefined();
-    expect(ita.estrategico!.preco).toBeGreaterThan(50000n);
-    expect(ita.estrategico!.margemPct).toBe("19.0");
+    const est = ita.estrategico as { preco: bigint; margemPct: string };
+    expect(est.preco).toBeGreaterThan(50000n);
+    expect(est.margemPct).toBe("19.0");
     expect(doDiretor.find((x) => x.codigo === "ECL-0001-02")!.estrategico).toEqual({ preco: null, margemPct: null });
+  });
+
+  it("listarOrcamentos: linha que não dá para calcular não derruba a lista", async () => {
+    const { u, clienteId, pessoas } = await cenario();
+    const d = await criarUsuarioTeste("diretor");
+    const a = await novoOrcamento(u.id, clienteId, pessoas);
+    const b = await novoOrcamento(u.id, clienteId, pessoas);
+    await cotacao(u.id, await item(u.id, a.id), { valor: "500,00" });
+    const vig = await comSessao(d.id, () => regrasVigentes());
+    expect((await comSessao(d.id, () => salvarRegras({ ...vig.valores, margemAlvoPct: "93.000" }))).ok).toBe(true);
+    const lista = await comSessao(d.id, () => listarOrcamentos());
+    expect(lista.find((x) => x.id === a.id)!.estrategico).toEqual({ erro: "Não foi possível calcular" });
+    expect(lista.find((x) => x.id === b.id)!.estrategico).toEqual({ preco: null, margemPct: null });
   });
 
   it("obterPrecificacao: id inválido ou inexistente → null", async () => {

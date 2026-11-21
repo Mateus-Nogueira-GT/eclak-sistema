@@ -46,7 +46,8 @@ export type ItemEntrada = {
 /** Valores em formato brasileiro ("1.000,00"), em centavos da moeda. Sem câmbio: vem dos Parâmetros vigentes. */
 export type CotacaoEntrada = {
   valor: string;
-  moeda?: Moeda;
+  /** Obrigatória, também na edição. */
+  moeda: Moeda;
   fornecedorId?: string | null;
   /** "4", "4,5" (%). */
   comissao?: string | null;

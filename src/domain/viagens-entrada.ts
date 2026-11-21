@@ -156,7 +156,8 @@ export const cotacaoSchema = z.strictObject({
     .regex(UUID, "Fornecedor não encontrado")
     .nullish()
     .transform((v) => v ?? null),
-  moeda: z.enum(MOEDAS, { error: "Moeda inválida" }).default("BRL"),
+  /** Obrigatória (também na edição): sem ela o valor seria lido em reais e o câmbio se perderia. */
+  moeda: z.enum(MOEDAS, { error: "Escolha a moeda" }),
   valor: dinheiro(false),
   comissao: percentual("0.000"),
   descontoAVista: percentual(null),

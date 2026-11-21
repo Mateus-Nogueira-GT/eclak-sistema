@@ -121,9 +121,10 @@ export type OrcamentoLista = {
   versaoAprovada: number | null;
   /**
    * Só para a camada estratégica: preço do pacote na forma de referência (pior custo) e a margem
-   * líquida desse preço com as cotações escolhidas. Nulos sem item cotado.
+   * líquida desse preço com as cotações escolhidas. Nulos sem item cotado; `erro` quando as regras
+   * vigentes não permitem calcular (ex.: taxas e margem somam 100% ou mais).
    */
-  estrategico?: { preco: bigint | null; margemPct: string | null };
+  estrategico?: { preco: bigint | null; margemPct: string | null } | { erro: string };
 };
 
 type ItemLinha = typeof itensViagem.$inferSelect;
@@ -294,9 +295,15 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
       if (cotados.length === 0) {
         linha.estrategico = { preco: null, margemPct: null };
       } else {
-        const e = camadaEstrategica(doItem, diasDaViagem(l.v.inicio, l.v.fim), regras);
-        const preco = e.precificacao.porForma[FORMA_REFERENCIA].preco;
-        linha.estrategico = { preco, margemPct: resultadoDoPreco(preco, e.custoEscolhidas, ref, regras).margemLiquidaPct };
+        // Uma linha que não dá para calcular não derruba a lista inteira.
+        try {
+          const e = camadaEstrategica(doItem, diasDaViagem(l.v.inicio, l.v.fim), regras);
+          const preco = e.precificacao.porForma[FORMA_REFERENCIA].preco;
+          linha.estrategico = { preco, margemPct: resultadoDoPreco(preco, e.custoEscolhidas, ref, regras).margemLiquidaPct };
+        } catch (e) {
+          console.error("Erro ao calcular orçamento da lista", { viagemId: l.v.id, erro: (e as Error)?.message });
+          linha.estrategico = { erro: "Não foi possível calcular" };
+        }
       }
     }
     return linha;
