@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { z } from "zod";
 import {
+  ajustarItem,
   ajusteSchema,
   envioSchema,
   itensDoSnapshot,
@@ -184,11 +185,11 @@ export async function enviarParaAprovacao(
   dados: EnvioEntrada,
 ): Promise<{ ok: true; id: string; numero: number } | Falha> {
   return comPerfil([], async (usuario) => {
+    if (!ehUuid(viagemId)) return ORCAMENTO_NAO_ENCONTRADO;
     const vig = await regrasVigentes();
     const regras = vig.valores;
     const p = envioSchema(regras.parcelamentoMaximo).safeParse(dados);
     if (!p.success) return falhaDeValidacao(p.error);
-    if (!ehUuid(viagemId)) return ORCAMENTO_NAO_ENCONTRADO;
     const { forma, alteracao } = p.data;
 
     let r: { id: string; numero: number } | Falha;
@@ -358,14 +359,15 @@ export async function devolver(versaoId: string, comentario: string): Promise<{ 
 
 /** Copia do snapshot com os ajustes por item; `null` se algum item não está no snapshot (ou é Aéreo). */
 function ajustarSnapshot(s: Snapshot, ajustes: AjustesItem): Snapshot | null {
-  const itens: ItemSnapshot[] = s.itens.map((i) => ({ ...i }));
+  const itens: ItemSnapshot[] = [...s.itens];
   for (const a of ajustes) {
-    const i = itens.find((x) => x.id === a.itemId.toLowerCase());
-    if (!i || i.tipo === "Aéreo") return null;
-    const ajuste = { ...i.ajuste };
+    const k = itens.findIndex((x) => x.id === a.itemId.toLowerCase());
+    if (k === -1 || itens[k].tipo === "Aéreo") return null;
+    const ajuste: { valorFornecedor?: string; comissaoPct?: string } = {};
     if (a.valorFornecedor !== undefined) ajuste.valorFornecedor = a.valorFornecedor.toString();
     if (a.comissaoPct !== undefined) ajuste.comissaoPct = a.comissaoPct;
-    if (Object.keys(ajuste).length > 0) i.ajuste = ajuste;
+    // Reescolhe o pior custo com os valores ajustados.
+    itens[k] = ajustarItem(itens[k], ajuste);
   }
   return { ...s, itens };
 }

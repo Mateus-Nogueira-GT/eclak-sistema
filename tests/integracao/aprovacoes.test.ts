@@ -9,7 +9,7 @@ import { auditoria, cotacoes, itensViagem, versoesPrecificacao, viagens } from "
 import { salvarCliente, type ClienteEntrada } from "@/server/actions/clientes";
 import { salvarRegras } from "@/server/actions/regras";
 import { aprovar, aprovarComAjuste, devolver, enviarParaAprovacao } from "@/server/actions/aprovacoes";
-import { alterarOrcamento, criarOrcamento, salvarCotacao, salvarItem, type ItemEntrada } from "@/server/actions/viagens";
+import { alterarOrcamento, criarOrcamento, escolherCotacao, salvarCotacao, salvarItem, type ItemEntrada } from "@/server/actions/viagens";
 import { ErroAcesso } from "@/server/auth";
 import { obterCliente } from "@/server/queries/clientes";
 import { regrasVigentes } from "@/server/queries/regras";
@@ -186,6 +186,11 @@ describe("envio para aprovação", () => {
       ok: false,
       erro: "Orçamento não encontrado",
     });
+    // id inválido é conferido antes da forma
+    expect(await comSessao(u.id, () => enviarParaAprovacao("x", { forma: { tipo: "credito", parcelas: 99 }, alteracao: "" }))).toEqual({
+      ok: false,
+      erro: "Orçamento não encontrado",
+    });
   });
 });
 
@@ -313,6 +318,33 @@ describe("decisão do Diretor", () => {
     expect(aud.map((x) => [x.acao, x.usuarioId])).toEqual([["criar", d.id]]);
     expect(await comSessao(d.id, () => aprovar(id1))).toEqual(DECIDIDO);
     expect(await comSessao(d.id, () => aprovar(v2.id))).toEqual(DECIDIDO);
+  });
+
+  it("ajuste do Diretor reescolhe o pior custo: preço e margem extra seguem o novo pior", async () => {
+    const { u, d, viagemId } = await cenario();
+    const passeio = await item(u.id, viagemId, { servico: "Coliseu" });
+    const a = await cotacao(u.id, passeio, { valor: "1.000,00" }); // custo 1.000,00 (pior no envio)
+    const b = await cotacao(u.id, passeio, { valor: "1.100,00", comissao: "20" }); // custo 880,00
+    expect((await comSessao(u.id, () => escolherCotacao(b))).ok).toBe(true);
+    const vig = await comSessao(u.id, () => regrasVigentes());
+    const id1 = await enviar(u.id, viagemId);
+    const [v1] = await versoesDa(viagemId);
+    expect((v1.snapshot as Snapshot).itens[0].precificada.id).toBe(a);
+    expect((v1.snapshot as Snapshot).itens[0].cotacoes.map((c) => c.id)).toEqual([a, b]);
+    expect((v1.resultado as ResultadoVersao).margemExtra).toBe((100000n - 88000n).toString());
+
+    // comissão 0 nas duas: b (1.100,00) passa a ser o pior custo
+    const r = await comSessao(d.id, () => aprovarComAjuste(id1, { preco: "2.000,00", forma: CREDITO6, itens: [{ itemId: passeio, comissaoPct: "0" }] }));
+    expect(r.ok).toBe(true);
+    const [, v2] = await versoesDa(viagemId);
+    const it2 = (v2.snapshot as Snapshot).itens[0];
+    expect(it2).toMatchObject({ ajuste: { comissaoPct: "0.000" } });
+    expect(it2.precificada.id).toBe(b);
+    expect(it2.escolhida.id).toBe(b);
+    const res = v2.resultado as ResultadoVersao;
+    expect(res.custo).toBe("110000");
+    expect(res.margemExtra).toBe("0");
+    expect(res.precoCalculado).toBe(precoDoPacote(110000n, CREDITO6, vig.valores).toString());
   });
 
   it("devolver exige motivo; pedido já decidido não se decide de novo", async () => {

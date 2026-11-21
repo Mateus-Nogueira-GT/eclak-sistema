@@ -49,7 +49,9 @@ export type ItemSnapshot = {
   checkout: string | null;
   diarias: number | null;
   automatico: boolean;
-  /** Cotação usada no preço: a de pior custo (maior custo líquido). */
+  /** Todas as cotações ativas do item, mais antigas primeiro (criação, id). */
+  cotacoes: CotacaoSnapshot[];
+  /** Cotação usada no preço: a de pior custo (maior custo líquido, com o ajuste); empate fica com a mais antiga. */
   precificada: CotacaoSnapshot;
   /** Cotação escolhida (custo esperado); igual à precificada quando é a mesma. */
   escolhida: CotacaoSnapshot;
@@ -103,7 +105,7 @@ export type CotacaoLida = {
   escolhida: boolean;
 };
 
-export type ItemLido = Omit<ItemSnapshot, "precificada" | "escolhida" | "ajuste"> & { cotacoes: CotacaoLida[] };
+export type ItemLido = Omit<ItemSnapshot, "cotacoes" | "precificada" | "escolhida" | "ajuste"> & { cotacoes: CotacaoLida[] };
 
 function snapCotacao(c: CotacaoLida): CotacaoSnapshot {
   return {
@@ -122,7 +124,7 @@ function snapCotacao(c: CotacaoLida): CotacaoSnapshot {
   };
 }
 
-function calcDe(i: Omit<ItemSnapshot, "precificada" | "escolhida">, c: CotacaoSnapshot): ItemCalc {
+function calcDe(i: Pick<ItemSnapshot, "id" | "tipo" | "servico" | "diarias" | "ajuste">, c: CotacaoSnapshot): ItemCalc {
   return {
     id: i.id,
     tipo: i.tipo,
@@ -144,15 +146,32 @@ export function itensDoSnapshot(itens: ItemLido[]): ItemSnapshot[] | { erro: str
   if (!itens.some((i) => i.tipo !== "Taxa" && i.tipo !== "Aéreo")) return { erro: MSG_SEM_ITEM_COTADO };
   return itens.map(({ cotacoes, ...i }) => {
     const snaps = cotacoes.map(snapCotacao);
-    let pior = 0;
-    let piorCusto = custoLiquido(calcDe(i, snaps[0]));
-    for (let k = 1; k < snaps.length; k++) {
-      const cl = custoLiquido(calcDe(i, snaps[k]));
-      if (cl > piorCusto) [pior, piorCusto] = [k, cl];
-    }
+    const pior = piorCotacao(i, snaps);
     const escolhida = cotacoes.findIndex((c) => c.escolhida);
-    return { ...i, precificada: snaps[pior], escolhida: snaps[escolhida === -1 ? pior : escolhida] };
+    return { ...i, cotacoes: snaps, precificada: pior, escolhida: escolhida === -1 ? pior : snaps[escolhida] };
   });
+}
+
+/** Maior custo líquido (com o ajuste do item); empate fica com a primeira (a mais antiga). */
+function piorCotacao(i: Pick<ItemSnapshot, "id" | "tipo" | "servico" | "diarias" | "ajuste">, cs: CotacaoSnapshot[]): CotacaoSnapshot {
+  let pior = cs[0];
+  let piorCusto = custoLiquido(calcDe(i, pior));
+  for (const c of cs.slice(1)) {
+    const cl = custoLiquido(calcDe(i, c));
+    if (cl > piorCusto) [pior, piorCusto] = [c, cl];
+  }
+  return pior;
+}
+
+/**
+ * Aplica o ajuste do Diretor ao item do snapshot (cópia) e reescolhe a cotação de pior custo com os valores
+ * ajustados, para o preço e a margem extra seguirem o novo pior custo.
+ */
+export function ajustarItem(i: ItemSnapshot, ajuste: { valorFornecedor?: string; comissaoPct?: string }): ItemSnapshot {
+  const novo = { ...i.ajuste, ...ajuste };
+  const item: ItemSnapshot = Object.keys(novo).length > 0 ? { ...i, ajuste: novo } : { ...i };
+  const todas = i.cotacoes?.length ? i.cotacoes : [i.precificada, ...(i.escolhida.id === i.precificada.id ? [] : [i.escolhida])];
+  return { ...item, precificada: piorCotacao(item, todas) };
 }
 
 /** Itens para `precificar` (pior custo, Aéreo fora) e os custos pelo pior e pelas escolhidas. */
