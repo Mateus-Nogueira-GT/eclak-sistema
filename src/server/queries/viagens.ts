@@ -1,19 +1,33 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import {
+  custosDoSnapshot,
+  MSG_PROPOSTA_INDISPONIVEL,
+  RATEIOS,
+  rotuloForma,
+  VALIDADE_PROPOSTA,
+  type ResultadoVersao,
+  type Snapshot,
+} from "@/domain/aprovacoes";
 import type { Moeda } from "@/domain/cambio";
+import { arredondar } from "@/domain/decimal";
 import {
   custoLiquido,
   FORMA_REFERENCIA,
   FORMAS_SIMULADOR,
+  margemDaAprovacao,
   precificar,
   resultadoDoPreco,
+  type FormaPagamento,
   type ItemCalc,
   type Precificacao,
+  type Rateio,
   type TipoItem,
 } from "@/domain/precificacao";
 import { veCamadaEstrategica } from "@/domain/perfis";
 import type { Regras } from "@/domain/regras";
-import { diasDaViagem, formatarCodigoViagem, noites, type StatusOrcamento } from "@/domain/viagens";
+import { diasDaViagem, formatarCodigoViagem, noites, type StatusOrcamento, type StatusVersao } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
@@ -28,7 +42,7 @@ import {
   viagemPassageiros,
   viagens,
 } from "@/server/db/schema";
-import { regrasVigentes } from "@/server/queries/regras";
+import { regrasDaVersao, regrasVigentes } from "@/server/queries/regras";
 
 // Segurança: a camada estratégica (custo líquido, venda, compensação, margem) só é montada dentro de
 // `estrategico`, e só quando `veCamadaEstrategica(perfil)`. Para os demais perfis ela nunca é calculada.
@@ -102,8 +116,27 @@ export type FichaPrecificacao = {
   aereo: ItemFicha[];
   /** Itens do terrestre sem cotação (ficam fora do cálculo). */
   itensSemCotacao: { id: string; servico: string }[];
-  /** Só para diretor, fin_operacional e fin_estrategico. */
-  estrategico?: CamadaEstrategica;
+  /** Versões enviadas, mais recentes primeiro. */
+  versoes: VersaoFicha[];
+  /**
+   * Só para diretor, fin_operacional e fin_estrategico. `erro` quando as regras vigentes não permitem calcular
+   * (ex.: taxas e margem somam 100% ou mais).
+   */
+  estrategico?: CamadaEstrategica | { erro: string };
+};
+
+export type VersaoFicha = {
+  id: string;
+  numero: number;
+  status: StatusVersao;
+  /** Preço do pacote da versão (centavos); só para a camada estratégica. */
+  preco?: bigint;
+  enviadoPor: string;
+  enviadoEm: Date;
+  decididoPor: string | null;
+  decididoEm: Date | null;
+  comentario: string | null;
+  alteracao: string | null;
 };
 
 export type OrcamentoLista = {
@@ -390,7 +423,286 @@ export async function obterPrecificacao(viagemId: string): Promise<FichaPrecific
     itens: terrestre.map(ficha),
     aereo: todos.filter((x) => x.item.tipo === "Aéreo").map(ficha),
     itensSemCotacao: terrestre.filter((x) => x.cotacoes.length === 0).map((x) => ({ id: x.item.id, servico: x.item.servico })),
+    versoes: [],
   };
-  if (veCamadaEstrategica(usuario.perfil)) resposta.estrategico = camadaEstrategica(todos, dias, regras);
+  const estrategico = veCamadaEstrategica(usuario.perfil);
+  resposta.versoes = await versoesDe(v.id, estrategico);
+  if (estrategico) {
+    // Parâmetros que não permitem calcular não derrubam a ficha.
+    try {
+      resposta.estrategico = camadaEstrategica(todos, dias, regras);
+    } catch (e) {
+      console.error("Erro ao calcular a precificação", { viagemId: v.id, erro: (e as Error)?.message });
+      resposta.estrategico = { erro: "Não foi possível calcular" };
+    }
+  }
   return resposta;
+}
+
+const decisor = alias(usuarios, "decisor");
+
+/** Versões da viagem, mais recentes primeiro; `preco` só com `estrategico`. */
+async function versoesDe(viagemId: string, estrategico: boolean): Promise<VersaoFicha[]> {
+  const linhas = await db
+    .select({ ver: versoesPrecificacao, enviadoPor: usuarios.nome, decididoPor: decisor.nome })
+    .from(versoesPrecificacao)
+    .innerJoin(usuarios, eq(usuarios.id, versoesPrecificacao.enviadoPor))
+    .leftJoin(decisor, eq(decisor.id, versoesPrecificacao.decididoPor))
+    .where(eq(versoesPrecificacao.viagemId, viagemId))
+    .orderBy(desc(versoesPrecificacao.numero));
+  return linhas.map(({ ver, enviadoPor, decididoPor }) => ({
+    id: ver.id,
+    numero: ver.numero,
+    status: ver.status,
+    ...(estrategico ? { preco: ver.preco } : {}),
+    enviadoPor,
+    enviadoEm: ver.enviadoEm,
+    decididoPor: decididoPor ?? null,
+    decididoEm: ver.decididoEm,
+    comentario: ver.comentario,
+    alteracao: ver.alteracao,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Aprovação (Diretor) e proposta (cliente)
+// ---------------------------------------------------------------------------
+
+export type PedidoLista = {
+  versaoId: string;
+  viagemId: string;
+  codigo: string;
+  cliente: string;
+  destino: string;
+  inicio: string;
+  fim: string;
+  numero: number;
+  status: StatusVersao;
+  preco: bigint;
+  /** Rótulo da forma ("Cartão em 6x"). */
+  forma: string;
+  /** Margem final (depois do rateio) gravada na versão, 1 casa. */
+  margemFinalPct: string;
+  alteracao: string | null;
+  comentario: string | null;
+  enviadoPor: string;
+  enviadoEm: Date;
+  decididoPor: string | null;
+  decididoEm: Date | null;
+};
+
+const DIAS_DECIDIDOS = 30;
+
+/** Pedidos do Diretor: `aguardando` (mais antigo primeiro) e decididos nos últimos 30 dias (mais recente primeiro). */
+export async function listarPedidosAprovacao(): Promise<{ aguardando: PedidoLista[]; decididos: PedidoLista[] }> {
+  await exigirPerfil("diretor");
+  const desde = new Date(Date.now() - DIAS_DECIDIDOS * 86_400_000);
+  const linhas = await db
+    .select({
+      ver: versoesPrecificacao,
+      v: viagens,
+      clienteCodigo: clientes.codigo,
+      cliente: clientes.grupo,
+      enviadoPor: usuarios.nome,
+      decididoPor: decisor.nome,
+    })
+    .from(versoesPrecificacao)
+    .innerJoin(viagens, eq(viagens.id, versoesPrecificacao.viagemId))
+    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
+    .innerJoin(usuarios, eq(usuarios.id, versoesPrecificacao.enviadoPor))
+    .leftJoin(decisor, eq(decisor.id, versoesPrecificacao.decididoPor))
+    .where(
+      and(
+        isNull(viagens.excluidoEm),
+        or(
+          eq(versoesPrecificacao.status, "aguardando"),
+          and(ne(versoesPrecificacao.status, "aguardando"), gte(versoesPrecificacao.decididoEm, desde)),
+        ),
+      ),
+    );
+  const lista = linhas.map(
+    (l): PedidoLista => ({
+      versaoId: l.ver.id,
+      viagemId: l.v.id,
+      codigo: formatarCodigoViagem(l.clienteCodigo, l.v.seq),
+      cliente: l.cliente,
+      destino: (l.ver.snapshot as Snapshot).destino,
+      inicio: (l.ver.snapshot as Snapshot).inicio,
+      fim: (l.ver.snapshot as Snapshot).fim,
+      numero: l.ver.numero,
+      status: l.ver.status,
+      preco: l.ver.preco,
+      forma: rotuloForma(l.ver.forma as FormaPagamento),
+      margemFinalPct: (l.ver.resultado as ResultadoVersao).finalPct,
+      alteracao: l.ver.alteracao,
+      comentario: l.ver.comentario,
+      enviadoPor: l.enviadoPor,
+      enviadoEm: l.ver.enviadoEm,
+      decididoPor: l.decididoPor ?? null,
+      decididoEm: l.ver.decididoEm,
+    }),
+  );
+  const t = (d: Date | null) => d?.getTime() ?? 0;
+  return {
+    aguardando: lista.filter((x) => x.status === "aguardando").sort((a, b) => t(a.enviadoEm) - t(b.enviadoEm) || a.numero - b.numero),
+    decididos: lista.filter((x) => x.status !== "aguardando").sort((a, b) => t(b.decididoEm) - t(a.decididoEm) || b.numero - a.numero),
+  };
+}
+
+export type MargemAprovacao = ReturnType<typeof margemDaAprovacao>;
+
+export type Pedido = Omit<PedidoLista, "forma" | "margemFinalPct"> & {
+  consultor: string;
+  passageiros: string[];
+  forma: FormaPagamento;
+  formaRotulo: string;
+  dias: number;
+  rateio: Rateio;
+  snapshot: Snapshot;
+  resultado: ResultadoVersao;
+  /** Pior custo e custo com as escolhidas, recalculados do snapshot. */
+  custo: bigint;
+  custoEscolhidas: bigint;
+  /** `margemDaAprovacao` do preço da versão nos três rateios, com as regras da versão. */
+  margens: Record<Rateio, MargemAprovacao>;
+  /** Margem de referência das regras da versão (só indica). */
+  referenciaPct: string;
+};
+
+/** Pedido de aprovação com o snapshot e as margens nos três rateios. Só o Diretor. `null` se não existe. */
+export async function obterPedido(versaoId: string): Promise<Pedido | null> {
+  await exigirPerfil("diretor");
+  if (!ehUuid(versaoId)) return null;
+  const [l] = await db
+    .select({
+      ver: versoesPrecificacao,
+      v: viagens,
+      clienteCodigo: clientes.codigo,
+      cliente: clientes.grupo,
+      enviadoPor: usuarios.nome,
+      decididoPor: decisor.nome,
+    })
+    .from(versoesPrecificacao)
+    .innerJoin(viagens, eq(viagens.id, versoesPrecificacao.viagemId))
+    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
+    .innerJoin(usuarios, eq(usuarios.id, versoesPrecificacao.enviadoPor))
+    .leftJoin(decisor, eq(decisor.id, versoesPrecificacao.decididoPor))
+    .where(and(eq(versoesPrecificacao.id, versaoId), isNull(viagens.excluidoEm)))
+    .limit(1);
+  if (!l) return null;
+  const [consultor] = await db.select({ nome: usuarios.nome }).from(usuarios).where(eq(usuarios.id, l.v.consultorId));
+  const regras = await regrasDaVersao(l.ver.regrasVersaoId);
+  const snapshot = l.ver.snapshot as Snapshot;
+  const forma = l.ver.forma as FormaPagamento;
+  const { custo, custoEscolhidas } = custosDoSnapshot(snapshot);
+  const margens = Object.fromEntries(
+    RATEIOS.map((r) => [r, margemDaAprovacao(l.ver.preco, custo, forma, l.ver.dias, r, regras)]),
+  ) as Record<Rateio, MargemAprovacao>;
+  return {
+    versaoId: l.ver.id,
+    viagemId: l.v.id,
+    codigo: formatarCodigoViagem(l.clienteCodigo, l.v.seq),
+    cliente: l.cliente,
+    consultor: consultor?.nome ?? "",
+    destino: snapshot.destino,
+    inicio: snapshot.inicio,
+    fim: snapshot.fim,
+    passageiros: snapshot.passageiros.map((p) => p.nome),
+    numero: l.ver.numero,
+    status: l.ver.status,
+    preco: l.ver.preco,
+    forma,
+    formaRotulo: rotuloForma(forma),
+    dias: l.ver.dias,
+    rateio: l.ver.rateio as Rateio,
+    alteracao: l.ver.alteracao,
+    comentario: l.ver.comentario,
+    enviadoPor: l.enviadoPor,
+    enviadoEm: l.ver.enviadoEm,
+    decididoPor: l.decididoPor ?? null,
+    decididoEm: l.ver.decididoEm,
+    snapshot,
+    resultado: l.ver.resultado as ResultadoVersao,
+    custo,
+    custoEscolhidas,
+    margens,
+    referenciaPct: regras.margemReferenciaPct,
+  };
+}
+
+/** Só dados para o cliente: nunca fornecedor, comissão, custo ou margem. */
+export type Proposta = {
+  codigo: string;
+  cliente: string;
+  numeroVersao: number;
+  destino: string;
+  inicio: string;
+  fim: string;
+  dias: number;
+  noites: number;
+  passageiros: string[];
+  /** Terrestre da versão aprovada (sem Aéreo); a taxa de roteiro aparece como "Taxa de roteiro", sem valor. */
+  itens: {
+    tipo: TipoItem;
+    cidade: string | null;
+    servico: string;
+    checkin: string | null;
+    checkout: string | null;
+    diarias: number | null;
+  }[];
+  /** Preço do pacote + taxa de serviço (dias × taxa por dia das regras da versão), em centavos. */
+  total: bigint;
+  /** total ÷ passageiros, meio para cima. */
+  porPessoa: bigint;
+  /** "Cartão em 6x". */
+  forma: string;
+  validade: string;
+};
+
+/**
+ * Proposta da última versão aprovada (mesmo com o orçamento já em edição de novo). Qualquer perfil. Os dados
+ * da viagem (destino, datas, passageiros, itens) vêm do snapshot da versão.
+ */
+export async function obterProposta(viagemId: string): Promise<{ ok: true; proposta: Proposta } | { ok: false; erro: string }> {
+  await exigirPerfil();
+  const naoEncontrado = { ok: false as const, erro: "Orçamento não encontrado" };
+  if (!ehUuid(viagemId)) return naoEncontrado;
+  const [l] = await db
+    .select({ v: viagens, clienteCodigo: clientes.codigo, cliente: clientes.grupo })
+    .from(viagens)
+    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
+    .where(and(eq(viagens.id, viagemId), isNull(viagens.excluidoEm)))
+    .limit(1);
+  if (!l) return naoEncontrado;
+  if (!l.v.versaoAprovadaId) return { ok: false, erro: MSG_PROPOSTA_INDISPONIVEL };
+  const [ver] = await db.select().from(versoesPrecificacao).where(eq(versoesPrecificacao.id, l.v.versaoAprovadaId));
+  const regras = await regrasDaVersao(ver.regrasVersaoId);
+  const s = ver.snapshot as Snapshot;
+  const total = ver.preco + BigInt(ver.dias) * BigInt(regras.taxaServicoPorDia);
+  const n = BigInt(Math.max(s.passageiros.length, 1));
+  return {
+    ok: true,
+    proposta: {
+      codigo: formatarCodigoViagem(l.clienteCodigo, l.v.seq),
+      cliente: l.cliente,
+      numeroVersao: ver.numero,
+      destino: s.destino,
+      inicio: s.inicio,
+      fim: s.fim,
+      dias: ver.dias,
+      noites: noites(s.inicio, s.fim),
+      passageiros: s.passageiros.map((p) => p.nome),
+      itens: s.itens
+        .filter((i) => i.tipo !== "Aéreo")
+        .map((i) =>
+          i.tipo === "Taxa"
+            ? { tipo: i.tipo, cidade: null, servico: "Taxa de roteiro", checkin: null, checkout: null, diarias: null }
+            : { tipo: i.tipo, cidade: i.cidade, servico: i.servico, checkin: i.checkin, checkout: i.checkout, diarias: i.diarias },
+        ),
+      total,
+      porPessoa: arredondar(total, n),
+      forma: rotuloForma(ver.forma as FormaPagamento),
+      validade: VALIDADE_PROPOSTA,
+    },
+  };
 }

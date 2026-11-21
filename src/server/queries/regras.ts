@@ -73,3 +73,11 @@ export async function historicoRegras(): Promise<LinhaHistorico[]> {
   }
   return linhas;
 }
+
+/** Valores de uma versão de regras pelo id (as versões não mudam depois de criadas). Exige login. */
+export async function regrasDaVersao(versaoId: string): Promise<Regras> {
+  await exigirPerfil();
+  const [v] = await db.select({ valores: regrasVersoes.valores }).from(regrasVersoes).where(eq(regrasVersoes.id, versaoId));
+  if (!v) throw new Error("Versão de regras não encontrada");
+  return normalizarRegras(v.valores);
+}

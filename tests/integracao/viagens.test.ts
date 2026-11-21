@@ -19,7 +19,7 @@ import {
 } from "@/server/actions/viagens";
 import { obterCliente } from "@/server/queries/clientes";
 import { regrasVigentes } from "@/server/queries/regras";
-import { listarOrcamentos, obterPrecificacao } from "@/server/queries/viagens";
+import { listarOrcamentos, obterPrecificacao, type CamadaEstrategica } from "@/server/queries/viagens";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
 
 const souza: ClienteEntrada = {
@@ -391,7 +391,7 @@ describe("precificação", () => {
     }
 
     const ficha = (await comSessao(f.id, () => obterPrecificacao(id)))!;
-    const e = ficha.estrategico!;
+    const e = ficha.estrategico as CamadaEstrategica;
     expect(e).toBeDefined();
     // pior custo do hotel: 3.300,00 (0%) > 2.981,76; passeio 500,00
     expect(e.precificacao.custo).toBe(330000n + 50000n);
