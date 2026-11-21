@@ -1,6 +1,6 @@
 import "server-only";
 import { asc, desc, eq, lte, sql } from "drizzle-orm";
-import { diferencasRegras, REGRAS_INICIAIS, RegrasSchema, type Regras } from "@/domain/regras";
+import { diferencasRegras, normalizarRegras, REGRAS_INICIAIS, type Regras } from "@/domain/regras";
 import { exigirPerfil } from "@/server/auth";
 import { db, type Transacao } from "@/server/db/client";
 import { regrasVersoes, usuarios } from "@/server/db/schema";
@@ -44,7 +44,7 @@ export async function regrasVigentes(em: Date = new Date()): Promise<RegrasVigen
   return {
     versaoId: linha.id,
     vigenteDesde: linha.vigenteDesde,
-    valores: RegrasSchema.parse(linha.valores),
+    valores: normalizarRegras(linha.valores),
   };
 }
 
@@ -65,8 +65,8 @@ export async function historicoRegras(): Promise<LinhaHistorico[]> {
 
   const linhas: LinhaHistorico[] = [];
   for (let i = versoes.length - 1; i >= 1; i--) {
-    const ant = RegrasSchema.parse(versoes[i - 1].valores);
-    const cur = RegrasSchema.parse(versoes[i].valores);
+    const ant = normalizarRegras(versoes[i - 1].valores);
+    const cur = normalizarRegras(versoes[i].valores);
     for (const d of diferencasRegras(ant, cur)) {
       linhas.push({ em: versoes[i].vigenteDesde, usuario: versoes[i].usuario ?? "Sistema", ...d });
     }

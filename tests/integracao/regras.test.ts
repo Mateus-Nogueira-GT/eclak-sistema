@@ -137,4 +137,19 @@ describe("parâmetros versionados", () => {
     const h = await comSessao(d.id, () => historicoRegras());
     expect(h.map((l) => l.campo)).toEqual(["Margem líquida alvo da viagem", "Margem de referência", "Markup de trem"]);
   });
+
+  it("versão gravada antes do câmbio é lida com os valores iniciais; salvar câmbio gera versão e histórico", async () => {
+    const d = await criarUsuarioTeste("diretor");
+    const antiga: Record<string, unknown> = { ...REGRAS_INICIAIS };
+    delete antiga.cambio;
+    await db.insert(regrasVersoes).values({ valores: antiga as typeof REGRAS_INICIAIS, vigenteDesde: new Date(0) });
+    const v = await comSessao(d.id, () => regrasVigentes());
+    expect(v.valores.cambio).toEqual(REGRAS_INICIAIS.cambio);
+    const novo = com({ cambio: { ...REGRAS_INICIAIS.cambio, EUR: { comercial: "6.0000", data: "2026-11-06" } } });
+    const r = await comSessao(d.id, () => salvarRegras(novo));
+    expect(r.ok).toBe(true);
+    expect(await db.select().from(regrasVersoes)).toHaveLength(2);
+    const h = await comSessao(d.id, () => historicoRegras());
+    expect(h.map((l) => [l.campo, l.antes, l.depois])).toEqual([["Câmbio EUR", "5,8930", "6,0000"]]);
+  });
 });

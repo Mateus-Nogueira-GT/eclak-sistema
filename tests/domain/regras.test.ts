@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CAMPOS, REGRAS_INICIAIS, RegrasSchema, diferencasRegras, valorNoCaminho } from "@/domain/regras";
+import { formatarCambio, lerCambio } from "@/domain/cambio";
+import { CAMPOS, REGRAS_INICIAIS, RegrasSchema, diferencasRegras, normalizarRegras, valorNoCaminho } from "@/domain/regras";
 
 describe("RegrasSchema", () => {
   it("aceita as regras iniciais, com dinheiro em centavos", () => {
@@ -42,6 +43,50 @@ describe("diferencasRegras", () => {
       { campo: "Margem de referência", antes: "19%", depois: "20%" },
       { campo: "Taxa de boleto (por boleto)", antes: "R$ 2,50", depois: "R$ 3,00" },
       { campo: "Taxa de cartão: crédito 2x a 6x", antes: "3,47%", depois: "3,5%" },
+    ]);
+  });
+});
+
+describe("câmbio nas regras", () => {
+  const comCambio = (usd: object) => ({ ...REGRAS_INICIAIS, cambio: { ...REGRAS_INICIAIS.cambio, USD: { ...REGRAS_INICIAIS.cambio.USD, ...usd } } });
+
+  it("lerCambio aceita vírgula ou ponto e devolve 4 casas", () => {
+    expect(lerCambio("5,4210")).toBe("5.4210");
+    expect(lerCambio("5.4210")).toBe("5.4210");
+    expect(lerCambio("5,42")).toBe("5.4200");
+    expect(lerCambio(" 9999,9999 ")).toBe("9999.9999");
+    for (const ruim of ["", "0", "0,0000", "-1", "5,42101", "10000", "abc", "5,4,2"]) {
+      expect(() => lerCambio(ruim), ruim).toThrow("Câmbio inválido");
+    }
+    expect(formatarCambio("5.4210")).toBe("5,4210");
+  });
+
+  it("schema recusa câmbio fora do formato canônico e data inválida", () => {
+    const ok = (p: object) => RegrasSchema.safeParse(comCambio(p)).success;
+    expect(ok({ comercial: "5.4210" })).toBe(true);
+    expect(ok({ comercial: "5,4210" })).toBe(false);
+    expect(ok({ comercial: "-5.4210" })).toBe(false);
+    expect(ok({ comercial: "0.0000" })).toBe(false);
+    expect(ok({ data: "2026-02-30" })).toBe(false);
+    expect(ok({ data: "06/11/2026" })).toBe(false);
+    expect(ok({ data: "2026-11-06" })).toBe(true);
+  });
+
+  it("versão antiga sem cambio é lida com os valores iniciais", () => {
+    const antiga: Record<string, unknown> = { ...REGRAS_INICIAIS };
+    delete antiga.cambio;
+    expect(normalizarRegras(antiga)).toEqual(REGRAS_INICIAIS);
+    expect(normalizarRegras(REGRAS_INICIAIS)).toEqual(REGRAS_INICIAIS);
+  });
+
+  it("histórico mostra 'Câmbio EUR: 5,8930 → 6,0000' e a data", () => {
+    const depois = {
+      ...REGRAS_INICIAIS,
+      cambio: { ...REGRAS_INICIAIS.cambio, EUR: { comercial: "6.0000", data: "2026-11-20" } },
+    };
+    expect(diferencasRegras(REGRAS_INICIAIS, depois)).toEqual([
+      { campo: "Câmbio EUR", antes: "5,8930", depois: "6,0000" },
+      { campo: "Câmbio EUR (data)", antes: "06/11/2026", depois: "20/11/2026" },
     ]);
   });
 });
