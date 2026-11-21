@@ -18,6 +18,7 @@ import type { Regras } from "./regras";
 export const MSG_SEM_ITEM_COTADO = "Inclua ao menos um item cotado";
 export const msgSemCotacao = (servico: string) => `${servico} está sem cotação`;
 export const MSG_JA_DECIDIDO = "Este pedido já foi decidido";
+export const MOTIVO_SUBSTITUIDA = "Substituída por ajuste do Diretor";
 export const MSG_MOTIVO = "Escreva o motivo da devolução";
 export const MSG_PROPOSTA_INDISPONIVEL = "Proposta disponível só depois da aprovação do Diretor";
 export const MSG_NAO_CALCULA = "Não foi possível calcular o preço com os Parâmetros vigentes";
@@ -124,7 +125,7 @@ function snapCotacao(c: CotacaoLida): CotacaoSnapshot {
   };
 }
 
-function calcDe(i: Pick<ItemSnapshot, "id" | "tipo" | "servico" | "diarias" | "ajuste">, c: CotacaoSnapshot): ItemCalc {
+export function calcDe(i: Pick<ItemSnapshot, "id" | "tipo" | "servico" | "diarias" | "ajuste">, c: CotacaoSnapshot): ItemCalc {
   return {
     id: i.id,
     tipo: i.tipo,
@@ -172,6 +173,24 @@ export function ajustarItem(i: ItemSnapshot, ajuste: { valorFornecedor?: string;
   const item: ItemSnapshot = Object.keys(novo).length > 0 ? { ...i, ajuste: novo } : { ...i };
   const todas = i.cotacoes?.length ? i.cotacoes : [i.precificada, ...(i.escolhida.id === i.precificada.id ? [] : [i.escolhida])];
   return { ...item, precificada: piorCotacao(item, todas) };
+}
+
+/** Ajuste do Diretor num item: valor do fornecedor (centavos como texto) e/ou comissão ("10.500"). */
+export type AjusteItem = { itemId: string; valorFornecedor?: bigint; comissaoPct?: string };
+
+/** Copia do snapshot com os ajustes por item; `null` se algum item não está no snapshot (ou é Aéreo). */
+export function ajustarSnapshot(s: Snapshot, ajustes: AjusteItem[]): Snapshot | null {
+  const itens: ItemSnapshot[] = [...s.itens];
+  for (const a of ajustes) {
+    const k = itens.findIndex((x) => x.id === a.itemId.toLowerCase());
+    if (k === -1 || itens[k].tipo === "Aéreo") return null;
+    const ajuste: { valorFornecedor?: string; comissaoPct?: string } = {};
+    if (a.valorFornecedor !== undefined) ajuste.valorFornecedor = a.valorFornecedor.toString();
+    if (a.comissaoPct !== undefined) ajuste.comissaoPct = a.comissaoPct;
+    // Reescolhe o pior custo com os valores ajustados.
+    itens[k] = ajustarItem(itens[k], ajuste);
+  }
+  return { ...s, itens };
 }
 
 /** Itens para `precificar` (pior custo, Aéreo fora) e os custos pelo pior e pelas escolhidas. */

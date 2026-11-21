@@ -587,6 +587,8 @@ export type Pedido = Omit<PedidoLista, "forma" | "margemFinalPct"> & {
   margens: Record<Rateio, MargemAprovacao>;
   /** Margem de referência das regras da versão (só indica). */
   referenciaPct: string;
+  /** Regras vigentes quando a versão foi enviada (para a simulação do Diretor no navegador). */
+  regras: Regras;
 };
 
 /** Pedido de aprovação com o snapshot e as margens nos três rateios. Só o Diretor. `null` se não existe. */
@@ -647,6 +649,7 @@ export async function obterPedido(versaoId: string): Promise<Pedido | null> {
     custoEscolhidas,
     margens,
     referenciaPct: regras.margemReferenciaPct,
+    regras,
   };
 }
 

@@ -18,6 +18,7 @@ const areas: { titulo: string; itens: Item[] }[] = [
       { href: "/fornecedores", label: "Fornecedores" },
     ],
   },
+  { titulo: "Gestão", itens: [{ href: "/aprovacoes", label: "Aprovações" }] },
   {
     titulo: "Administração",
     itens: [

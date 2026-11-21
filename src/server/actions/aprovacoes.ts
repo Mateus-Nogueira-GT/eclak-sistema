@@ -2,20 +2,19 @@
 
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import type { z } from "zod";
 import {
-  ajustarItem,
+  ajustarSnapshot,
   ajusteSchema,
   envioSchema,
   itensDoSnapshot,
   motivoSchema,
+  MOTIVO_SUBSTITUIDA,
   MSG_JA_DECIDIDO,
   MSG_NAO_CALCULA,
   precoCalculado,
   custosDoSnapshot,
   resultadoDaVersao,
   type ItemLido,
-  type ItemSnapshot,
   type ResultadoVersao,
   type Snapshot,
 } from "@/domain/aprovacoes";
@@ -63,7 +62,6 @@ const AGUARDANDO: Falha = {
   erro: "Orçamento aguardando aprovação. Peça ao Diretor para devolver antes de alterar.",
 };
 
-type AjustesItem = NonNullable<z.infer<ReturnType<typeof ajusteSchema>>["itens"]>;
 type ViagemLinha = typeof viagens.$inferSelect;
 type VersaoLinha = typeof versoesPrecificacao.$inferSelect;
 
@@ -357,24 +355,9 @@ export async function devolver(versaoId: string, comentario: string): Promise<{ 
   });
 }
 
-/** Copia do snapshot com os ajustes por item; `null` se algum item não está no snapshot (ou é Aéreo). */
-function ajustarSnapshot(s: Snapshot, ajustes: AjustesItem): Snapshot | null {
-  const itens: ItemSnapshot[] = [...s.itens];
-  for (const a of ajustes) {
-    const k = itens.findIndex((x) => x.id === a.itemId.toLowerCase());
-    if (k === -1 || itens[k].tipo === "Aéreo") return null;
-    const ajuste: { valorFornecedor?: string; comissaoPct?: string } = {};
-    if (a.valorFornecedor !== undefined) ajuste.valorFornecedor = a.valorFornecedor.toString();
-    if (a.comissaoPct !== undefined) ajuste.comissaoPct = a.comissaoPct;
-    // Reescolhe o pior custo com os valores ajustados.
-    itens[k] = ajustarItem(itens[k], ajuste);
-  }
-  return { ...s, itens };
-}
-
 /**
  * Aprova com ajuste: cria a versão seguinte `aprovada_com_ajuste` (snapshot copiado com os ajustes, mesmas
- * regras e dias da versão ajustada), marca a ajustada `devolvida` ("Substituída por ajuste do Diretor") e
+ * regras e dias da versão ajustada), marca a ajustada `devolvida` (MOTIVO_SUBSTITUIDA) e
  * aprova a viagem com a nova. Itens e cotações não mudam. Só o Diretor.
  */
 export async function aprovarComAjuste(
@@ -428,7 +411,7 @@ export async function aprovarComAjuste(
           acao: "criar",
           depois: semId(nova),
         });
-        await decidirVersao(tx, usuario.id, ver, "devolvida", "Substituída por ajuste do Diretor", agora);
+        await decidirVersao(tx, usuario.id, ver, "devolvida", MOTIVO_SUBSTITUIDA, agora);
         await mudarStatusViagem(tx, usuario.id, v, { status: "aprovado", versaoAprovadaId: nova.id }, agora);
         return { id: nova.id, numero: nova.numero };
       },
