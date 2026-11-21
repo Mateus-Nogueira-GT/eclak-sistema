@@ -378,6 +378,9 @@ describe("precificação", () => {
       expect(s).not.toContain('"margem');
       expect(s).not.toContain('"custoLiquido"');
       expect(s).not.toContain('"custo');
+      for (const proibida of ["porForma", "precoPorForma", "somaVendas", "compensacao"]) expect(k.has(proibida), proibida).toBe(false);
+      expect(ficha.referencia).toMatchObject({ forma: "Crédito 2x a 6x (referência)" });
+      expect(BigInt(ficha.referencia!.precoCliente)).toBeGreaterThan(0n);
       // operacional: valor do fornecedor, comissão e desconto aparecem
       expect(ficha.itens.find((x) => x.id === hotel)!.cotacoes.map((c) => [c.valorBrl, c.comissaoPct, c.descontoAVistaPct, c.escolhida])).toEqual([
         [310600n, "4.000", "4.000", true],
@@ -400,6 +403,7 @@ describe("precificação", () => {
     expect(e.precificacao.itens.map((x) => x.id).sort()).toEqual([hotel, passeio].sort());
     expect(e.precificacao.porForma).toHaveLength(5);
     expect(json(ficha)).toContain('"custoLiquido"');
+    expect(ficha.referencia!.precoCliente).toBe(e.precificacao.porForma[2].precoCliente.toString());
   });
 
   it("sugestão de custo de referência: média de outras viagens com mesmo tipo, serviço e cidade (sem acento/caixa)", async () => {

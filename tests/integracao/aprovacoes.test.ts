@@ -483,7 +483,9 @@ describe("pedidos e versões", () => {
     ]);
     expect(doConsultor.versoes[1]).toMatchObject({ enviadoPor: "Teste consultor", decididoPor: "Teste diretor" });
     expect(doConsultor.versoes.every((x) => !("preco" in x))).toBe(true);
-    const s = json(doConsultor);
+    const { referencia, ...semReferencia } = doConsultor;
+    expect(referencia).toMatchObject({ forma: "Crédito 2x a 6x (referência)" });
+    const s = json(semReferencia);
     expect(s).not.toContain('"preco');
     expect(s).not.toContain('"custo');
     expect(s).not.toContain('"margem');

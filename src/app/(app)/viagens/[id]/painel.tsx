@@ -7,7 +7,6 @@ import { Bilhete } from "@/components/bilhete";
 import { StatusOrcamentoBadge } from "@/components/status-orcamento";
 import { SoGestao, Semaforo } from "@/components/kit";
 import { Botao, Card, Eyebrow, Tabs } from "@/components/ui";
-import { arredondar } from "@/domain/decimal";
 import { formatarReais } from "@/domain/dinheiro";
 import { FORMA_REFERENCIA } from "@/domain/precificacao";
 import type { StatusOrcamento } from "@/domain/viagens";
@@ -21,7 +20,6 @@ import { estrategicoOk, Vendas } from "./vendas";
 import { Versoes } from "./versoes";
 
 export type Extras = { semCompensacaoPct: string | null; diasCobertos: string | null; limiteDiaria: bigint };
-export type PropostaResumo = { total: bigint; porPessoa: bigint };
 type Aba = "vendas" | "comparacao" | "simulador" | "avista" | "produto";
 
 const PROXIMO_PASSO: Record<StatusOrcamento, string> = {
@@ -37,14 +35,12 @@ export function Painel({
   removidos,
   fornecedores,
   extras,
-  proposta,
 }: {
   ficha: FichaPrecificacao;
   pessoas: PessoaOpcao[];
   removidos: { id: string; nome: string }[];
   fornecedores: FornecedorOpcao[];
   extras: Extras | null;
-  proposta: PropostaResumo | null;
 }) {
   const est = estrategicoOk(ficha);
   const erroEst = ficha.estrategico && "erro" in ficha.estrategico ? ficha.estrategico.erro : null;
@@ -57,7 +53,6 @@ export function Painel({
   const editavel = !aguardando;
   const idsRemovidos = new Set(removidos.map((r) => r.id));
   const temCotados = ficha.itens.some((i) => !i.automatico && i.cotacoes.length > 0);
-  const n = BigInt(Math.max(ficha.passageiros.length, 1));
   const ref = est?.precificacao.porForma[FORMA_REFERENCIA];
 
   const abas: { value: Aba; label: string }[] = [
@@ -134,18 +129,11 @@ export function Painel({
       <div className={`mb-6 grid gap-5 ${est ? "grid-cols-1 lg:grid-cols-[1.4fr_1fr_1fr_1fr]" : "grid-cols-1 lg:grid-cols-[1.3fr_1fr]"}`}>
         <Card className="p-6">
           <Eyebrow>Valor de referência para o cliente</Eyebrow>
-          {est && ref && temCotados ? (
+          {ficha.referencia ? (
             <>
-              <p className="num mt-1.5 text-[32px] font-bold tracking-tight text-verde">{formatarReais(ref.precoCliente)}</p>
+              <p className="num mt-1.5 text-[32px] font-bold tracking-tight text-verde">{formatarReais(BigInt(ficha.referencia.precoCliente))}</p>
               <p className="mt-1 text-[13px] leading-relaxed text-cinza">
-                {formatarReais(arredondar(ref.precoCliente, n))} por pessoa · {formatarReais(ref.precoCliente)} para {doisDigitos(Number(n))} {n === 1n ? "pessoa" : "pessoas"}, em 2x a 6x. Orçamento sem caráter de reserva; os valores podem variar conforme as datas. Não inclui aéreo.
-              </p>
-            </>
-          ) : proposta ? (
-            <>
-              <p className="num mt-1.5 text-[32px] font-bold tracking-tight text-verde">{formatarReais(proposta.total)}</p>
-              <p className="mt-1 text-[13px] leading-relaxed text-cinza">
-                {formatarReais(proposta.porPessoa)} por pessoa · {formatarReais(proposta.total)} para {doisDigitos(Number(n))} {n === 1n ? "pessoa" : "pessoas"}, na última versão aprovada. Orçamento sem caráter de reserva; os valores podem variar conforme as datas. Não inclui aéreo.
+                {formatarReais(BigInt(ficha.referencia.porPessoa))} por pessoa · {formatarReais(BigInt(ficha.referencia.precoCliente))} para {doisDigitos(ficha.passageiros.length)} {ficha.passageiros.length === 1 ? "pessoa" : "pessoas"}, em 2x a 6x. Orçamento sem caráter de reserva; os valores podem variar conforme as datas. Não inclui aéreo.
               </p>
             </>
           ) : (
@@ -154,9 +142,7 @@ export function Painel({
               <p className="mt-1 text-[13px] leading-relaxed text-cinza">
                 {erroEst
                   ? "Não foi possível calcular com os Parâmetros vigentes. Fale com o Diretor."
-                  : est
-                    ? "Cote ao menos um item para ver o valor. Orçamento sem caráter de reserva; os valores podem variar conforme as datas. Não inclui aéreo."
-                    : "O valor aparece depois da aprovação do Diretor. Orçamento sem caráter de reserva; os valores podem variar conforme as datas. Não inclui aéreo."}
+                  : "Cote ao menos um item para ver o valor. Orçamento sem caráter de reserva; os valores podem variar conforme as datas. Não inclui aéreo."}
               </p>
             </>
           )}

@@ -123,6 +123,11 @@ export type FichaPrecificacao = {
    * (ex.: taxas e margem somam 100% ou mais).
    */
   estrategico?: CamadaEstrategica | { erro: string };
+  /**
+   * Valor de referência para o cliente (visível a todos os perfis): preço do pacote + taxa de serviço, no pior custo
+   * e na forma de referência. Centavos como texto. `null` sem item cotado ou se o cálculo não for possível.
+   */
+  referencia: { precoCliente: string; porPessoa: string; forma: string } | null;
 };
 
 export type VersaoFicha = {
@@ -424,8 +429,23 @@ export async function obterPrecificacao(viagemId: string): Promise<FichaPrecific
     aereo: todos.filter((x) => x.item.tipo === "Aéreo").map(ficha),
     itensSemCotacao: terrestre.filter((x) => x.cotacoes.length === 0).map((x) => ({ id: x.item.id, servico: x.item.servico })),
     versoes: [],
+    referencia: null,
   };
   const estrategico = veCamadaEstrategica(usuario.perfil);
+  // A conta usa a camada estratégica, mas só o preço ao cliente sai dela.
+  if (todos.some((x) => x.item.tipo !== "Aéreo" && x.cotacoes.length > 0)) {
+    try {
+      const preco = camadaEstrategica(todos, dias, regras).precificacao.porForma[FORMA_REFERENCIA];
+      const n = BigInt(Math.max(resposta.passageiros.length, 1));
+      resposta.referencia = {
+        precoCliente: preco.precoCliente.toString(),
+        porPessoa: arredondar(preco.precoCliente, n).toString(),
+        forma: preco.rotulo,
+      };
+    } catch (e) {
+      console.error("Erro ao calcular o valor de referência", { viagemId: v.id, erro: (e as Error)?.message });
+    }
+  }
   resposta.versoes = await versoesDe(v.id, estrategico);
   if (estrategico) {
     // Parâmetros que não permitem calcular não derrubam a ficha.

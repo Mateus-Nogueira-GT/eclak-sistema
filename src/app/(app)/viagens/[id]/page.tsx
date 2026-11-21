@@ -4,8 +4,8 @@ import { exigirPerfil } from "@/server/auth";
 import { obterCliente } from "@/server/queries/clientes";
 import { listarFornecedores } from "@/server/queries/fornecedores";
 import { regrasVigentes } from "@/server/queries/regras";
-import { obterPrecificacao, obterProposta } from "@/server/queries/viagens";
-import { Painel, type Extras, type PropostaResumo } from "./painel";
+import { obterPrecificacao } from "@/server/queries/viagens";
+import { Painel, type Extras } from "./painel";
 
 export default async function Pagina({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -40,13 +40,6 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
     extras = e;
   }
 
-  // Quem não vê a camada estratégica vê o valor da última versão aprovada, o mesmo da proposta.
-  let proposta: PropostaResumo | null = null;
-  if (!ficha.estrategico && ficha.versaoAprovadaId) {
-    const r = await obterProposta(ficha.id);
-    if (r.ok) proposta = { total: r.proposta.total, porPessoa: r.proposta.porPessoa };
-  }
-
   return (
     <div className="mx-auto max-w-[1240px]">
       <Painel
@@ -55,7 +48,6 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
         removidos={removidos}
         fornecedores={fornecedores.map((f) => ({ id: f.id, nome: f.nome, comissaoPct: f.comissaoPct, tarifaFixa: f.tarifaFixa }))}
         extras={extras}
-        proposta={proposta}
       />
     </div>
   );
