@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Armchair, BedDouble, Cake, Mail, Pencil, Phone, ShieldAlert, StickyNote, UtensilsCrossed } from "lucide-react";
+import { ArrowLeft, Armchair, BedDouble, Cake, Mail, Pencil, Phone, Plus, ShieldAlert, StickyNote, UtensilsCrossed } from "lucide-react";
 import { Badge, Card, CardHeader, Eyebrow, Td, Th } from "@/components/ui";
 import { NOMES_TIPO_CLIENTE, hojeEmCuiaba, idade } from "@/domain/clientes";
 import { exigirPerfil } from "@/server/auth";
@@ -45,6 +45,14 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
           >
             <Pencil size={15} /> Editar
           </Link>
+          {usuario.perfil !== "fin_operacional" && usuario.perfil !== "fin_estrategico" && (
+            <Link
+              href={`/viagens/novo?cliente=${c.id}`}
+              className="inline-flex items-center gap-2 rounded-[5px] bg-verde px-3.5 py-2 text-[14px] font-semibold text-white hover:bg-[#254B5C]"
+            >
+              <Plus size={15} /> Novo orçamento
+            </Link>
+          )}
           {usuario.perfil === "diretor" && <ExcluirCliente id={c.id} />}
         </div>
       </div>
