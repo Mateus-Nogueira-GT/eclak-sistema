@@ -527,3 +527,46 @@ export function vencimentoPadraoFornecedor(inicio: string, aceiteEm: string): st
   const venc = iso(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
   return venc < aceiteEm ? aceiteEm : venc;
 }
+
+// ---------------------------------------------------------------------------
+// Previsto da conta atualizado: linhas de pagamento em aberto
+// ---------------------------------------------------------------------------
+
+/** `alvo` repartido na proporção de `pesos` (truncado ao centavo); a última absorve o resto (nunca negativo). Pesos zerados: tudo na última. */
+function repartir(pesos: bigint[], alvo: bigint): bigint[] {
+  const soma = pesos.reduce((a, p) => a + p, 0n);
+  let acumulado = 0n;
+  return pesos.map((p, i) => {
+    const v = i === pesos.length - 1 ? alvo - acumulado : soma === 0n ? 0n : (alvo * p) / soma;
+    acumulado += v;
+    return v;
+  });
+}
+
+export type LinhaReprevisao = { valorOriginal: bigint; valorBrlPrevisto: bigint; pago: boolean };
+
+/**
+ * Novos valores das linhas de pagamento quando o previsto da conta muda de `antes` para `depois` (na moeda e em
+ * reais). A diferença entra nas linhas em aberto na mesma razão linhas ÷ previsto (o desconto à vista se mantém),
+ * repartida na proporção de cada linha em aberto (truncado; a última absorve; nunca negativo). Linhas pagas não
+ * mudam. Mesma ordem e tamanho de `linhas`.
+ */
+export function reprevisarLinhas(
+  linhas: LinhaReprevisao[],
+  antes: { original: bigint; brl: bigint },
+  depois: { original: bigint; brl: bigint },
+): { valorOriginal: bigint; valorBrlPrevisto: bigint }[] {
+  const abertas = linhas.map((l, i) => [l, i] as const).filter(([l]) => !l.pago);
+  const novo = (campo: "valorOriginal" | "valorBrlPrevisto", a: bigint, d: bigint): bigint[] => {
+    const total = linhas.reduce((s, l) => s + l[campo], 0n);
+    const delta = a === 0n ? d - a : arredondar((d - a) * total, a);
+    const emAberto = abertas.reduce((s, [l]) => s + l[campo], 0n);
+    const alvo = emAberto + delta < 0n ? 0n : emAberto + delta;
+    return repartir(abertas.map(([l]) => l[campo]), alvo);
+  };
+  const originais = novo("valorOriginal", antes.original, depois.original);
+  const reais = novo("valorBrlPrevisto", antes.brl, depois.brl);
+  const saida = linhas.map((l) => ({ valorOriginal: l.valorOriginal, valorBrlPrevisto: l.valorBrlPrevisto }));
+  abertas.forEach(([, i], k) => (saida[i] = { valorOriginal: originais[k], valorBrlPrevisto: reais[k] }));
+  return saida;
+}

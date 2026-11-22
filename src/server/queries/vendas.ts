@@ -1,12 +1,49 @@
 import "server-only";
-import { and, eq, gte, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { rotuloForma } from "@/domain/aprovacoes";
+import { rotuloForma, type ResultadoVersao, type Snapshot } from "@/domain/aprovacoes";
+import type { Moeda } from "@/domain/cambio";
+import { hojeEmCuiaba } from "@/domain/clientes";
+import { veCamadaEstrategica } from "@/domain/perfis";
 import type { FormaPagamento } from "@/domain/precificacao";
+import {
+  formatarDocumento,
+  margemReal,
+  planejadaDaVersao,
+  ponteDaMargem,
+  ROTULO_MEIO,
+  ROTULO_STATUS_VIAGEM,
+  statusDaViagem,
+  taxaRoteiroDoSnapshot,
+  type ComissaoTipo,
+  type FormaPagamentoFornecedorTipo,
+  type LinhaPonte,
+  type MargemPlanejada,
+  type MargemReal,
+  type MeioRecebimento,
+  type StatusComissao,
+  type StatusConta,
+  type StatusPagamento,
+  type StatusParcela,
+  type StatusViagem,
+} from "@/domain/venda";
 import { formatarCodigoViagem } from "@/domain/viagens";
+import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { clientes, usuarios, versoesPrecificacao, viagens } from "@/server/db/schema";
+import {
+  clientes,
+  comissoes,
+  contasPagar,
+  fornecedores,
+  itensViagem,
+  pagamentosFornecedor,
+  parcelasReceber,
+  usuarios,
+  vendas,
+  versoesPrecificacao,
+  viagens,
+} from "@/server/db/schema";
 import { regrasDaVersao } from "@/server/queries/regras";
 
 /** Estado da proposta no Fechamento da venda. */
@@ -115,4 +152,376 @@ export async function listarPropostas(): Promise<PropostaLista[]> {
   );
   const t = (x: PropostaLista) => (x.vendidaEm ?? x.aprovadoEm)?.getTime() ?? 0;
   return lista.sort((a, b) => t(b) - t(a));
+}
+
+// ---------------------------------------------------------------------------
+// Viagem vendida (Entradas, Saídas, Conciliação)
+// ---------------------------------------------------------------------------
+
+export type ParcelaVendida = {
+  id: string;
+  numero: number;
+  totalParcelas: number;
+  vencimento: string;
+  valor: bigint;
+  meio: MeioRecebimento;
+  rotuloMeio: string;
+  status: StatusParcela;
+  recebidaEm: string | null;
+  valorRecebido: bigint | null;
+  observacao: string | null;
+  /** Só na camada estratégica (taxas financeiras). */
+  taxaPrevista?: bigint;
+  taxaEfetiva?: bigint | null;
+};
+
+export type PagamentoVendido = {
+  id: string;
+  numero: number;
+  vencimento: string;
+  valorOriginal: bigint;
+  valorBrlPrevisto: bigint;
+  status: StatusPagamento;
+  pagoEm: string | null;
+  valorOriginalPago: bigint | null;
+  cambioEfetivo: string | null;
+  valorBrlPago: bigint | null;
+};
+
+export type ComissaoVendida = {
+  id: string;
+  contaId: string;
+  /** Fornecedor ou, sem ele, o serviço da conta. */
+  fornecedor: string;
+  aereo: boolean;
+  baseBrl: bigint;
+  pct: string;
+  valorPrevisto: bigint;
+  previstaPara: string;
+  status: StatusComissao;
+  recebidaEm: string | null;
+  valorRecebido: bigint | null;
+  motivo: string | null;
+  /** Ainda `prevista`. */
+  pendente: boolean;
+};
+
+export type ContaVendida = {
+  id: string;
+  descricao: string;
+  fornecedorId: string | null;
+  fornecedor: string | null;
+  aereo: boolean;
+  moeda: Moeda;
+  valorOriginal: bigint;
+  cambioAplicado: string | null;
+  previstoVendaBrl: bigint;
+  previstoBrl: bigint;
+  comissaoPct: string;
+  comissaoTipo: ComissaoTipo;
+  descontoAVistaPct: string | null;
+  forma: FormaPagamentoFornecedorTipo | null;
+  status: StatusConta;
+  contestacao: string | null;
+  contestadaEm: Date | null;
+  motivoPrevisto: string | null;
+  /** Previsto atual diferente do previsto na venda. */
+  divergente: boolean;
+  contestada: boolean;
+  pagamentos: PagamentoVendido[];
+  comissao: ComissaoVendida | null;
+};
+
+export type ErroCalculo = { erro: string };
+export const MSG_NAO_CALCULA_MARGEM = "Não foi possível calcular";
+
+export type ViagemVendida = {
+  id: string;
+  codigo: string;
+  cliente: string;
+  destino: string;
+  inicio: string;
+  fim: string;
+  passageiros: string[];
+  consultor: string;
+  status: StatusViagem;
+  rotuloStatus: string;
+  vendidaEm: Date | null;
+  conciliadaEm: Date | null;
+  venda: {
+    id: string;
+    aceiteEm: string;
+    /** "Boleto em 2x". */
+    forma: string;
+    parcelas: number;
+    primeiroVencimento: string;
+    faturaNome: string;
+    /** Formatado (CPF ou CNPJ). */
+    faturaDocumento: string;
+    comprovante: string | null;
+    observacao: string | null;
+  };
+  /** Centavos de real. */
+  resumo: { valorVendido: bigint; recebido: bigint; aReceber: bigint; pagoFornecedores: bigint; aPagar: bigint };
+  parcelas: ParcelaVendida[];
+  contas: ContaVendida[];
+  comissoes: ComissaoVendida[];
+  /** Contas divergentes ou contestadas + comissões pendentes. */
+  divergencias: number;
+  /** Só para quem vê a camada estratégica; montada só para esses perfis. */
+  estrategico?: {
+    planejada: MargemPlanejada;
+    real: MargemReal | ErroCalculo;
+    ponte: LinhaPonte[] | ErroCalculo;
+  };
+};
+
+/**
+ * Viagem vendida: cabeçalho, status derivado (hoje em Cuiabá), resumo (vendido, recebido, a receber, pago a
+ * fornecedores, a pagar), parcelas, contas com pagamentos e comissão, comissões e divergências. Qualquer perfil
+ * logado; margem planejada × real e ponte só na camada estratégica. `null` se não existe ou não está vendida.
+ */
+export async function obterViagemVendida(viagemId: string): Promise<ViagemVendida | null> {
+  const usuario = await exigirPerfil();
+  if (!ehUuid(viagemId)) return null;
+  const [l] = await db
+    .select({
+      v: viagens,
+      venda: vendas,
+      versao: versoesPrecificacao,
+      clienteCodigo: clientes.codigo,
+      cliente: clientes.grupo,
+      consultor: usuarios.nome,
+    })
+    .from(viagens)
+    .innerJoin(vendas, eq(vendas.viagemId, viagens.id))
+    .innerJoin(versoesPrecificacao, eq(versoesPrecificacao.id, vendas.versaoId))
+    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
+    .innerJoin(usuarios, eq(usuarios.id, viagens.consultorId))
+    .where(and(eq(viagens.id, viagemId), isNull(viagens.excluidoEm), eq(viagens.status, "vendida")))
+    .limit(1);
+  if (!l) return null;
+  const { v, venda, versao } = l;
+  const estrategico = veCamadaEstrategica(usuario.perfil);
+  const snapshot = versao.snapshot as Snapshot;
+
+  const ps = await db.select().from(parcelasReceber).where(eq(parcelasReceber.viagemId, v.id)).orderBy(asc(parcelasReceber.numero));
+  const cs = await db
+    .select({ c: contasPagar, fornecedor: fornecedores.nome })
+    .from(contasPagar)
+    .innerJoin(itensViagem, eq(itensViagem.id, contasPagar.itemId))
+    .leftJoin(fornecedores, eq(fornecedores.id, contasPagar.fornecedorId))
+    .where(and(eq(contasPagar.viagemId, v.id), isNull(contasPagar.excluidoEm)))
+    .orderBy(asc(itensViagem.ordem), asc(contasPagar.id));
+  const idsContas = cs.map((x) => x.c.id);
+  const pags =
+    idsContas.length === 0
+      ? []
+      : await db
+          .select()
+          .from(pagamentosFornecedor)
+          .where(inArray(pagamentosFornecedor.contaId, idsContas))
+          .orderBy(asc(pagamentosFornecedor.numero));
+  const coms =
+    idsContas.length === 0
+      ? []
+      : await db
+          .select()
+          .from(comissoes)
+          .where(and(eq(comissoes.viagemId, v.id), inArray(comissoes.contaId, idsContas)))
+          .orderBy(asc(comissoes.previstaPara));
+
+  const parcelas = ps.map((p): ParcelaVendida => {
+    const linha: ParcelaVendida = {
+      id: p.id,
+      numero: p.numero,
+      totalParcelas: p.totalParcelas,
+      vencimento: p.vencimento,
+      valor: p.valor,
+      meio: p.meio,
+      rotuloMeio: ROTULO_MEIO[p.meio],
+      status: p.status,
+      recebidaEm: p.recebidaEm,
+      valorRecebido: p.valorRecebido,
+      observacao: p.observacao,
+    };
+    if (estrategico) {
+      linha.taxaPrevista = p.taxaPrevista;
+      linha.taxaEfetiva = p.taxaEfetiva;
+    }
+    return linha;
+  });
+
+  const contaPorId = new Map(cs.map((x) => [x.c.id, x]));
+  const comissoesVendidas = coms.map((c): ComissaoVendida => {
+    const conta = contaPorId.get(c.contaId)!;
+    return {
+      id: c.id,
+      contaId: c.contaId,
+      fornecedor: conta.fornecedor ?? conta.c.descricao,
+      aereo: conta.c.aereo,
+      baseBrl: c.baseBrl,
+      pct: c.pct,
+      valorPrevisto: c.valorPrevisto,
+      previstaPara: c.previstaPara,
+      status: c.status,
+      recebidaEm: c.recebidaEm,
+      valorRecebido: c.valorRecebido,
+      motivo: c.motivo,
+      pendente: c.status === "prevista",
+    };
+  });
+
+  const contas = cs.map(({ c, fornecedor }): ContaVendida => ({
+    id: c.id,
+    descricao: c.descricao,
+    fornecedorId: c.fornecedorId,
+    fornecedor,
+    aereo: c.aereo,
+    moeda: c.moeda,
+    valorOriginal: c.valorOriginal,
+    cambioAplicado: c.cambioAplicado,
+    previstoVendaBrl: c.previstoVendaBrl,
+    previstoBrl: c.previstoBrl,
+    comissaoPct: c.comissaoPct,
+    comissaoTipo: c.comissaoTipo,
+    descontoAVistaPct: c.descontoAVistaPct,
+    forma: c.forma,
+    status: c.status,
+    contestacao: c.contestacao,
+    contestadaEm: c.contestadaEm,
+    motivoPrevisto: c.motivoPrevisto,
+    divergente: c.previstoBrl !== c.previstoVendaBrl,
+    contestada: c.contestacao !== null,
+    pagamentos: pags
+      .filter((p) => p.contaId === c.id)
+      .map((p) => ({
+        id: p.id,
+        numero: p.numero,
+        vencimento: p.vencimento,
+        valorOriginal: p.valorOriginal,
+        valorBrlPrevisto: p.valorBrlPrevisto,
+        status: p.status,
+        pagoEm: p.pagoEm,
+        valorOriginalPago: p.valorOriginalPago,
+        cambioEfetivo: p.cambioEfetivo,
+        valorBrlPago: p.valorBrlPago,
+      })),
+    comissao: comissoesVendidas.find((x) => x.contaId === c.id) ?? null,
+  }));
+
+  const ativas = contas.filter((c) => c.status !== "cancelada");
+  const soma = (xs: bigint[]) => xs.reduce((a, x) => a + x, 0n);
+  const linhasAtivas = ativas.flatMap((c) => c.pagamentos);
+  const resumo = {
+    valorVendido: venda.total,
+    recebido: soma(ps.filter((p) => p.status === "recebida").map((p) => p.valorRecebido ?? 0n)),
+    aReceber: soma(ps.filter((p) => p.status === "a_receber").map((p) => p.valor)),
+    pagoFornecedores: soma(linhasAtivas.filter((p) => p.status === "pago").map((p) => p.valorBrlPago ?? 0n)),
+    aPagar: soma(linhasAtivas.filter((p) => p.status !== "pago").map((p) => p.valorBrlPrevisto)),
+  };
+
+  const status = statusDaViagem({
+    status: v.status,
+    inicio: v.inicio,
+    fim: v.fim,
+    conciliadaEm: v.conciliadaEm ? v.conciliadaEm.toISOString() : null,
+    hoje: hojeEmCuiaba(),
+  });
+
+  const resposta: ViagemVendida = {
+    id: v.id,
+    codigo: formatarCodigoViagem(l.clienteCodigo, v.seq),
+    cliente: l.cliente,
+    destino: v.destino,
+    inicio: v.inicio,
+    fim: v.fim,
+    passageiros: snapshot.passageiros.map((p) => p.nome),
+    consultor: l.consultor,
+    status,
+    rotuloStatus: ROTULO_STATUS_VIAGEM[status],
+    vendidaEm: v.vendidaEm,
+    conciliadaEm: v.conciliadaEm,
+    venda: {
+      id: venda.id,
+      aceiteEm: venda.aceiteEm,
+      forma: rotuloForma(venda.forma as FormaPagamento),
+      parcelas: venda.parcelas,
+      primeiroVencimento: venda.primeiroVencimento,
+      faturaNome: venda.faturaNome,
+      faturaDocumento: formatarDocumento(venda.faturaDocumento),
+      comprovante: venda.comprovante,
+      observacao: venda.observacao,
+    },
+    resumo,
+    parcelas,
+    contas,
+    comissoes: comissoesVendidas,
+    divergencias: contas.filter((c) => c.divergente || c.contestada).length + comissoesVendidas.filter((c) => c.pendente).length,
+  };
+
+  if (estrategico) {
+    const res = versao.resultado as ResultadoVersao;
+    const planejada = planejadaDaVersao(res);
+    const erro: ErroCalculo = { erro: MSG_NAO_CALCULA_MARGEM };
+    let real: MargemReal | ErroCalculo = erro;
+    let ponte: LinhaPonte[] | ErroCalculo = erro;
+    try {
+      const impostoPct = (await regrasDaVersao(versao.regrasVersaoId)).impostoSobreMargemPct;
+      const taxaRoteiro = taxaRoteiroDoSnapshot(snapshot);
+      /** Em reais: pago nas linhas pagas + previsto nas em aberto; nenhuma paga = previsto atual da conta. */
+      const pagoBrl = (c: ContaVendida) =>
+        c.pagamentos.some((p) => p.status === "pago")
+          ? soma(c.pagamentos.map((p) => (p.status === "pago" ? (p.valorBrlPago ?? 0n) : p.valorBrlPrevisto)))
+          : null;
+      const contasMargem = ativas.map((c) => ({
+        aereo: c.aereo,
+        previstoBrl: c.previstoBrl,
+        pagoBrl: pagoBrl(c),
+        rotulo: c.fornecedor ?? c.descricao,
+        moeda: c.moeda,
+        previstoVendaBrl: c.previstoVendaBrl,
+      }));
+      const parcelasMargem = ps
+        .filter((p) => p.status !== "cancelada")
+        .map((p) => ({ valor: p.valor, recebida: p.status === "recebida", taxaEfetiva: p.taxaEfetiva, taxaPrevista: p.taxaPrevista }));
+      const comissoesAtivas = comissoesVendidas.filter((c) => ativas.some((k) => k.id === c.contaId));
+      try {
+        real = margemReal({
+          preco: versao.preco,
+          contas: contasMargem,
+          comissoesRecebidas: soma(comissoesAtivas.filter((c) => !c.aereo && c.status === "recebida").map((c) => c.valorRecebido ?? 0n)),
+          parcelas: parcelasMargem,
+          fixo: planejada.fixo,
+          impostoPct,
+          taxaRoteiro,
+        });
+      } catch {
+        real = erro;
+      }
+      try {
+        ponte = ponteDaMargem({
+          planejada,
+          preco: versao.preco,
+          impostoPct,
+          taxaRoteiro,
+          contas: contasMargem,
+          comissoes: comissoesAtivas.map((c) => ({
+            fornecedor: c.fornecedor,
+            aereo: c.aereo,
+            valorPrevisto: c.valorPrevisto,
+            valorRecebido: c.status === "recebida" ? c.valorRecebido : null,
+            naoRecebida: c.status === "nao_recebida",
+          })),
+          parcelas: parcelasMargem,
+        }).linhas;
+      } catch {
+        ponte = erro;
+      }
+    } catch {
+      // regras da versão ou snapshot ilegíveis: margem e ponte ficam com o erro
+    }
+    resposta.estrategico = { planejada, real, ponte };
+  }
+  return resposta;
 }

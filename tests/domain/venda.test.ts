@@ -18,6 +18,7 @@ import {
   ROTULO_STATUS_VIAGEM,
   statusDaViagem,
   alocarTaxasPrevistas,
+  reprevisarLinhas,
   vencimentoPadraoFornecedor,
   taxaRoteiroDoSnapshot,
   type ContaGerada,
@@ -615,5 +616,50 @@ describe("vencimentoPadraoFornecedor", () => {
     expect(vencimentoPadraoFornecedor("2027-03-01", "2026-11-20")).toBe("2027-01-30");
     expect(vencimentoPadraoFornecedor("2026-12-10", "2026-11-20")).toBe("2026-11-20");
     expect(() => vencimentoPadraoFornecedor("2027-02-30", "2026-11-20")).toThrow("Data inválida");
+  });
+});
+
+describe("reprevisarLinhas", () => {
+  const l = (o: bigint, b: bigint, pago = false) => ({ valorOriginal: o, valorBrlPrevisto: b, pago });
+
+  it("uma linha sem desconto: vira o novo previsto", () => {
+    expect(reprevisarLinhas([l(500000n, 500000n)], { original: 500000n, brl: 500000n }, { original: 684000n, brl: 684000n })).toEqual([
+      { valorOriginal: 684000n, valorBrlPrevisto: 684000n },
+    ]);
+  });
+
+  it("à vista com desconto: a diferença entra na mesma razão (desconto mantido)", () => {
+    // 310600 com 4% à vista = 298176; previsto vai a 320000 → 307200 (= 320000 × 0,96)
+    expect(reprevisarLinhas([l(298176n, 298176n)], { original: 310600n, brl: 310600n }, { original: 320000n, brl: 320000n })).toEqual([
+      { valorOriginal: 307200n, valorBrlPrevisto: 307200n },
+    ]);
+  });
+
+  it("parcelado com uma paga: só as em aberto absorvem, na proporção, soma exata", () => {
+    const r = reprevisarLinhas(
+      [l(50000n, 50000n, true), l(30000n, 30000n), l(20000n, 20000n)],
+      { original: 100000n, brl: 100000n },
+      { original: 110001n, brl: 110001n },
+    );
+    expect(r[0]).toEqual({ valorOriginal: 50000n, valorBrlPrevisto: 50000n });
+    expect(r[1].valorBrlPrevisto + r[2].valorBrlPrevisto).toBe(60001n);
+    expect(r[1].valorBrlPrevisto).toBe(36000n);
+    expect(r[2].valorBrlPrevisto).toBe(24001n);
+  });
+
+  it("redução maior que o em aberto: nunca negativo", () => {
+    const r = reprevisarLinhas([l(50000n, 50000n, true), l(50000n, 50000n)], { original: 100000n, brl: 100000n }, { original: 10000n, brl: 10000n });
+    expect(r).toEqual([
+      { valorOriginal: 50000n, valorBrlPrevisto: 50000n },
+      { valorOriginal: 0n, valorBrlPrevisto: 0n },
+    ]);
+  });
+
+  it("moeda estrangeira: original e reais separados; linhas zeradas recebem na última", () => {
+    const r = reprevisarLinhas([l(0n, 0n), l(0n, 0n)], { original: 0n, brl: 0n }, { original: 1000n, brl: 6158n });
+    expect(r).toEqual([
+      { valorOriginal: 0n, valorBrlPrevisto: 0n },
+      { valorOriginal: 1000n, valorBrlPrevisto: 6158n },
+    ]);
   });
 });

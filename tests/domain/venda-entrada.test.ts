@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { alteracaoNovaForma, fechamentoSchema, novaFormaSchema, pedidoClienteSchema } from "@/domain/venda-entrada";
+import {
+  alteracaoNovaForma,
+  baixaPagamentoSchema,
+  baixaParcelaSchema,
+  contestacaoSchema,
+  fechamentoSchema,
+  formaFornecedorSchema,
+  motivoPrevistoSchema,
+  motivoSchema,
+  novaFormaSchema,
+  pedidoClienteSchema,
+} from "@/domain/venda-entrada";
 
 const HOJE = "2026-11-22";
 const base = {
@@ -58,5 +69,49 @@ describe("nova forma e pedido do cliente", () => {
     expect(alteracaoNovaForma(null)).toBe("Nova forma de pagamento acordada com o cliente");
     const p = pedidoClienteSchema.safeParse("   ");
     expect(p.success ? null : p.error.issues[0].message).toBe("Escreva o pedido do cliente");
+  });
+});
+
+describe("entradas do financeiro da viagem", () => {
+  const msg = (r: { success: boolean; error?: { issues: { message: string }[] } }) => (r.success ? null : r.error!.issues[0].message);
+
+  it("baixa de parcela: data até hoje, valor em reais, taxa opcional", () => {
+    expect(baixaParcelaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "1.234,56" })).toEqual({
+      recebidaEm: "2026-11-21",
+      valorRecebido: 123456n,
+      taxaEfetiva: null,
+    });
+    expect(baixaParcelaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "10", taxaEfetiva: "1,50" }).taxaEfetiva).toBe(150n);
+    expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "", valorRecebido: "10" }))).toBe("Informe a data");
+    expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "2026-11-23", valorRecebido: "10" }))).toBe("Data no futuro");
+    expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "2026-11-21", valorRecebido: "abc" }))).toBe("Valor inválido");
+  });
+
+  it("baixa de pagamento: câmbio efetivo opcional no schema, canônico", () => {
+    expect(baixaPagamentoSchema(HOJE).parse({ pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,3" })).toEqual({
+      pagoEm: "2026-11-21",
+      valorOriginalPago: 100000n,
+      cambioEfetivo: "6.3000",
+    });
+    expect(baixaPagamentoSchema(HOJE).parse({ pagoEm: "2026-11-21", valorOriginalPago: "1" }).cambioEfetivo).toBeNull();
+    expect(msg(baixaPagamentoSchema(HOJE).safeParse({ pagoEm: "2026-11-21", valorOriginalPago: "1", cambioEfetivo: "0" }))).toBe("Câmbio inválido");
+  });
+
+  it("forma ao fornecedor", () => {
+    expect(formaFornecedorSchema.parse({ tipo: "a_vista" })).toEqual({ tipo: "a_vista" });
+    expect(formaFornecedorSchema.parse({ tipo: "parcelado", parcelas: [{ vencimento: "2027-01-10", valor: "100,00" }] })).toEqual({
+      tipo: "parcelado",
+      parcelas: [{ vencimento: "2027-01-10", valorOriginal: 10000n }],
+    });
+    expect(msg(formaFornecedorSchema.safeParse({ tipo: "parcelado", parcelas: [] }))).toBe("Informe as parcelas");
+    expect(msg(formaFornecedorSchema.safeParse({ tipo: "cartao_corporativo" }))).toBe("Informe a data");
+    expect(msg(formaFornecedorSchema.safeParse({ tipo: "boleto" }))).toBe("Forma inválida");
+  });
+
+  it("textos obrigatórios", () => {
+    expect(msg(motivoPrevistoSchema.safeParse(" "))).toBe("Escreva o motivo da alteração");
+    expect(msg(contestacaoSchema.safeParse(""))).toBe("Escreva a contestação");
+    expect(msg(motivoSchema.safeParse(""))).toBe("Escreva o motivo");
+    expect(motivoSchema.parse("  Fornecedor faliu ")).toBe("Fornecedor faliu");
   });
 });

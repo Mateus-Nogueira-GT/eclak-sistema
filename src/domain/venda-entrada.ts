@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { formaSchema } from "./aprovacoes";
 import { hojeEmCuiaba } from "./clientes";
+import { lerCambio } from "./cambio";
 import { dataReal } from "./clientes-entrada";
-import { documentoValido } from "./venda";
+import { lerReais } from "./dinheiro";
+import { COMISSAO_TIPOS, documentoValido } from "./venda";
 
 // Entradas das actions da venda (Zod). Datas ISO "AAAA-MM-DD".
 
@@ -95,4 +97,132 @@ export const pedidoClienteSchema = obrigatorio(MSG_PEDIDO_CLIENTE, 4000);
 /** "Nova forma de pagamento acordada com o cliente: <nota>" (sem nota, só a frase). */
 export function alteracaoNovaForma(nota: string | null): string {
   return nota ? `${ALTERACAO_NOVA_FORMA}: ${nota}` : ALTERACAO_NOVA_FORMA;
+}
+
+// ---------------------------------------------------------------------------
+// Financeiro da viagem vendida (baixas, contas a pagar, comissões, conciliação)
+// ---------------------------------------------------------------------------
+
+export const MSG_NAO_VENDIDA = "A viagem ainda não foi vendida";
+export const MSG_CONCILIADA = "Viagem conciliada: desfaça a conciliação para alterar";
+export const MSG_NAO_CONCILIADA = "A viagem não está conciliada";
+export const MSG_JA_BAIXADO_NA_CONTA = "Já há pagamento baixado nesta conta";
+export const MSG_CAMBIO_EFETIVO = "Informe o câmbio efetivo";
+export const MSG_EM_ABERTO = "Ainda há valores em aberto";
+export const MSG_DATA = "Informe a data";
+export const MSG_DATA_FUTURA = "Data no futuro";
+export const MSG_MOTIVO_PREVISTO = "Escreva o motivo da alteração";
+export const MSG_CONTESTACAO = "Escreva a contestação";
+export const MSG_MOTIVO = "Escreva o motivo";
+export const MSG_PARCELA_RECEBIDA = "Parcela já recebida";
+export const MSG_PARCELA_CANCELADA = "Parcela cancelada";
+export const MSG_PARCELA_EM_ABERTO = "Esta parcela não foi baixada";
+export const MSG_PAGAMENTO_PAGO = "Pagamento já baixado";
+export const MSG_PAGAMENTO_EM_ABERTO = "Este pagamento não foi baixado";
+export const MSG_COMISSAO_REGISTRADA = "Comissão já registrada";
+export const MSG_COMISSAO_EM_ABERTO = "Esta comissão não foi registrada";
+export const MSG_SEM_FORNECEDOR = "Conta sem fornecedor: a comissão só pode ser descontada";
+
+const MAX_CENTAVOS = 999_999_999_999n;
+
+/** Dinheiro em formato brasileiro ("1.000,00") → centavos; `null` se vazio, ou a mensagem do erro. */
+function lerValor(v: string | null | undefined): bigint | null | string {
+  if (!v || !v.trim()) return null;
+  let c: bigint;
+  try {
+    c = lerReais(v);
+  } catch {
+    return "Valor inválido";
+  }
+  return c > MAX_CENTAVOS ? "Valor muito alto" : c;
+}
+
+function reais(opcional: true): z.ZodType<bigint | null, string | null | undefined>;
+function reais(opcional: false): z.ZodType<bigint, string | null | undefined>;
+function reais(opcional: boolean): z.ZodType<bigint | null, string | null | undefined> {
+  return z
+    .string({ error: "Valor inválido" })
+    .nullish()
+    .transform((v, ctx) => {
+      const c = lerValor(v);
+      if (typeof c === "string" || (c === null && !opcional)) {
+        ctx.addIssue({ code: "custom", message: typeof c === "string" ? c : "Valor inválido" });
+        return z.NEVER;
+      }
+      return c;
+    });
+}
+
+/** Valor em reais obrigatório ("1.000,00" → centavos). */
+export const valorReaisSchema = reais(false);
+
+/** Data de baixa: obrigatória, real e não depois de `hoje` (Cuiabá). */
+const dataBaixa = (hoje: string) => data(MSG_DATA).refine((v) => v <= hoje, MSG_DATA_FUTURA);
+
+export function baixaParcelaSchema(hoje: string = hojeEmCuiaba()) {
+  return z.strictObject({
+    recebidaEm: dataBaixa(hoje),
+    valorRecebido: reais(false),
+    /** Taxa cobrada de fato (maquininha, boleto); vazia = a prevista. */
+    taxaEfetiva: reais(true),
+  });
+}
+
+export function baixaPagamentoSchema(hoje: string = hojeEmCuiaba()) {
+  return z.strictObject({
+    pagoEm: dataBaixa(hoje),
+    /** Na moeda da conta. */
+    valorOriginalPago: reais(false),
+    /** Obrigatório (na action) se a moeda não é BRL; "6,2000" → "6.2000". */
+    cambioEfetivo: z
+      .string({ error: "Câmbio inválido" })
+      .nullish()
+      .transform((v, ctx) => {
+        if (!v || !v.trim()) return null;
+        try {
+          return lerCambio(v);
+        } catch {
+          ctx.addIssue({ code: "custom", message: "Câmbio inválido" });
+          return z.NEVER;
+        }
+      }),
+  });
+}
+
+export function comissaoRecebidaSchema(hoje: string = hojeEmCuiaba()) {
+  return z.strictObject({ recebidaEm: dataBaixa(hoje), valorRecebido: reais(false) });
+}
+
+/** Forma de pagamento ao fornecedor. Parcelas na moeda da conta, somando o previsto (conferido na action). */
+export const formaFornecedorSchema = z.discriminatedUnion(
+  "tipo",
+  [
+    z.strictObject({ tipo: z.literal("a_vista"), vencimento: data(MSG_DATA).optional() }),
+    z.strictObject({
+      tipo: z.literal("parcelado"),
+      parcelas: z
+        .array(z.strictObject({ vencimento: data(MSG_DATA), valor: reais(false) }), { error: "Informe as parcelas" })
+        .min(1, "Informe as parcelas")
+        .max(24, "Parcelas demais")
+        .transform((ps) => ps.map((p) => ({ vencimento: p.vencimento, valorOriginal: p.valor }))),
+    }),
+    z.strictObject({ tipo: z.literal("cartao_corporativo"), vencimento: data(MSG_DATA) }),
+  ],
+  { error: "Forma inválida" },
+);
+
+export const comissaoTipoSchema = z.strictObject({
+  tipo: z.enum(COMISSAO_TIPOS, { error: "Tipo de comissão inválido" }),
+  previstaPara: data(MSG_DATA).nullish().transform((v) => v ?? null),
+});
+
+export const motivoPrevistoSchema = obrigatorio(MSG_MOTIVO_PREVISTO, 2000);
+export const contestacaoSchema = obrigatorio(MSG_CONTESTACAO, 4000);
+export const motivoSchema = obrigatorio(MSG_MOTIVO, 2000);
+
+/** "Ainda há valores em aberto: a, b, c e mais N" (até 3 nomes). */
+export function msgEmAberto(itens: string[]): string {
+  const nomes = itens.slice(0, 3).join(", ");
+  const resto = itens.length - 3;
+  return `${MSG_EM_ABERTO}: ${nomes}${resto > 0 ? ` e mais ${resto}` : ""}`;
 }
