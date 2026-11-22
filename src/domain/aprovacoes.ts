@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Moeda } from "./cambio";
+import { arredondar, lerDecimal } from "./decimal";
 import { lerPercentual, lerReais } from "./dinheiro";
 import {
   custoLiquido,
@@ -22,6 +23,8 @@ export const MOTIVO_SUBSTITUIDA = "Substituída por ajuste do Diretor";
 export const MSG_MOTIVO = "Escreva o motivo da devolução";
 export const MSG_PROPOSTA_INDISPONIVEL = "Proposta disponível só depois da aprovação do Diretor";
 export const MSG_NAO_CALCULA = "Não foi possível calcular o preço com os Parâmetros vigentes";
+export const MSG_ITEM_NAO_ENCONTRADO = "Item não encontrado";
+export const MSG_COTACAO_NAO_ENCONTRADA = "Cotação não encontrada";
 export const VALIDADE_PROPOSTA =
   "Orçamento sem caráter de reserva; os valores podem variar conforme as datas. Não inclui aéreo.";
 
@@ -38,6 +41,8 @@ export type CotacaoSnapshot = {
   comissaoPct: string;
   descontoAVistaPct: string | null;
   tarifaFixa: string;
+  /** Valor e/ou comissão trocados pelo Diretor na aprovação com ajuste (só no snapshot; a cotação não muda). */
+  ajustadoPeloDiretor?: true;
 };
 
 export type ItemSnapshot = {
@@ -56,7 +61,10 @@ export type ItemSnapshot = {
   precificada: CotacaoSnapshot;
   /** Cotação escolhida (custo esperado); igual à precificada quando é a mesma. */
   escolhida: CotacaoSnapshot;
-  /** Ajuste do Diretor, aplicado sobre as duas cotações no cálculo (valor em centavos de real, "10.000"). */
+  /**
+   * Legado (versões gravadas antes do ajuste por cotação): ajuste aplicado sobre todas as cotações do item.
+   * O ajuste atual vai na própria cotação (`ajustadoPeloDiretor`); este campo não é mais gravado.
+   */
   ajuste?: { valorFornecedor?: string; comissaoPct?: string };
 };
 
@@ -87,6 +95,15 @@ export type ResultadoVersao = {
   custoEscolhidas: string;
   margemExtra: string;
   precoCalculado: string | null;
+  /**
+   * Valores para o cliente, com as regras da versão: taxa de serviço (dias × taxa por dia), preço ao cliente
+   * (preço + taxa de serviço), por pessoa (meio para cima) e o número de passageiros do snapshot. Ausentes em
+   * versões gravadas antes deles (a proposta recalcula).
+   */
+  taxaServico?: string;
+  precoCliente?: string;
+  porPessoa?: string;
+  numeroPassageiros?: number;
 };
 
 /** Cotação ativa como vem do banco (dinheiro em bigint). */
@@ -164,31 +181,60 @@ function piorCotacao(i: Pick<ItemSnapshot, "id" | "tipo" | "servico" | "diarias"
   return pior;
 }
 
+/** Ajuste do Diretor numa cotação do item (padrão: a precificada); valor em centavos de real, comissão "10.000". */
+export type AjusteCotacao = { cotacaoId?: string; valorFornecedor?: string; comissaoPct?: string };
+
 /**
- * Aplica o ajuste do Diretor ao item do snapshot (cópia) e reescolhe a cotação de pior custo com os valores
- * ajustados, para o preço e a margem extra seguirem o novo pior custo.
+ * Valor em reais trocado pelo Diretor: `valorBrl` = o valor; em moeda estrangeira, `valorOriginal` volta pelo
+ * câmbio aplicado da cotação (centavos da moeda, meio para cima).
  */
-export function ajustarItem(i: ItemSnapshot, ajuste: { valorFornecedor?: string; comissaoPct?: string }): ItemSnapshot {
-  const novo = { ...i.ajuste, ...ajuste };
-  const item: ItemSnapshot = Object.keys(novo).length > 0 ? { ...i, ajuste: novo } : { ...i };
-  const todas = i.cotacoes?.length ? i.cotacoes : [i.precificada, ...(i.escolhida.id === i.precificada.id ? [] : [i.escolhida])];
-  return { ...item, precificada: piorCotacao(item, todas) };
+function ajustarCotacao(c: CotacaoSnapshot, a: AjusteCotacao): CotacaoSnapshot {
+  const nova: CotacaoSnapshot = { ...c, ajustadoPeloDiretor: true };
+  if (a.valorFornecedor !== undefined) {
+    const brl = BigInt(a.valorFornecedor);
+    nova.valorBrl = brl.toString();
+    nova.valorOriginal =
+      c.moeda === "BRL" || !c.cambioAplicado ? brl.toString() : arredondar(brl * 10_000n, lerDecimal(c.cambioAplicado, 4)).toString();
+  }
+  if (a.comissaoPct !== undefined) nova.comissaoPct = a.comissaoPct;
+  return nova;
 }
 
-/** Ajuste do Diretor num item: valor do fornecedor (centavos como texto) e/ou comissão ("10.500"). */
-export type AjusteItem = { itemId: string; valorFornecedor?: bigint; comissaoPct?: string };
+/**
+ * Aplica o ajuste do Diretor a uma cotação do item (cópia; padrão: a precificada no momento) e reescolhe a de
+ * pior custo com os valores ajustados. A escolhida só muda se for a ajustada. Cotação que não é do item → erro.
+ */
+export function ajustarItem(i: ItemSnapshot, ajuste: AjusteCotacao): ItemSnapshot | { erro: string } {
+  const todas = i.cotacoes?.length ? i.cotacoes : [i.precificada, ...(i.escolhida.id === i.precificada.id ? [] : [i.escolhida])];
+  const alvoId = (ajuste.cotacaoId ?? i.precificada.id).toLowerCase();
+  const k = todas.findIndex((c) => c.id === alvoId);
+  if (k === -1) return { erro: MSG_COTACAO_NAO_ENCONTRADA };
+  const nova = ajustarCotacao(todas[k], ajuste);
+  const cotacoes = todas.map((c, j) => (j === k ? nova : c));
+  return {
+    ...i,
+    cotacoes,
+    escolhida: i.escolhida.id === nova.id ? nova : i.escolhida,
+    precificada: piorCotacao(i, cotacoes),
+  };
+}
 
-/** Copia do snapshot com os ajustes por item; `null` se algum item não está no snapshot (ou é Aéreo). */
-export function ajustarSnapshot(s: Snapshot, ajustes: AjusteItem[]): Snapshot | null {
+/** Ajuste do Diretor num item: cotação (padrão: a precificada), valor do fornecedor em centavos e/ou comissão ("10.500"). */
+export type AjusteItem = { itemId: string; cotacaoId?: string; valorFornecedor?: bigint; comissaoPct?: string };
+
+/** Cópia do snapshot com os ajustes por cotação; erro se o item não está no snapshot (ou é Aéreo) ou a cotação não é dele. */
+export function ajustarSnapshot(s: Snapshot, ajustes: AjusteItem[]): Snapshot | { erro: string } {
   const itens: ItemSnapshot[] = [...s.itens];
   for (const a of ajustes) {
     const k = itens.findIndex((x) => x.id === a.itemId.toLowerCase());
-    if (k === -1 || itens[k].tipo === "Aéreo") return null;
-    const ajuste: { valorFornecedor?: string; comissaoPct?: string } = {};
+    if (k === -1 || itens[k].tipo === "Aéreo") return { erro: MSG_ITEM_NAO_ENCONTRADO };
+    const ajuste: AjusteCotacao = {};
+    if (a.cotacaoId !== undefined) ajuste.cotacaoId = a.cotacaoId;
     if (a.valorFornecedor !== undefined) ajuste.valorFornecedor = a.valorFornecedor.toString();
     if (a.comissaoPct !== undefined) ajuste.comissaoPct = a.comissaoPct;
-    // Reescolhe o pior custo com os valores ajustados.
-    itens[k] = ajustarItem(itens[k], ajuste);
+    const r = ajustarItem(itens[k], ajuste);
+    if ("erro" in r) return r;
+    itens[k] = r;
   }
   return { ...s, itens };
 }
@@ -224,6 +270,9 @@ export function resultadoDaVersao(
   const { custo, custoEscolhidas } = custosDoSnapshot(s);
   const m = margemDaAprovacao(preco, custo, forma, dias, rateio, regras);
   const calc = precoCalculado(custo, forma, regras);
+  const taxaServico = BigInt(dias) * BigInt(regras.taxaServicoPorDia);
+  const precoCliente = preco + taxaServico;
+  const numeroPassageiros = s.passageiros.length;
   return {
     custo: str(m.custo),
     imposto: str(m.imposto),
@@ -237,6 +286,10 @@ export function resultadoDaVersao(
     custoEscolhidas: str(custoEscolhidas),
     margemExtra: str(custo - custoEscolhidas),
     precoCalculado: calc === null ? null : str(calc),
+    taxaServico: str(taxaServico),
+    precoCliente: str(precoCliente),
+    porPessoa: str(arredondar(precoCliente, BigInt(Math.max(numeroPassageiros, 1)))),
+    numeroPassageiros,
   };
 }
 
@@ -345,7 +398,8 @@ export function ajusteSchema(parcelamentoMaximo: number) {
     itens: z
       .array(
         z.strictObject({
-          itemId: z.string({ error: "Item não encontrado" }).regex(UUID, "Item não encontrado"),
+          itemId: z.string({ error: MSG_ITEM_NAO_ENCONTRADO }).regex(UUID, MSG_ITEM_NAO_ENCONTRADO),
+          cotacaoId: z.string({ error: MSG_COTACAO_NAO_ENCONTRADA }).regex(UUID, MSG_COTACAO_NAO_ENCONTRADA).optional(),
           valorFornecedor: dinheiro(false).optional(),
           comissaoPct: percentual.optional(),
         }),

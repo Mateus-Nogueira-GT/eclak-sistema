@@ -62,9 +62,10 @@ const pctBr = (p: string) => `${p.replace(".", ",")}%`;
 const formasIguais = (a: FormaPagamento, b: FormaPagamento) => a.tipo === b.tipo && a.parcelas === b.parcelas && !!a.antecipado === !!b.antecipado;
 const larguraPct = (v: bigint, total: bigint) => (total > 0n && v > 0n ? Number((v * 10000n) / total) / 100 : 0);
 
+/** A linha editável é a cotação precificada (pior custo) do item no pedido. */
 const baseDoItem = (i: ItemSnapshot) => ({
-  valor: BigInt(i.ajuste?.valorFornecedor ?? i.precificada.valorBrl),
-  com: lerPercentual(pctParaCampo(i.ajuste?.comissaoPct ?? i.precificada.comissaoPct)),
+  valor: BigInt(i.precificada.valorBrl),
+  com: lerPercentual(pctParaCampo(i.precificada.comissaoPct)),
 });
 
 type Campos = Record<string, { valor: string; com: string }>;
@@ -112,7 +113,19 @@ export function Painel({ pedido: p }: { pedido: Pedido }) {
     const pc = lerPct(c.com);
     const valor = v ?? base.valor;
     const com = pc ?? base.com;
-    return { i, valor, com, valorOk: v !== null, comOk: pc !== null, mudouValor: valor !== base.valor, mudouCom: milesimos(com) !== milesimos(base.com) };
+    const mudouValor = valor !== base.valor;
+    const mudouCom = milesimos(com) !== milesimos(base.com);
+    // Mesmo ajuste que o servidor aplica: só na cotação precificada, e o pior custo é reescolhido.
+    let ajustado: ItemSnapshot = i;
+    if (mudouValor || mudouCom) {
+      const r = ajustarItem(i, {
+        cotacaoId: i.precificada.id,
+        ...(mudouValor ? { valorFornecedor: valor.toString() } : {}),
+        ...(mudouCom ? { comissaoPct: com } : {}),
+      });
+      if (!("erro" in r)) ajustado = r;
+    }
+    return { i, ajustado, valor, com, valorOk: v !== null, comOk: pc !== null, mudouValor, mudouCom };
   });
   const camposOk = linhas.every((l) => l.valorOk && l.comOk);
   const chaveItens = JSON.stringify(linhas.map((l) => [l.i.id, l.mudouValor ? l.valor.toString() : null, l.mudouCom ? l.com : null]));
@@ -121,14 +134,7 @@ export function Painel({ pedido: p }: { pedido: Pedido }) {
     try {
       const simulado: Snapshot = {
         ...p.snapshot,
-        itens: p.snapshot.itens.map((i) => {
-          const l = linhas.find((x) => x.i.id === i.id);
-          if (!l || (!l.mudouValor && !l.mudouCom)) return i;
-          return ajustarItem(i, {
-            ...(l.mudouValor ? { valorFornecedor: l.valor.toString() } : {}),
-            ...(l.mudouCom ? { comissaoPct: l.com } : {}),
-          });
-        }),
+        itens: p.snapshot.itens.map((i) => linhas.find((x) => x.i.id === i.id)?.ajustado ?? i),
       };
       const { custo } = custosDoSnapshot(simulado);
       const m = (f: FormaPagamento, r: Rateio): MargemAprovacao => margemDaAprovacao(precoSim, custo, f, p.dias, r, regras);
@@ -168,6 +174,7 @@ export function Painel({ pedido: p }: { pedido: Pedido }) {
       .filter((l) => l.mudouValor || l.mudouCom)
       .map((l) => ({
         itemId: l.i.id,
+        cotacaoId: l.i.precificada.id,
         ...(l.mudouValor ? { valorFornecedor: reaisParaCampo(l.valor) } : {}),
         ...(l.mudouCom ? { comissaoPct: pctParaCampo(l.com) } : {}),
       }));
@@ -339,19 +346,25 @@ export function Painel({ pedido: p }: { pedido: Pedido }) {
             right={[3, 4, 5, 6]}
             head={["Tipo", "Item", "Fornecedor", "Valor do fornecedor (R$)", "Comissão (%)", "Custo líquido (R$)", "Ganho do item (R$)"]}
             rows={linhas.map((l) => {
-              const liq = custoLiquido(calcDe({ ...l.i, ajuste: { valorFornecedor: l.valor.toString(), comissaoPct: l.com } }, l.i.precificada));
+              // Custo líquido e ganho pela cotação de pior custo depois do ajuste (pode ser outra).
+              const pior = l.ajustado.precificada;
+              const liq = custoLiquido(calcDe(l.ajustado, pior));
+              const trocou = pior.id !== l.i.precificada.id;
               return [
                 l.i.tipo,
                 <b key="n" className="font-semibold">{l.i.servico}{l.i.cidade ? ` · ${l.i.cidade}` : ""}</b>,
-                l.i.precificada.fornecedor ?? "",
+                <span key="f">
+                  {l.i.precificada.fornecedor ?? "Sem fornecedor"} · {l.i.precificada.moeda}
+                  {trocou && <span className="block text-[11.5px] text-cinza">Pior custo agora: {pior.fornecedor ?? "sem fornecedor"} · {pior.moeda}</span>}
+                </span>,
                 <input key="v" inputMode="decimal" value={campos[l.i.id].valor} onChange={(e) => edita(l.i.id, "valor", e.target.value)} className={cx(campoNum, "w-[130px]", l.mudouValor && "!border-terracota", !l.valorOk && "!border-ouro bg-ouro/15")} aria-label={`Valor do fornecedor de ${l.i.servico}`} />,
                 <input key="c" inputMode="decimal" value={campos[l.i.id].com} onChange={(e) => edita(l.i.id, "com", e.target.value)} className={cx(campoNum, "w-[80px]", l.mudouCom && "!border-terracota", !l.comOk && "!border-ouro bg-ouro/15")} aria-label={`Comissão de ${l.i.servico}`} />,
                 reaisParaCampo(liq),
-                reaisParaCampo(l.valor - liq),
+                reaisParaCampo(BigInt(pior.valorBrl) - liq),
               ];
             })}
           />
-          <p className="px-6 pb-5 pt-3 text-[13px] text-cinza">Campos com borda laranja foram alterados na simulação. A taxa de roteiro entra no custo.</p>
+          <p className="px-6 pb-5 pt-3 text-[13px] text-cinza">Cada linha mostra a cotação de pior custo do item, a que define o preço; em moeda estrangeira, o valor é em reais. Campos com borda laranja foram alterados na simulação. A taxa de roteiro entra no custo.</p>
         </Card>
       )}
 

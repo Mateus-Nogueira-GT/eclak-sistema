@@ -26,6 +26,7 @@ import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
 import { cotacoes, fornecedores, itensViagem, pessoas, versoesPrecificacao, viagemPassageiros, viagens } from "@/server/db/schema";
 import { regrasDaVersao, regrasVigentes } from "@/server/queries/regras";
+import { sincronizarTaxaRoteiro } from "@/server/taxa-roteiro";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -47,14 +48,16 @@ export type AjusteEntrada = {
   forma: FormaPagamento;
   /** Padrão: o rateio da versão ajustada. */
   rateio?: Rateio;
-  /** Ajustes por item, só no snapshot da nova versão (itens e cotações não mudam). Valor em reais; comissão "4,5". */
-  itens?: { itemId: string; valorFornecedor?: string; comissaoPct?: string }[];
+  /**
+   * Ajustes por item, só no snapshot da nova versão (itens e cotações não mudam). Cada um vale para uma cotação
+   * do item (padrão: a precificada no momento). Valor em reais; comissão "4,5".
+   */
+  itens?: { itemId: string; cotacaoId?: string; valorFornecedor?: string; comissaoPct?: string }[];
 };
 
 type Falha = { ok: false; erro: string; campos?: Record<string, string> };
 const ORCAMENTO_NAO_ENCONTRADO: Falha = { ok: false, erro: "Orçamento não encontrado" };
 const PEDIDO_NAO_ENCONTRADO: Falha = { ok: false, erro: "Pedido não encontrado" };
-const ITEM_NAO_ENCONTRADO: Falha = { ok: false, erro: "Item não encontrado" };
 const DECIDIDO: Falha = { ok: false, erro: MSG_JA_DECIDIDO };
 const NAO_CALCULA: Falha = { ok: false, erro: MSG_NAO_CALCULA };
 const AGUARDANDO: Falha = {
@@ -196,6 +199,9 @@ export async function enviarParaAprovacao(
         const v = await travarViagem(tx, viagemId);
         if (!v) return ORCAMENTO_NAO_ENCONTRADO;
         if (v.status === "aguardando_aprovacao") return AGUARDANDO;
+        const agora = new Date();
+        // A taxa de roteiro acompanha os Parâmetros vigentes antes do snapshot (mudou desde a última edição?).
+        await sincronizarTaxaRoteiro(tx, viagemId, regras, usuario.id, agora);
         const itens = itensDoSnapshot(await lerItens(tx, viagemId));
         if ("erro" in itens) return { ok: false, erro: itens.erro } satisfies Falha;
         const passageiros = await tx
@@ -216,7 +222,6 @@ export async function enviarParaAprovacao(
           return NAO_CALCULA;
         }
 
-        const agora = new Date();
         const [ver] = await tx
           .insert(versoesPrecificacao)
           .values({
@@ -376,7 +381,7 @@ export async function aprovarComAjuste(
       versaoId,
       async (tx, { v, ver, agora }) => {
         const snapshot = ajustarSnapshot(ver.snapshot as Snapshot, p.data.itens ?? []);
-        if (!snapshot) return ITEM_NAO_ENCONTRADO;
+        if ("erro" in snapshot) return { ok: false, erro: snapshot.erro } satisfies Falha;
         const rateio = p.data.rateio ?? (ver.rateio as Rateio);
         let resultado: ResultadoVersao;
         try {
