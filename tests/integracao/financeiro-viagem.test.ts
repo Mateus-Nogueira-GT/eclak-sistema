@@ -32,7 +32,8 @@ import {
   registrarComissao,
 } from "@/server/actions/financeiro-viagem";
 import { obterCliente } from "@/server/queries/clientes";
-import { obterViagemVendida } from "@/server/queries/vendas";
+import { margensVendidas, obterViagemVendida } from "@/server/queries/vendas";
+import { listarOrcamentos } from "@/server/queries/viagens";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
 
 const souza: ClienteEntrada = {
@@ -838,5 +839,26 @@ describe("obterViagemVendida", () => {
     expect(await ficha(x.fin.id, "00000000-0000-4000-8000-000000000000")).toBeNull();
     expect(await ficha(x.fin.id, "x")).toBeNull();
     await expect(obterViagemVendida(x.viagemId)).rejects.toThrow();
+  });
+});
+
+describe("margens das viagens vendidas em lote", () => {
+  beforeEach(limparBanco);
+
+  it("listarOrcamentos e margensVendidas dão a mesma margem da ficha; sem camada estratégica, nada", async () => {
+    const x = await vendida();
+    expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.passeio.id, "684,00", "Reajuste"))).toEqual({ ok: true });
+    const e = await estrategico(x.fin.id, x.viagemId);
+    const lote = await margensVendidas([x.viagemId, x.viagemId, "00000000-0000-4000-8000-000000000000"]);
+    expect([...lote.keys()]).toEqual([x.viagemId]);
+    expect(lote.get(x.viagemId)).toEqual(e.f.estrategico);
+
+    const lista = await comSessao(x.fin.id, () => listarOrcamentos());
+    const linha = lista.find((l) => l.id === x.viagemId)!;
+    expect(linha.margemVendida).toEqual({ planejadaPct: e.planejada.finalPct, realPct: e.real.finalPct });
+    expect(linha.statusViagem?.status).toBe("vendida");
+    const doConsultor = (await comSessao(x.u.id, () => listarOrcamentos())).find((l) => l.id === x.viagemId)!;
+    expect(doConsultor.margemVendida).toBeUndefined();
+    expect(doConsultor.estrategico).toBeUndefined();
   });
 });

@@ -1,7 +1,7 @@
 import "server-only";
 import type { z } from "zod";
 import type { Perfil } from "@/domain/perfis";
-import { ErroAcesso, exigirPerfil, type UsuarioAtual } from "@/server/auth";
+import { ErroAcesso, exigirPerfilSemMemo, type UsuarioAtual } from "@/server/auth";
 
 export type SemPermissao = { ok: false; erro: "Sem permissão" };
 
@@ -15,7 +15,7 @@ export async function comPerfil<T>(
 ): Promise<T | SemPermissao> {
   let usuario: UsuarioAtual;
   try {
-    usuario = await exigirPerfil(...perfis);
+    usuario = await exigirPerfilSemMemo(...perfis);
   } catch (e) {
     if (e instanceof ErroAcesso) return { ok: false, erro: "Sem permissão" };
     throw e;

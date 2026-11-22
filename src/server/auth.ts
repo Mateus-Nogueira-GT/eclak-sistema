@@ -53,9 +53,21 @@ const memo: <T extends () => Promise<unknown>>(fn: T) => T =
 
 export const usuarioAtual: () => Promise<UsuarioAtual | null> = memo(resolverUsuarioAtual);
 
-export async function exigirPerfil(...perfis: Perfil[]): Promise<UsuarioAtual> {
-  const u = await resolverUsuarioAtual();
+function conferirPerfil(u: UsuarioAtual | null, perfis: Perfil[]): UsuarioAtual {
   if (!u) throw new ErroAcesso();
   if (perfis.length > 0 && !perfis.includes(u.perfil)) throw new ErroAcesso();
   return u;
+}
+
+/**
+ * Telas e queries: usuário logado (e com um dos `perfis`, se dados). Usa o memo por requisição de `usuarioAtual`,
+ * então várias queries da mesma renderização não validam o token de novo; fora da renderização relê sempre.
+ */
+export async function exigirPerfil(...perfis: Perfil[]): Promise<UsuarioAtual> {
+  return conferirPerfil(await usuarioAtual(), perfis);
+}
+
+/** Actions (`comPerfil`): relê sempre o token e a linha de `usuarios`, sem memo. */
+export async function exigirPerfilSemMemo(...perfis: Perfil[]): Promise<UsuarioAtual> {
+  return conferirPerfil(await resolverUsuarioAtual(), perfis);
 }

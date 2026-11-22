@@ -43,7 +43,7 @@ import {
   viagens,
 } from "@/server/db/schema";
 import { regrasDaVersao, regrasVigentes } from "@/server/queries/regras";
-import { obterViagemVendida } from "@/server/queries/vendas";
+import { margensVendidas } from "@/server/queries/vendas";
 
 // Segurança: a camada estratégica (custo líquido, venda, compensação, margem) só é montada dentro de
 // `estrategico`, e só quando `veCamadaEstrategica(perfil)`. Para os demais perfis ela nunca é calculada.
@@ -324,7 +324,9 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
   const regras = estrategico ? (await regrasVigentes()).valores : null;
 
   const hoje = hojeEmCuiaba();
-  return Promise.all(linhas.map(async (l) => {
+  // Margem planejada × real das vendidas: uma leitura em lote (nunca uma consulta por linha).
+  const margens = estrategico ? await margensVendidas(linhas.filter((l) => l.v.status === "vendida").map((l) => l.v.id)) : null;
+  return linhas.map((l) => {
     const linha: OrcamentoLista = {
       id: l.v.id,
       codigo: formatarCodigoViagem(l.clienteCodigo, l.v.seq),
@@ -347,13 +349,8 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
         hoje,
       });
       linha.statusViagem = { status, rotulo: ROTULO_STATUS_VIAGEM[status] };
-      if (estrategico) {
-        const vendida = await obterViagemVendida(l.v.id);
-        if (vendida?.estrategico) {
-          const { planejada, real } = vendida.estrategico;
-          linha.margemVendida = { planejadaPct: planejada.finalPct, realPct: "erro" in real ? null : real.finalPct };
-        }
-      }
+      const m = margens?.get(l.v.id);
+      if (m) linha.margemVendida = { planejadaPct: m.planejada.finalPct, realPct: "erro" in m.real ? null : m.real.finalPct };
     }
     if (itens && regras) {
       const doItem = itens.get(l.v.id) ?? [];
@@ -374,7 +371,7 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
       }
     }
     return linha;
-  }));
+  });
 }
 
 /** Sugestão de custo de referência por item da viagem (média em centavos de real, arredondada). */

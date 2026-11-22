@@ -28,6 +28,7 @@ import {
   type StatusParcela,
   type StatusViagem,
 } from "@/domain/venda";
+import { normalizarRegras } from "@/domain/regras";
 import { formatarCodigoViagem } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
@@ -41,6 +42,7 @@ import {
   pagamentosFornecedor,
   pessoas,
   parcelasReceber,
+  regrasVersoes,
   usuarios,
   vendas,
   versoesPrecificacao,
@@ -254,6 +256,7 @@ export type ComissaoVendida = {
 
 export type ContaVendida = {
   id: string;
+  itemId: string;
   descricao: string;
   fornecedorId: string | null;
   fornecedor: string | null;
@@ -327,105 +330,40 @@ export type ViagemVendida = {
   };
 };
 
-/**
- * Viagem vendida: cabeçalho, status derivado (hoje em Cuiabá), resumo (vendido, recebido, a receber, pago a
- * fornecedores, a pagar), parcelas, contas com pagamentos e comissão, comissões e divergências. Qualquer perfil
- * logado; margem planejada × real e ponte só na camada estratégica. `null` se não existe ou não está vendida.
- */
-export async function obterViagemVendida(viagemId: string): Promise<ViagemVendida | null> {
-  const usuario = await exigirPerfil();
-  if (!ehUuid(viagemId)) return null;
-  const [l] = await db
-    .select({
-      v: viagens,
-      venda: vendas,
-      versao: versoesPrecificacao,
-      clienteCodigo: clientes.codigo,
-      cliente: clientes.grupo,
-      consultor: usuarios.nome,
-    })
-    .from(viagens)
-    .innerJoin(vendas, eq(vendas.viagemId, viagens.id))
-    .innerJoin(versoesPrecificacao, eq(versoesPrecificacao.id, vendas.versaoId))
-    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
-    .innerJoin(usuarios, eq(usuarios.id, viagens.consultorId))
-    .where(and(eq(viagens.id, viagemId), isNull(viagens.excluidoEm), eq(viagens.status, "vendida")))
-    .limit(1);
-  if (!l) return null;
-  const { v, venda, versao } = l;
-  const estrategico = veCamadaEstrategica(usuario.perfil);
-  const snapshot = versao.snapshot as Snapshot;
+type ParcelaLinha = typeof parcelasReceber.$inferSelect;
+type ContaLinha = { c: typeof contasPagar.$inferSelect; fornecedor: string | null };
+type PagamentoLinha = typeof pagamentosFornecedor.$inferSelect;
+type ComissaoLinha = typeof comissoes.$inferSelect;
+type VersaoLinha = typeof versoesPrecificacao.$inferSelect;
 
-  const ps = await db.select().from(parcelasReceber).where(eq(parcelasReceber.viagemId, v.id)).orderBy(asc(parcelasReceber.numero));
-  const cs = await db
-    .select({ c: contasPagar, fornecedor: fornecedores.nome })
-    .from(contasPagar)
-    .innerJoin(itensViagem, eq(itensViagem.id, contasPagar.itemId))
-    .leftJoin(fornecedores, eq(fornecedores.id, contasPagar.fornecedorId))
-    .where(and(eq(contasPagar.viagemId, v.id), isNull(contasPagar.excluidoEm)))
-    .orderBy(asc(itensViagem.ordem), asc(contasPagar.id));
-  const idsContas = cs.map((x) => x.c.id);
-  const pags =
-    idsContas.length === 0
-      ? []
-      : await db
-          .select()
-          .from(pagamentosFornecedor)
-          .where(inArray(pagamentosFornecedor.contaId, idsContas))
-          .orderBy(asc(pagamentosFornecedor.numero));
-  const coms =
-    idsContas.length === 0
-      ? []
-      : await db
-          .select()
-          .from(comissoes)
-          // Canceladas (conta passou a `descontada`) ficam fora da ficha, da margem e da ponte.
-          .where(and(eq(comissoes.viagemId, v.id), inArray(comissoes.contaId, idsContas), ne(comissoes.status, "cancelada")))
-          .orderBy(asc(comissoes.previstaPara));
+const soma = (xs: bigint[]) => xs.reduce((a, x) => a + x, 0n);
 
-  const parcelas = ps.map((p): ParcelaVendida => {
-    const linha: ParcelaVendida = {
-      id: p.id,
-      numero: p.numero,
-      totalParcelas: p.totalParcelas,
-      vencimento: p.vencimento,
-      valor: p.valor,
-      meio: p.meio,
-      rotuloMeio: ROTULO_MEIO[p.meio],
-      status: p.status,
-      recebidaEm: p.recebidaEm,
-      valorRecebido: p.valorRecebido,
-      observacao: p.observacao,
-    };
-    if (estrategico) {
-      linha.taxaPrevista = p.taxaPrevista;
-      linha.taxaEfetiva = p.taxaEfetiva;
-    }
-    return linha;
-  });
-
+/** Contas com pagamentos e comissão (as canceladas ficam de fora das comissões), na ordem das linhas dadas. */
+function montarContas(cs: ContaLinha[], pags: PagamentoLinha[], coms: ComissaoLinha[]): { contas: ContaVendida[]; comissoes: ComissaoVendida[] } {
   const contaPorId = new Map(cs.map((x) => [x.c.id, x]));
-  const comissoesVendidas = coms.map((c): ComissaoVendida => {
-    const conta = contaPorId.get(c.contaId)!;
-    return {
-      id: c.id,
-      contaId: c.contaId,
-      fornecedor: conta.fornecedor ?? conta.c.descricao,
-      aereo: conta.c.aereo,
-      baseBrl: c.baseBrl,
-      pct: c.pct,
-      valorPrevisto: c.valorPrevisto,
-      previstaPara: c.previstaPara,
-      status: c.status,
-      recebidaEm: c.recebidaEm,
-      valorRecebido: c.valorRecebido,
-      motivo: c.motivo,
-      pendente: c.status === "prevista",
-    };
-  });
-
+  const comissoesVendidas = coms
+    .filter((c) => c.status !== "cancelada" && contaPorId.has(c.contaId))
+    .map((c): ComissaoVendida => {
+      const conta = contaPorId.get(c.contaId)!;
+      return {
+        id: c.id,
+        contaId: c.contaId,
+        fornecedor: conta.fornecedor ?? conta.c.descricao,
+        aereo: conta.c.aereo,
+        baseBrl: c.baseBrl,
+        pct: c.pct,
+        valorPrevisto: c.valorPrevisto,
+        previstaPara: c.previstaPara,
+        status: c.status,
+        recebidaEm: c.recebidaEm,
+        valorRecebido: c.valorRecebido,
+        motivo: c.motivo,
+        pendente: c.status === "prevista",
+      };
+    });
   const contas = cs.map(({ c, fornecedor }): ContaVendida => ({
     id: c.id,
+    itemId: c.itemId,
     descricao: c.descricao,
     fornecedorId: c.fornecedorId,
     fornecedor,
@@ -462,9 +400,261 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
       })),
     comissao: comissoesVendidas.find((x) => x.contaId === c.id) ?? null,
   }));
+  return { contas, comissoes: comissoesVendidas };
+}
+
+export type MargensVendida = NonNullable<ViagemVendida["estrategico"]>;
+
+/**
+ * Margem planejada (o `resultado` da versão), margem real e ponte de uma viagem vendida, sem I/O. `impostoPct`
+ * nulo (regras da versão ilegíveis) ou cálculo impossível: real e ponte ficam com o erro.
+ */
+function calcularMargens(d: {
+  versao: VersaoLinha;
+  fim: string;
+  impostoPct: string | null;
+  parcelas: ParcelaLinha[];
+  contas: ContaVendida[];
+  comissoes: ComissaoVendida[];
+}): MargensVendida {
+  const { versao } = d;
+  const planejada = planejadaDaVersao(versao.resultado as ResultadoVersao);
+  const erro: ErroCalculo = { erro: MSG_NAO_CALCULA_MARGEM };
+  let real: MargemReal | ErroCalculo = erro;
+  let ponte: LinhaPonte[] | ErroCalculo = erro;
+  if (d.impostoPct === null) return { planejada, real, ponte };
+  const impostoPct = d.impostoPct;
+  try {
+    const snapshot = versao.snapshot as Snapshot;
+    const taxaRoteiro = taxaRoteiroDoSnapshot(snapshot);
+    const ativas = d.contas.filter((c) => c.status !== "cancelada");
+    /** Em reais: pago nas linhas pagas + previsto nas em aberto; nenhuma paga = previsto atual da conta. */
+    const pagoBrl = (c: ContaVendida) =>
+      c.pagamentos.some((p) => p.status === "pago")
+        ? soma(c.pagamentos.map((p) => (p.status === "pago" ? (p.valorBrlPago ?? 0n) : p.valorBrlPrevisto)))
+        : null;
+    /** Previsto e comissão que a conta teria na venda com o tipo `tipo` (snapshot da versão vendida). */
+    const naVenda = (c: ContaVendida, tipo: ComissaoTipo) => {
+      const modalidade: Record<string, "net" | "comissionado"> = c.fornecedorId
+        ? { [c.fornecedorId]: tipo === "a_receber" ? "comissionado" : "net" }
+        : {};
+      const g = contasDoSnapshot(snapshot, modalidade, d.fim).find((x) => x.itemId === c.itemId);
+      if (!g) throw new Error(MSG_NAO_CALCULA_MARGEM);
+      return { previsto: g.previstoBrl, comissao: g.comissao?.valor ?? 0n };
+    };
+    const contasMargem = ativas.map((c) => ({
+      aereo: c.aereo,
+      previstoBrl: c.previstoBrl,
+      pagoBrl: pagoBrl(c),
+      rotulo: c.fornecedor ?? c.descricao,
+      moeda: c.moeda,
+      previstoVendaBrl: c.previstoVendaBrl,
+      pagos: c.pagamentos
+        .filter((p) => p.status === "pago")
+        .map((p) => ({ valorOriginalPago: p.valorOriginalPago ?? 0n, valorBrlPago: p.valorBrlPago ?? 0n })),
+      cambioVenda: c.cambioAplicado,
+      comissaoNaVenda: c.comissaoTipoVenda === "a_receber" ? naVenda(c, "a_receber").comissao : 0n,
+      trocaDeTipo:
+        c.comissaoTipo === c.comissaoTipoVenda
+          ? undefined
+          : {
+              para: c.comissaoTipo,
+              previstoNaVenda: naVenda(c, c.comissaoTipo).previsto,
+              comissaoPrevista: c.comissao?.valorPrevisto ?? 0n,
+            },
+    }));
+    const parcelasMargem = d.parcelas.map((p) => ({
+      valor: p.valor,
+      recebida: p.status === "recebida",
+      taxaEfetiva: p.taxaEfetiva,
+      taxaPrevista: p.taxaPrevista,
+      valorRecebido: p.valorRecebido,
+      cancelada: p.status === "cancelada",
+      numero: p.numero,
+      totalParcelas: p.totalParcelas,
+    }));
+    const comissoesAtivas = d.comissoes.filter((c) => ativas.some((k) => k.id === c.contaId));
+    try {
+      real = margemReal({
+        preco: versao.preco,
+        contas: contasMargem,
+        comissoesRecebidas: soma(comissoesAtivas.filter((c) => !c.aereo && c.status === "recebida").map((c) => c.valorRecebido ?? 0n)),
+        parcelas: parcelasMargem,
+        fixo: planejada.fixo,
+        impostoPct,
+        taxaRoteiro,
+      });
+    } catch {
+      real = erro;
+    }
+    try {
+      ponte = ponteDaMargem({
+        planejada,
+        preco: versao.preco,
+        impostoPct,
+        taxaRoteiro,
+        contas: contasMargem,
+        comissoes: comissoesAtivas.map((c) => ({
+          fornecedor: c.fornecedor,
+          aereo: c.aereo,
+          valorPrevisto: c.valorPrevisto,
+          valorRecebido: c.status === "recebida" ? c.valorRecebido : null,
+          naoRecebida: c.status === "nao_recebida",
+        })),
+        parcelas: parcelasMargem,
+      }).linhas;
+    } catch {
+      ponte = erro;
+    }
+  } catch {
+    // snapshot ilegível: margem e ponte ficam com o erro
+  }
+  return { planejada, real, ponte };
+}
+
+/** Imposto sobre a margem por versão de regras (uma leitura por id; sem checagem de acesso). Ilegível: nulo. */
+async function impostoPorRegras(ids: string[]): Promise<Map<string, string | null>> {
+  const unicos = [...new Set(ids)];
+  const linhas = unicos.length === 0 ? [] : await db.select({ id: regrasVersoes.id, valores: regrasVersoes.valores }).from(regrasVersoes).where(inArray(regrasVersoes.id, unicos));
+  const porId = new Map<string, string | null>(unicos.map((id) => [id, null]));
+  for (const l of linhas) {
+    try {
+      porId.set(l.id, normalizarRegras(l.valores).impostoSobreMargemPct);
+    } catch {
+      porId.set(l.id, null);
+    }
+  }
+  return porId;
+}
+
+/** Contas ativas das viagens (com o fornecedor), na ordem dos itens. */
+function contasDe(viagemIds: string[]) {
+  return db
+    .select({ c: contasPagar, fornecedor: fornecedores.nome })
+    .from(contasPagar)
+    .innerJoin(itensViagem, eq(itensViagem.id, contasPagar.itemId))
+    .leftJoin(fornecedores, eq(fornecedores.id, contasPagar.fornecedorId))
+    .where(and(inArray(contasPagar.viagemId, viagemIds), isNull(contasPagar.excluidoEm)))
+    .orderBy(asc(itensViagem.ordem), asc(contasPagar.id));
+}
+
+function pagamentosDe(contaIds: string[]) {
+  return contaIds.length === 0
+    ? Promise.resolve([] as PagamentoLinha[])
+    : db.select().from(pagamentosFornecedor).where(inArray(pagamentosFornecedor.contaId, contaIds)).orderBy(asc(pagamentosFornecedor.numero));
+}
+
+function comissoesDe(viagemIds: string[]) {
+  return db
+    .select()
+    .from(comissoes)
+    // Canceladas (conta passou a `descontada`) ficam fora da ficha, da margem e da ponte.
+    .where(and(inArray(comissoes.viagemId, viagemIds), ne(comissoes.status, "cancelada")))
+    .orderBy(asc(comissoes.previstaPara));
+}
+
+/**
+ * Margens (planejada, real, ponte) das viagens vendidas, em lote: versões, parcelas, contas, pagamentos e
+ * comissões numa leitura cada, regras uma vez por versão. Uso interno, **sem checagem de acesso**: só chamar
+ * depois de conferir `veCamadaEstrategica`. Id sem venda fica de fora.
+ */
+export async function margensVendidas(viagemIds: string[]): Promise<Map<string, MargensVendida>> {
+  const resultado = new Map<string, MargensVendida>();
+  const ids = [...new Set(viagemIds)];
+  if (ids.length === 0) return resultado;
+  const vs = await db
+    .select({ viagemId: vendas.viagemId, fim: viagens.fim, versao: versoesPrecificacao })
+    .from(vendas)
+    .innerJoin(viagens, eq(viagens.id, vendas.viagemId))
+    .innerJoin(versoesPrecificacao, eq(versoesPrecificacao.id, vendas.versaoId))
+    .where(inArray(vendas.viagemId, ids));
+  if (vs.length === 0) return resultado;
+  const comVenda = vs.map((v) => v.viagemId);
+  const [ps, cs, coms, impostos] = await Promise.all([
+    db.select().from(parcelasReceber).where(inArray(parcelasReceber.viagemId, comVenda)).orderBy(asc(parcelasReceber.numero)),
+    contasDe(comVenda),
+    comissoesDe(comVenda),
+    impostoPorRegras(vs.map((v) => v.versao.regrasVersaoId)),
+  ]);
+  const pags = await pagamentosDe(cs.map((x) => x.c.id));
+  for (const v of vs) {
+    const csDa = cs.filter((x) => x.c.viagemId === v.viagemId);
+    const { contas, comissoes: comissoesDa } = montarContas(csDa, pags, coms.filter((c) => c.viagemId === v.viagemId));
+    resultado.set(
+      v.viagemId,
+      calcularMargens({
+        versao: v.versao,
+        fim: v.fim,
+        impostoPct: impostos.get(v.versao.regrasVersaoId) ?? null,
+        parcelas: ps.filter((p) => p.viagemId === v.viagemId),
+        contas,
+        comissoes: comissoesDa,
+      }),
+    );
+  }
+  return resultado;
+}
+
+/**
+ * Viagem vendida: cabeçalho, status derivado (hoje em Cuiabá), resumo (vendido, recebido, a receber, pago a
+ * fornecedores, a pagar), parcelas, contas com pagamentos e comissão, comissões e divergências. Qualquer perfil
+ * logado; margem planejada × real e ponte só na camada estratégica. `null` se não existe ou não está vendida.
+ */
+export async function obterViagemVendida(viagemId: string): Promise<ViagemVendida | null> {
+  const usuario = await exigirPerfil();
+  if (!ehUuid(viagemId)) return null;
+  const [l] = await db
+    .select({
+      v: viagens,
+      venda: vendas,
+      versao: versoesPrecificacao,
+      clienteCodigo: clientes.codigo,
+      cliente: clientes.grupo,
+      consultor: usuarios.nome,
+    })
+    .from(viagens)
+    .innerJoin(vendas, eq(vendas.viagemId, viagens.id))
+    .innerJoin(versoesPrecificacao, eq(versoesPrecificacao.id, vendas.versaoId))
+    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
+    .innerJoin(usuarios, eq(usuarios.id, viagens.consultorId))
+    .where(and(eq(viagens.id, viagemId), isNull(viagens.excluidoEm), eq(viagens.status, "vendida")))
+    .limit(1);
+  if (!l) return null;
+  const { v, venda, versao } = l;
+  const estrategico = veCamadaEstrategica(usuario.perfil);
+  const snapshot = versao.snapshot as Snapshot;
+
+  const [ps, cs, coms] = await Promise.all([
+    db.select().from(parcelasReceber).where(eq(parcelasReceber.viagemId, v.id)).orderBy(asc(parcelasReceber.numero)),
+    contasDe([v.id]),
+    comissoesDe([v.id]),
+  ]);
+  const pags = await pagamentosDe(cs.map((x) => x.c.id));
+
+  const parcelas = ps.map((p): ParcelaVendida => {
+    const linha: ParcelaVendida = {
+      id: p.id,
+      numero: p.numero,
+      totalParcelas: p.totalParcelas,
+      vencimento: p.vencimento,
+      valor: p.valor,
+      meio: p.meio,
+      rotuloMeio: ROTULO_MEIO[p.meio],
+      status: p.status,
+      recebidaEm: p.recebidaEm,
+      valorRecebido: p.valorRecebido,
+      observacao: p.observacao,
+    };
+    if (estrategico) {
+      linha.taxaPrevista = p.taxaPrevista;
+      linha.taxaEfetiva = p.taxaEfetiva;
+    }
+    return linha;
+  });
+
+  const { contas, comissoes: comissoesVendidas } = montarContas(cs, pags, coms);
 
   const ativas = contas.filter((c) => c.status !== "cancelada");
-  const soma = (xs: bigint[]) => xs.reduce((a, x) => a + x, 0n);
   const linhasAtivas = ativas.flatMap((c) => c.pagamentos);
   const recebidasComDiferenca = ps.filter((p) => p.status === "recebida" && p.valorRecebido !== null && p.valorRecebido !== p.valor);
   const resumo = {
@@ -520,97 +710,15 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
   };
 
   if (estrategico) {
-    const res = versao.resultado as ResultadoVersao;
-    const planejada = planejadaDaVersao(res);
-    const erro: ErroCalculo = { erro: MSG_NAO_CALCULA_MARGEM };
-    let real: MargemReal | ErroCalculo = erro;
-    let ponte: LinhaPonte[] | ErroCalculo = erro;
-    try {
-      const impostoPct = (await regrasDaVersao(versao.regrasVersaoId)).impostoSobreMargemPct;
-      const taxaRoteiro = taxaRoteiroDoSnapshot(snapshot);
-      /** Em reais: pago nas linhas pagas + previsto nas em aberto; nenhuma paga = previsto atual da conta. */
-      const pagoBrl = (c: ContaVendida) =>
-        c.pagamentos.some((p) => p.status === "pago")
-          ? soma(c.pagamentos.map((p) => (p.status === "pago" ? (p.valorBrlPago ?? 0n) : p.valorBrlPrevisto)))
-          : null;
-      /** Previsto e comissão que a conta teria na venda com o tipo `tipo` (snapshot da versão vendida). */
-      const naVenda = (c: ContaVendida, tipo: ComissaoTipo) => {
-        const itemId = contaPorId.get(c.id)!.c.itemId;
-        const modalidade: Record<string, "net" | "comissionado"> = c.fornecedorId
-          ? { [c.fornecedorId]: tipo === "a_receber" ? "comissionado" : "net" }
-          : {};
-        const g = contasDoSnapshot(snapshot, modalidade, v.fim).find((x) => x.itemId === itemId);
-        if (!g) throw new Error(MSG_NAO_CALCULA_MARGEM);
-        return { previsto: g.previstoBrl, comissao: g.comissao?.valor ?? 0n };
-      };
-      const contasMargem = ativas.map((c) => ({
-        aereo: c.aereo,
-        previstoBrl: c.previstoBrl,
-        pagoBrl: pagoBrl(c),
-        rotulo: c.fornecedor ?? c.descricao,
-        moeda: c.moeda,
-        previstoVendaBrl: c.previstoVendaBrl,
-        pagos: c.pagamentos
-          .filter((p) => p.status === "pago")
-          .map((p) => ({ valorOriginalPago: p.valorOriginalPago ?? 0n, valorBrlPago: p.valorBrlPago ?? 0n })),
-        cambioVenda: c.cambioAplicado,
-        comissaoNaVenda: c.comissaoTipoVenda === "a_receber" ? naVenda(c, "a_receber").comissao : 0n,
-        trocaDeTipo:
-          c.comissaoTipo === c.comissaoTipoVenda
-            ? undefined
-            : {
-                para: c.comissaoTipo,
-                previstoNaVenda: naVenda(c, c.comissaoTipo).previsto,
-                comissaoPrevista: c.comissao?.valorPrevisto ?? 0n,
-              },
-      }));
-      const parcelasMargem = ps.map((p) => ({
-        valor: p.valor,
-        recebida: p.status === "recebida",
-        taxaEfetiva: p.taxaEfetiva,
-        taxaPrevista: p.taxaPrevista,
-        valorRecebido: p.valorRecebido,
-        cancelada: p.status === "cancelada",
-        numero: p.numero,
-        totalParcelas: p.totalParcelas,
-      }));
-      const comissoesAtivas = comissoesVendidas.filter((c) => ativas.some((k) => k.id === c.contaId));
-      try {
-        real = margemReal({
-          preco: versao.preco,
-          contas: contasMargem,
-          comissoesRecebidas: soma(comissoesAtivas.filter((c) => !c.aereo && c.status === "recebida").map((c) => c.valorRecebido ?? 0n)),
-          parcelas: parcelasMargem,
-          fixo: planejada.fixo,
-          impostoPct,
-          taxaRoteiro,
-        });
-      } catch {
-        real = erro;
-      }
-      try {
-        ponte = ponteDaMargem({
-          planejada,
-          preco: versao.preco,
-          impostoPct,
-          taxaRoteiro,
-          contas: contasMargem,
-          comissoes: comissoesAtivas.map((c) => ({
-            fornecedor: c.fornecedor,
-            aereo: c.aereo,
-            valorPrevisto: c.valorPrevisto,
-            valorRecebido: c.status === "recebida" ? c.valorRecebido : null,
-            naoRecebida: c.status === "nao_recebida",
-          })),
-          parcelas: parcelasMargem,
-        }).linhas;
-      } catch {
-        ponte = erro;
-      }
-    } catch {
-      // regras da versão ou snapshot ilegíveis: margem e ponte ficam com o erro
-    }
-    resposta.estrategico = { planejada, real, ponte };
+    const impostos = await impostoPorRegras([versao.regrasVersaoId]);
+    resposta.estrategico = calcularMargens({
+      versao,
+      fim: v.fim,
+      impostoPct: impostos.get(versao.regrasVersaoId) ?? null,
+      parcelas: ps,
+      contas,
+      comissoes: comissoesVendidas,
+    });
   }
   return resposta;
 }
