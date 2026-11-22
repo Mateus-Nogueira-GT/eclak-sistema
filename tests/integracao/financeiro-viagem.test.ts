@@ -862,3 +862,35 @@ describe("margens das viagens vendidas em lote", () => {
     expect(doConsultor.estrategico).toBeUndefined();
   });
 });
+
+describe("restrições da venda (0018)", () => {
+  beforeEach(limparBanco);
+
+  /** Código do erro do Postgres (o drizzle embrulha o erro do driver em `cause`). */
+  async function codigoDoErro(p: Promise<unknown>): Promise<string | undefined> {
+    try {
+      await p;
+    } catch (e) {
+      const x = e as { code?: string; cause?: { code?: string } };
+      return x.cause?.code ?? x.code;
+    }
+    return undefined;
+  }
+
+  const semId = <T extends { id: string }>(x: T): Omit<T, "id"> => Object.fromEntries(Object.entries(x).filter(([k]) => k !== "id")) as Omit<T, "id">;
+
+  it("comissão por conta, parcela por (venda, número), pagamento por (conta, número) e conta ativa por item são únicos", async () => {
+    const x = await vendida();
+    const comissao = semId(x.comissao);
+    expect(await codigoDoErro(db.insert(comissoes).values(comissao))).toBe("23505");
+    const parcela = semId(x.parcelas[0]);
+    expect(await codigoDoErro(db.insert(parcelasReceber).values(parcela))).toBe("23505");
+    const pagamento = semId(x.pagPasseio);
+    expect(await codigoDoErro(db.insert(pagamentosFornecedor).values(pagamento))).toBe("23505");
+    const conta = semId(x.passeio);
+    expect(await codigoDoErro(db.insert(contasPagar).values(conta))).toBe("23505");
+    // excluída logicamente, outra conta ativa do mesmo item é aceita
+    await db.update(contasPagar).set({ excluidoEm: new Date() }).where(eq(contasPagar.id, x.passeio.id));
+    expect(await codigoDoErro(db.insert(contasPagar).values(conta))).toBeUndefined();
+  });
+});

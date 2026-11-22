@@ -96,6 +96,11 @@ export function hojeEmCuiaba(agora: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Cuiaba" }).format(agora);
 }
 
+/** Data (AAAA-MM-DD) de um instante em Cuiabá: 2026-11-21T02:00Z → "2026-11-20". */
+export function dataEmCuiaba(d: Date): string {
+  return hojeEmCuiaba(d);
+}
+
 // ---------- Alertas ----------
 
 export type AlertaCliente = {
@@ -155,8 +160,8 @@ function proximoAniversario(nascimento: string, hoje: string): { dias: number; d
 
 /**
  * Alertas da ficha: passaporte (sem cadastro, vencido, ou vencendo menos de 6 meses depois da volta de uma
- * viagem internacional que ainda não terminou) e aniversário nos próximos 30 dias. Em grupo, documento só do
- * titular. Sem passaporte (nem número, nem validade) e com viagem: um aviso por viagem, com destino e volta,
+ * viagem internacional que ainda não terminou) e aniversário nos próximos 30 dias. Em grupo, documento do
+ * titular e de cada passageiro de uma viagem internacional futura. Sem passaporte (nem número, nem validade) e com viagem: um aviso por viagem, com destino e volta,
  * no lugar do genérico.
  */
 export function alertasDoCliente(
@@ -168,8 +173,9 @@ export function alertasDoCliente(
   const futuras = viagens.filter((v) => v.internacional && v.fim >= hoje);
   for (const p of c.pessoas) {
     const quem = { pessoa: p.nome, ...(p.id ? { pessoaId: p.id } : {}) };
-    const checaDocumento = c.tipo !== "grupo" || p.titular;
     const minhas = p.id ? futuras.filter((v) => v.passageiros.includes(p.id!)) : [];
+    // Em grupo, sem viagem, só o titular; quem embarca numa viagem internacional é conferido sempre.
+    const checaDocumento = c.tipo !== "grupo" || p.titular || minhas.length > 0;
     if (checaDocumento) {
       if (!p.validadePassaporte) {
         const temNumero = !!p.passaporte?.trim();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   alertasDoCliente,
+  dataEmCuiaba,
   cpfValido,
   formatarCodigoCliente,
   formatarCpf,
@@ -205,13 +206,31 @@ describe("alertasDoCliente: passaporte × volta da viagem", () => {
     const a = alertasDoCliente({ tipo: "individual", pessoas: [ana("2026-11-01")] }, "2026-11-22", [viagem()]);
     expect(a.map((x) => x.tipo)).toEqual(["passaporte_vencido"]);
   });
-  it("grupo: só o titular", () => {
+  it("grupo: na viagem, todo passageiro é conferido (não só o titular)", () => {
     const a = alertasDoCliente(
       { tipo: "grupo", pessoas: [ana("2027-06-30"), pessoa({ id: "p2", nome: "Bia Souza", titular: false, validadePassaporte: "2027-06-30" })] },
       "2026-11-22",
       [viagem({ passageiros: ["p1", "p2"] })],
     );
-    expect(a.map((x) => x.pessoa)).toEqual(["Ana Lima"]);
+    expect(a.map((x) => [x.tipo, x.pessoa])).toEqual([
+      ["passaporte_volta", "Ana Lima"],
+      ["passaporte_volta", "Bia Souza"],
+    ]);
+  });
+  it("grupo: passageiro sem passaporte na viagem avisa; quem não viaja segue a regra antiga (só o titular)", () => {
+    const a = alertasDoCliente(
+      {
+        tipo: "grupo",
+        pessoas: [
+          ana("2031-01-01"),
+          pessoa({ id: "p2", nome: "Bia Souza", titular: false, passaporte: null, validadePassaporte: null }),
+          pessoa({ id: "p3", nome: "Caio Souza", titular: false, passaporte: null, validadePassaporte: null }),
+        ],
+      },
+      "2026-11-22",
+      [viagem({ passageiros: ["p1", "p2"] })],
+    );
+    expect(a.map((x) => x.texto)).toEqual(["Bia Souza não tem passaporte cadastrado para Itália (29/01/2027)."]);
   });
 });
 
@@ -219,5 +238,9 @@ describe("hojeEmCuiaba", () => {
   it("usa UTC-4", () => {
     expect(hojeEmCuiaba(new Date("2026-11-19T03:30:00Z"))).toBe("2026-11-18");
     expect(hojeEmCuiaba(new Date("2026-11-19T04:30:00Z"))).toBe("2026-11-19");
+  });
+  it("dataEmCuiaba: a data do instante em Cuiabá (não a de UTC)", () => {
+    expect(dataEmCuiaba(new Date("2026-11-21T02:00:00Z"))).toBe("2026-11-20");
+    expect(dataEmCuiaba(new Date("2026-11-21T04:00:00Z"))).toBe("2026-11-21");
   });
 });

@@ -6,7 +6,6 @@ import { Bilhete } from "@/components/bilhete";
 import { Grade, Semaforo, SoGestao } from "@/components/kit";
 import { Badge, Botao, Campo, Card, CardHeader, Eyebrow, Select, Tabs, inputCls } from "@/components/ui";
 import { formatarCambio } from "@/domain/cambio";
-import { hojeEmCuiaba } from "@/domain/clientes";
 import { formatarReais, lerReais } from "@/domain/dinheiro";
 import type { ComissaoTipo, FormaPagamentoFornecedorTipo, LinhaPonte } from "@/domain/venda";
 import {
@@ -140,9 +139,8 @@ const marca = (acao: ReturnType<typeof useAcao>, k: string) => (acao.campos[k] ?
 // Formulários (painéis em linha)
 // ---------------------------------------------------------------------------
 
-function FormBaixaParcela({ parcela, onFechar }: { parcela: ParcelaVendida; onFechar: () => void }) {
+function FormBaixaParcela({ parcela, hoje, onFechar }: { parcela: ParcelaVendida; hoje: string; onFechar: () => void }) {
   const acao = useAcao();
-  const hoje = hojeEmCuiaba();
   const [data, setData] = useState(hoje);
   const [valor, setValor] = useState(reaisParaCampo(parcela.valor));
   const [taxa, setTaxa] = useState("");
@@ -184,9 +182,8 @@ function FormBaixaParcela({ parcela, onFechar }: { parcela: ParcelaVendida; onFe
   );
 }
 
-function FormBaixaPagamento({ conta, pag, onFechar }: { conta: ContaVendida; pag: PagamentoVendido; onFechar: () => void }) {
+function FormBaixaPagamento({ conta, pag, hoje, onFechar }: { conta: ContaVendida; pag: PagamentoVendido; hoje: string; onFechar: () => void }) {
   const acao = useAcao();
-  const hoje = hojeEmCuiaba();
   const [data, setData] = useState(hoje);
   const [valor, setValor] = useState(reaisParaCampo(pag.valorOriginal));
   const [cambio, setCambio] = useState("");
@@ -378,9 +375,8 @@ function FormContestar({ conta, onFechar }: { conta: ContaVendida; onFechar: () 
   );
 }
 
-function FormComissaoRecebida({ c, onFechar }: { c: ComissaoVendida; onFechar: () => void }) {
+function FormComissaoRecebida({ c, hoje, onFechar }: { c: ComissaoVendida; hoje: string; onFechar: () => void }) {
   const acao = useAcao();
-  const hoje = hojeEmCuiaba();
   const [data, setData] = useState(hoje);
   const [valor, setValor] = useState(reaisParaCampo(c.valorPrevisto));
   return (
@@ -442,6 +438,7 @@ export function ViagemVendidaView({
   podeAgir,
   ehDiretor,
   margem,
+  hoje,
 }: {
   v: ViagemVendida;
   ficha: FichaPrecificacao | null;
@@ -450,6 +447,8 @@ export function ViagemVendidaView({
   ehDiretor: boolean;
   /** Parâmetros do semáforo; só com a camada estratégica. */
   margem: { alvoPct: string; referenciaPct: string } | null;
+  /** Hoje em Cuiabá, do servidor (limite das datas de baixa; a renderização do cliente não recalcula). */
+  hoje: string;
 }) {
   const [aba, setAba] = useState<Aba>("entradas");
   const [painel, setPainel] = useState<Painel | null>(null);
@@ -547,13 +546,13 @@ export function ViagemVendidaView({
 
       {painelDaAba && (
         <div key={chave}>
-          {painelDaAba.tipo === "baixaParcela" && <FormBaixaParcela parcela={painelDaAba.parcela} onFechar={fechar} />}
-          {painelDaAba.tipo === "baixaPagamento" && <FormBaixaPagamento conta={painelDaAba.conta} pag={painelDaAba.pag} onFechar={fechar} />}
+          {painelDaAba.tipo === "baixaParcela" && <FormBaixaParcela parcela={painelDaAba.parcela} hoje={hoje} onFechar={fechar} />}
+          {painelDaAba.tipo === "baixaPagamento" && <FormBaixaPagamento conta={painelDaAba.conta} pag={painelDaAba.pag} hoje={hoje} onFechar={fechar} />}
           {painelDaAba.tipo === "forma" && <FormForma conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "comissaoTipo" && <FormComissaoTipo conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "previsto" && <FormPrevisto conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "contestar" && <FormContestar conta={painelDaAba.conta} onFechar={fechar} />}
-          {painelDaAba.tipo === "comissaoRecebida" && <FormComissaoRecebida c={painelDaAba.c} onFechar={fechar} />}
+          {painelDaAba.tipo === "comissaoRecebida" && <FormComissaoRecebida c={painelDaAba.c} hoje={hoje} onFechar={fechar} />}
           {painelDaAba.tipo === "comissaoNao" && <FormComissaoNao c={painelDaAba.c} onFechar={fechar} />}
         </div>
       )}

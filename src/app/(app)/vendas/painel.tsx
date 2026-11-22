@@ -6,7 +6,6 @@ import { useState } from "react";
 import { Check, CircleCheck, Send, Undo2 } from "lucide-react";
 import { Badge, Botao, BotaoLink, Campo, Card, CardHeader, Eyebrow, Select, cx, inputCls } from "@/components/ui";
 import { Grade } from "@/components/kit";
-import { hojeEmCuiaba } from "@/domain/clientes";
 import { formatarReais } from "@/domain/dinheiro";
 import { rotuloForma } from "@/domain/aprovacoes";
 import type { FormaPagamento } from "@/domain/precificacao";
@@ -27,7 +26,8 @@ const TIPOS: { valor: FormaPagamento["tipo"]; rotulo: string }[] = [
 const mesmaForma = (a: FormaPagamento, b: FormaPagamento) =>
   a.tipo === b.tipo && a.parcelas === b.parcelas && !!a.antecipado === !!b.antecipado;
 
-export function Painel({ p }: { p: PropostaLista }) {
+/** `hoje` (Cuiabá) vem do servidor: a renderização do cliente não recalcula a data. */
+export function Painel({ p, hoje }: { p: PropostaLista; hoje: string }) {
   return (
     <div className="space-y-5">
       <Card className="p-6">
@@ -61,7 +61,7 @@ export function Painel({ p }: { p: PropostaLista }) {
         </div>
       </Card>
 
-      {p.estado === "aguardando" && <RespostaCliente p={p} />}
+      {p.estado === "aguardando" && <RespostaCliente p={p} hoje={hoje} />}
       {p.estado === "vendida" && <ComFinanceiro p={p} />}
       {p.estado === "ajustes" && (
         <Card className="p-6">
@@ -77,9 +77,8 @@ export function Painel({ p }: { p: PropostaLista }) {
   );
 }
 
-function RespostaCliente({ p }: { p: PropostaLista }) {
+function RespostaCliente({ p, hoje }: { p: PropostaLista; hoje: string }) {
   const router = useRouter();
-  const hoje = hojeEmCuiaba();
   const acao = useAcao();
   const [resp, setResp] = useState<"aprovou" | "ajustes">("aprovou");
   const aprovada = p.formaAprovada;

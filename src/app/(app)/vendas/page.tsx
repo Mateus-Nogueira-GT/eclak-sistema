@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Badge, PageHeader } from "@/components/ui";
+import { dataEmCuiaba, hojeEmCuiaba } from "@/domain/clientes";
 import { formatarReais } from "@/domain/dinheiro";
 import { ErroAcesso, exigirPerfil } from "@/server/auth";
 import { listarPropostas, type PropostaLista } from "@/server/queries/vendas";
@@ -51,7 +52,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<B
               <Item key={p.id} p={p} ativo={p.id === escolhida?.id} />
             ))}
           </nav>
-          {escolhida && <Painel key={escolhida.id} p={escolhida} />}
+          {escolhida && <Painel key={escolhida.id} p={escolhida} hoje={hojeEmCuiaba()} />}
         </div>
       )}
     </div>
@@ -67,7 +68,7 @@ function Item({ p, ativo }: { p: PropostaLista; ativo: boolean }) {
     >
       <span className="block text-[12.5px] text-cinza">
         {p.codigo} · versão {p.numeroVersao}
-        {p.aprovadoEm ? ` · aprovada em ${dataBr(p.aprovadoEm.toISOString().slice(0, 10))}` : ""}
+        {p.aprovadoEm ? ` · aprovada em ${dataBr(dataEmCuiaba(p.aprovadoEm))}` : ""}
       </span>
       <span className="mt-0.5 block text-[15px] font-semibold text-texto">{p.cliente}</span>
       <span className="mt-1 flex flex-wrap items-center justify-between gap-2">

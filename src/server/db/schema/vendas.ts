@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, check, date, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import {
   COMISSAO_TIPOS,
   FORMAS_PAGAMENTO_FORNECEDOR,
@@ -83,6 +83,9 @@ export const parcelasReceber = pgTable(
   },
   (t) => [
     check("parcelas_receber_valores", sql`${t.valor} >= 0 AND ${t.taxaPrevista} >= 0 AND (${t.valorRecebido} IS NULL OR ${t.valorRecebido} >= 0) AND (${t.taxaEfetiva} IS NULL OR ${t.taxaEfetiva} >= 0)`),
+    unique("parcelas_receber_venda_numero_unico").on(t.vendaId, t.numero),
+    // Fluxo de caixa: o que ainda vai entrar, por vencimento.
+    index("parcelas_receber_a_receber_vencimento_idx").on(t.vencimento).where(sql`${t.status} = 'a_receber'`),
   ],
 );
 
@@ -123,6 +126,8 @@ export const contasPagar = pgTable(
   },
   (t) => [
     check("contas_pagar_valores", sql`${t.valorOriginal} >= 0 AND ${t.previstoVendaBrl} >= 0 AND ${t.previstoBrl} >= 0`),
+    // Uma conta ativa por item da viagem.
+    uniqueIndex("contas_pagar_viagem_item_ativa_unico").on(t.viagemId, t.itemId).where(sql`${t.excluidoEm} IS NULL`),
   ],
 );
 
@@ -145,6 +150,9 @@ export const pagamentosFornecedor = pgTable(
   },
   (t) => [
     check("pagamentos_fornecedor_valores", sql`${t.valorOriginal} >= 0 AND ${t.valorBrlPrevisto} >= 0 AND (${t.valorOriginalPago} IS NULL OR ${t.valorOriginalPago} >= 0) AND (${t.valorBrlPago} IS NULL OR ${t.valorBrlPago} >= 0)`),
+    unique("pagamentos_fornecedor_conta_numero_unico").on(t.contaId, t.numero),
+    // Fluxo de caixa: o que ainda vai sair, por vencimento.
+    index("pagamentos_fornecedor_a_pagar_vencimento_idx").on(t.vencimento).where(sql`${t.status} = 'a_pagar'`),
   ],
 );
 
@@ -170,5 +178,9 @@ export const comissoes = pgTable(
   },
   (t) => [
     check("comissoes_valores", sql`${t.baseBrl} >= 0 AND ${t.valorPrevisto} >= 0 AND (${t.valorRecebido} IS NULL OR ${t.valorRecebido} >= 0)`),
+    // Uma comissão por conta (cancelada volta a prevista, nunca duplica).
+    unique("comissoes_conta_unico").on(t.contaId),
+    // Fluxo de caixa: comissões a receber, pela data prevista.
+    index("comissoes_prevista_para_idx").on(t.previstaPara).where(sql`${t.status} = 'prevista'`),
   ],
 );

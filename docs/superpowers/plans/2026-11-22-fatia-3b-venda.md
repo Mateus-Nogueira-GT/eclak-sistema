@@ -31,6 +31,18 @@ Do Claude (conferir):
 - **Viagem vendida não aceita mudança de itens/cotações/precificação** ("Viagem vendida: ajustes de valor vão em Contas a pagar").
 - **Aviso de passaporte × volta** (pendência da fatia 2): para viagens `aprovado`/`vendida` com `internacional = true` e data de volta ≥ hoje, passageiro sem validade ou com validade < volta + 182 dias. Novo campo `viagens.internacional` (padrão `true`, editável no orçamento). O aviso aparece na ficha do cliente, no chip "Documentos pendentes" e na viagem.
 
+Do Controller (revisão final, a confirmar com o Mateus):
+- **Recebimento a menos ou parcela cancelada**: a baixa com valor recebido diferente do valor da parcela exige observação ("Explique a diferença do valor recebido"). A receita da margem real = preço da versão − Σ (valor − valor recebido) das parcelas recebidas (positivo = recebido a menos; negativo = a mais) − Σ valor das parcelas canceladas, cada diferença **na parte do pacote** (× preço ÷ total a receber, meio para cima), para a taxa de serviço não contar como receita do pacote; o imposto é recalculado sobre a nova base. A ponte ganha "Recebido a menos", "Recebido a mais" e "Parcela cancelada: n de N" com esse efeito (soma continua exata). O cartão "Recebido" continua sendo o caixa; "A receber" mostra "Diferença no recebimento" quando ≠ 0. As divergências contam as parcelas recebidas com diferença e as canceladas.
+- **Previsto acima do já pago sem linha em aberto**: o aumento vira uma linha nova em aberto (vence hoje em Cuiabá; na moeda pelo câmbio da conta) e a conta volta a `a_pagar`; a linha é o aumento do previsto, sem passar do novo previsto menos o já pago (com desconto à vista pago, não cobra o desconto de volta).
+
+## Para a fatia 4
+
+- Cartão direto no fornecedor: parcelas e contas marcadas "não transita pelo caixa" no fluxo de caixa.
+- `definirFormaFornecedor` apaga as linhas de pagamento em aberto: vai conflitar com as FKs futuras (boletos, faturas de cartão); trocar por cancelamento lógico ou recusar quando houver vínculo.
+- `fatura_numero` a partir de 1502 sem buracos: linha contadora travada dentro da trava da viagem.
+- `travarViagemEdicao`/`alterarOrcamento` sem o lock consultivo (seguro hoje).
+- `internacional` editável depois da venda; `excluirCliente` com viagens vendidas; texto de "A pagar" sobre o desconto.
+
 ## Global Constraints
 
 - Todas as das fatias 1–3a (centavos `bigint`, percentuais string, RLS, auditoria na mesma transação, exclusão lógica, "hoje" em `America/Cuiaba`, marca sem vermelho/gradiente/emoji/estrelinha, textos pt-BR, `comPerfil` no início de toda action, `exigirPerfil` em toda query).

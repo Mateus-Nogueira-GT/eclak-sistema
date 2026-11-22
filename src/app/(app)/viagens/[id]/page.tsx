@@ -59,6 +59,7 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
             podeAgir={estrategico}
             ehDiretor={usuario.perfil === "diretor"}
             margem={regras ? { alvoPct: regras.margemAlvoPct, referenciaPct: regras.margemReferenciaPct } : null}
+            hoje={hojeEmCuiaba()}
           />
         </div>
       );

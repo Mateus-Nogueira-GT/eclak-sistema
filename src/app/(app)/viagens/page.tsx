@@ -88,7 +88,8 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<B
                   )}
                   {estrategico && (
                     <Td className="num text-right">
-                      {o.estrategico === undefined || "erro" in o.estrategico || o.estrategico.margemPct === null ? <span className="text-cinza">-</span> : pct1(o.estrategico.margemPct)}
+                      {/* Vendida: a margem de hoje (recalculada) não vale; a coluna ao lado mostra planejada × real. */}
+                      {o.status === "vendida" || o.estrategico === undefined || "erro" in o.estrategico || o.estrategico.margemPct === null ? <span className="text-cinza">-</span> : pct1(o.estrategico.margemPct)}
                     </Td>
                   )}
                   {estrategico && (

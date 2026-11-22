@@ -127,6 +127,13 @@
       "when": 1795352702447,
       "tag": "0017_comissao_tipo_venda",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795366623323,
+      "tag": "0018_restricoes_caixa",
+      "breakpoints": true
     }
   ]
 }
