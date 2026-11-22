@@ -126,11 +126,21 @@ describe("cronogramaRecebimento (Review Focus 3)", () => {
 describe("alocarTaxasPrevistas", () => {
   it("reparte a taxa da aprovação pelo valor das parcelas; a última absorve e a soma é exata", () => {
     expect(alocarTaxasPrevistas(1000n, [33333n, 33333n, 33334n])).toEqual([333n, 333n, 334n]);
-    // 1001 × 1/3 = 333,67 → 334; a última fica com 333
-    expect(alocarTaxasPrevistas(1001n, [100n, 100n, 100n])).toEqual([334n, 334n, 333n]);
+    // 1001 × 1/3 = 333,67 → truncado 333; a última fica com 335
+    expect(alocarTaxasPrevistas(1001n, [100n, 100n, 100n])).toEqual([333n, 333n, 335n]);
     expect(alocarTaxasPrevistas(0n, [500n, 500n])).toEqual([0n, 0n]);
     expect(alocarTaxasPrevistas(7n, [0n, 0n])).toEqual([0n, 7n]);
     expect(alocarTaxasPrevistas(5n, [])).toEqual([]);
+    expect(() => alocarTaxasPrevistas(-1n, [1n])).toThrow("Valor inválido");
+  });
+  it("nunca devolve parte negativa (7 centavos em 10 parcelas de 1)", () => {
+    const a = alocarTaxasPrevistas(7n, Array.from({ length: 10 }, () => 1n));
+    expect(a.every((x) => x >= 0n)).toBe(true);
+    expect(a.reduce((x, y) => x + y, 0n)).toBe(7n);
+    expect(a).toEqual([0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 0n, 7n]);
+    const b = alocarTaxasPrevistas(5n, [1n, 0n, 1n, 1n, 0n, 1n]);
+    expect(b.every((x) => x >= 0n)).toBe(true);
+    expect(b.reduce((x, y) => x + y, 0n)).toBe(5n);
     for (const taxa of [1n, 999n, 31337n, 123457n]) {
       for (let n = 1; n <= 10; n++) {
         const valores = cronogramaRecebimento(9_000_001n, n, "2026-11-20").map((p) => p.valor);
@@ -282,11 +292,42 @@ describe("aplicarFormaFornecedor", () => {
     );
     expect(linhas.map((l) => l.valorOriginal)).toEqual([33333n, 33333n, 33334n]);
     expect(linhas.reduce((a, l) => a + l.valorBrlPrevisto, 0n)).toBe(615821n);
-    expect(linhas[0].valorBrlPrevisto).toBe(205272n);
+    expect(linhas[0].valorBrlPrevisto).toBe(205271n);
     expect(() =>
       aplicarFormaFornecedor(eur, { tipo: "parcelado", parcelas: [{ vencimento: "2026-12-01", valorOriginal: 99999n }] }, null),
     ).toThrow("A soma das parcelas deve ser igual ao valor previsto");
     expect(() => aplicarFormaFornecedor(eur, { tipo: "parcelado", parcelas: [] }, null)).toThrow("Informe as parcelas");
+  });
+  it("parcelado com linhas mínimas ou zeradas: reais nunca negativos e soma exata", () => {
+    const pequena = conta({ moeda: "EUR", previstoOriginal: 10n, previstoBrl: 7n });
+    const parcelas = Array.from({ length: 10 }, (_, i) => ({ vencimento: `2027-0${(i % 9) + 1}-01`, valorOriginal: 1n }));
+    const l1 = aplicarFormaFornecedor(pequena, { tipo: "parcelado", parcelas }, null);
+    expect(l1.every((l) => l.valorBrlPrevisto >= 0n)).toBe(true);
+    expect(l1.reduce((a, l) => a + l.valorBrlPrevisto, 0n)).toBe(7n);
+    const comZero = conta({ moeda: "EUR", previstoOriginal: 3n, previstoBrl: 20n });
+    const l2 = aplicarFormaFornecedor(
+      comZero,
+      {
+        tipo: "parcelado",
+        parcelas: [
+          { vencimento: "2027-01-01", valorOriginal: 1n },
+          { vencimento: "2027-02-01", valorOriginal: 0n },
+          { vencimento: "2027-03-01", valorOriginal: 1n },
+          { vencimento: "2027-04-01", valorOriginal: 1n },
+          { vencimento: "2027-05-01", valorOriginal: 0n },
+        ],
+      },
+      null,
+    );
+    expect(l2.map((l) => l.valorBrlPrevisto)).toEqual([6n, 0n, 6n, 6n, 2n]);
+    expect(l2.every((l) => l.valorBrlPrevisto >= 0n)).toBe(true);
+    expect(l2.reduce((a, l) => a + l.valorBrlPrevisto, 0n)).toBe(20n);
+    const zerada = aplicarFormaFornecedor(
+      conta({ previstoOriginal: 0n, previstoBrl: 0n }),
+      { tipo: "parcelado", parcelas: [{ vencimento: "2027-01-01", valorOriginal: 0n }, { vencimento: "2027-02-01", valorOriginal: 0n }] },
+      null,
+    );
+    expect(zerada.map((l) => l.valorBrlPrevisto)).toEqual([0n, 0n]);
   });
   it("cartão corporativo: uma linha na data da fatura, valor cheio", () => {
     expect(aplicarFormaFornecedor(conta(), { tipo: "cartao_corporativo", vencimento: "2026-12-10" }, "7.000")).toEqual([
@@ -523,6 +564,24 @@ describe("ponteDaMargem", () => {
       ["Comissão recebida: Op", -5000n],
       ["Imposto", 350n],
       ["Margem real", 460350n],
+    ]);
+  });
+
+  it("comissão marcada não recebida tem rótulo próprio", () => {
+    const p = ponteDaMargem({
+      planejada: { custo: 500000n, imposto: 35000n, taxa: 0n, fixo: 0n, final: 465000n },
+      preco: 1000000n,
+      impostoPct: "7.000",
+      taxaRoteiro: 0n,
+      contas: [{ rotulo: "Op", aereo: false, moeda: "BRL", previstoVendaBrl: 550000n, previstoBrl: 550000n, pagoBrl: null }],
+      comissoes: [{ fornecedor: "Op", aereo: false, valorPrevisto: 50000n, valorRecebido: null, naoRecebida: true }],
+      parcelas: [],
+    });
+    expect(p.linhas.map((l) => [l.rotulo, l.valor])).toEqual([
+      ["Margem planejada", 465000n],
+      ["Comissão não recebida: Op", -50000n],
+      ["Imposto", 3500n],
+      ["Margem real", 418500n],
     ]);
   });
 });

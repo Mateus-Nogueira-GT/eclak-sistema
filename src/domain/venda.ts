@@ -98,14 +98,16 @@ export function cronogramaRecebimento(total: bigint, n: number, primeiro: string
 
 /**
  * Taxas financeiras previstas por parcela: a `taxa` do `resultado` da versão aprovada repartida na proporção do
- * valor de cada parcela sobre o total (meio para cima); a última absorve, então a soma é a taxa da aprovação.
+ * valor de cada parcela sobre o total (truncado ao centavo); a última absorve o resto (nunca negativo), então a
+ * soma é a taxa da aprovação.
  */
 export function alocarTaxasPrevistas(resultadoTaxa: bigint, valoresParcelas: bigint[]): bigint[] {
   if (valoresParcelas.length === 0) return [];
+  if (resultadoTaxa < 0n || valoresParcelas.some((v) => v < 0n)) throw new Error("Valor inválido");
   const total = valoresParcelas.reduce((a, v) => a + v, 0n);
   let acumulado = 0n;
   return valoresParcelas.map((v, i) => {
-    const t = i === valoresParcelas.length - 1 ? resultadoTaxa - acumulado : total === 0n ? 0n : arredondar(resultadoTaxa * v, total);
+    const t = i === valoresParcelas.length - 1 ? resultadoTaxa - acumulado : total === 0n ? 0n : (resultadoTaxa * v) / total;
     acumulado += t;
     return t;
   });
@@ -269,7 +271,7 @@ export type LinhaPagamento = {
 /**
  * Linhas de pagamento ao fornecedor. À vista: uma linha com o desconto à vista da cotação (se houver) sobre o
  * previsto. Parcelado: as parcelas informadas, cuja soma tem de ser o previsto na moeda; os reais seguem a
- * proporção (meio para cima) e a última absorve, somando o previsto em reais. Cartão corporativo: uma linha na
+ * proporção (truncada ao centavo) e a última absorve o resto, nunca negativo, somando o previsto em reais. Cartão corporativo: uma linha na
  * data da fatura, valor cheio.
  */
 export function aplicarFormaFornecedor(
@@ -296,6 +298,7 @@ export function aplicarFormaFornecedor(
       return [{ numero: 1, vencimento: forma.vencimento, valorOriginal: conta.previstoOriginal, valorBrlPrevisto: conta.previstoBrl }];
     case "parcelado": {
       const ps = forma.parcelas;
+      if (conta.previstoBrl < 0n) throw new Error("Valor inválido");
       if (ps.length === 0) throw new Error("Informe as parcelas");
       for (const p of ps) {
         lerData(p.vencimento);
@@ -306,7 +309,7 @@ export function aplicarFormaFornecedor(
       let acumulado = 0n;
       return ps.map((p, i) => {
         const ultima = i === ps.length - 1;
-        const brl = ultima ? conta.previstoBrl - acumulado : soma === 0n ? 0n : arredondar(conta.previstoBrl * p.valorOriginal, soma);
+        const brl = ultima ? conta.previstoBrl - acumulado : soma === 0n ? 0n : (conta.previstoBrl * p.valorOriginal) / soma;
         acumulado += brl;
         return { numero: i + 1, vencimento: p.vencimento, valorOriginal: p.valorOriginal, valorBrlPrevisto: brl };
       });
@@ -392,8 +395,10 @@ export type ComissaoPonte = {
   fornecedor: string;
   aereo: boolean;
   valorPrevisto: bigint;
-  /** Nulo = ainda não recebida (ou "não será recebida"). */
+  /** Nulo = ainda não recebida (ou marcada "não será recebida"). */
   valorRecebido: bigint | null;
+  /** Marcada "não será recebida" (rótulo próprio na ponte). */
+  naoRecebida?: boolean;
 };
 
 export type EntradaPonte = {
@@ -413,6 +418,7 @@ export type LinhaPonte = { rotulo: string; valor: bigint };
  * "Fornecedores escolhidos" (custo planejado pelo pior − custo das escolhidas na venda); por conta,
  * "<rótulo>: valor atualizado" (previsto atual − previsto na venda, e o pago diferente do previsto em reais);
  * "Diferença de câmbio" (pago − previsto nas contas pagas em moeda estrangeira); "Comissão pendente: <f>";
+ * "Comissão não recebida: <f>" (marcada "não será recebida");
  * "Comissão recebida: <f>" (recebida com valor diferente do previsto); "Taxas financeiras"; "Imposto".
  * As linhas do meio somam exatamente real.final − planejada.final.
  */
@@ -448,7 +454,8 @@ export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: Linh
   add("Diferença de câmbio", -cambio);
 
   for (const c of comissoes) {
-    if (c.valorRecebido === null) add(`Comissão pendente: ${c.fornecedor}`, -c.valorPrevisto);
+    if (c.naoRecebida) add(`Comissão não recebida: ${c.fornecedor}`, -c.valorPrevisto);
+    else if (c.valorRecebido === null) add(`Comissão pendente: ${c.fornecedor}`, -c.valorPrevisto);
     else add(`Comissão recebida: ${c.fornecedor}`, c.valorRecebido - c.valorPrevisto);
   }
 
