@@ -68,6 +68,13 @@ const AGUARDANDO: Falha = {
 type ViagemLinha = typeof viagens.$inferSelect;
 type VersaoLinha = typeof versoesPrecificacao.$inferSelect;
 
+/** Recusa dentro da transação que precisa desfazer o que já foi gravado; vira a `falha` fora dela. */
+class Desfazer extends Error {
+  constructor(readonly falha: Falha) {
+    super(falha.erro);
+  }
+}
+
 const ehFalha = (x: unknown): x is Falha => typeof x === "object" && x !== null && "ok" in x;
 
 /** Erro de banco inesperado: loga só o código (sem parâmetros) e relança genérico. */
@@ -201,9 +208,10 @@ export async function enviarParaAprovacao(
         if (v.status === "aguardando_aprovacao") return AGUARDANDO;
         const agora = new Date();
         // A taxa de roteiro acompanha os Parâmetros vigentes antes do snapshot (mudou desde a última edição?).
+        // Daqui em diante, recusa desfaz a transação (Desfazer): envio que falha não muda nada.
         await sincronizarTaxaRoteiro(tx, viagemId, regras, usuario.id, agora);
         const itens = itensDoSnapshot(await lerItens(tx, viagemId));
-        if ("erro" in itens) return { ok: false, erro: itens.erro } satisfies Falha;
+        if ("erro" in itens) throw new Desfazer({ ok: false, erro: itens.erro });
         const passageiros = await tx
           .select({ id: pessoas.id, nome: pessoas.nome })
           .from(viagemPassageiros)
@@ -214,12 +222,12 @@ export async function enviarParaAprovacao(
         const dias = diasDaViagem(v.inicio, v.fim);
         const rateio = regras.rateio.metodo;
         const preco = p.data.preco ?? precoCalculado(custosDoSnapshot(snapshot).custo, forma, regras);
-        if (preco === null) return NAO_CALCULA;
+        if (preco === null) throw new Desfazer(NAO_CALCULA);
         let resultado: ResultadoVersao;
         try {
           resultado = resultadoDaVersao(snapshot, preco, forma, dias, rateio, regras);
         } catch {
-          return NAO_CALCULA;
+          throw new Desfazer(NAO_CALCULA);
         }
 
         const [ver] = await tx
@@ -251,6 +259,7 @@ export async function enviarParaAprovacao(
         return { id: ver.id, numero: ver.numero };
       });
     } catch (e) {
+      if (e instanceof Desfazer) return e.falha;
       throw erroDeBanco("Erro ao enviar para aprovação", e);
     }
     if (ehFalha(r)) return r;

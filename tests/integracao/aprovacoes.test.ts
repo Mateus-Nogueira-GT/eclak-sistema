@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import type { ResultadoVersao, Snapshot } from "@/domain/aprovacoes";
@@ -602,6 +602,40 @@ describe("integridade da versão aprovada e proposta desatualizada", () => {
     expect(await comSessao(u.id, () => obterProposta(viagemId))).toMatchObject({ ok: true, proposta: { desatualizada: true, numeroVersao: 1 } });
     await comSessao(d.id, () => aprovar(id2));
     expect(await comSessao(u.id, () => obterProposta(viagemId))).toMatchObject({ ok: true, proposta: { desatualizada: false, numeroVersao: 2 } });
+  });
+
+  it("envio que falha não altera a taxa de roteiro nem o status (viagem aprovada)", async () => {
+    const { u, d, viagemId } = await cenario();
+    await cotado(u.id, viagemId);
+    for (let i = 0; i < 4; i++) await cotacao(u.id, await item(u.id, viagemId, { servico: `Passeio ${i}` }), { valor: "100,00" });
+    const id1 = await enviar(u.id, viagemId);
+    await comSessao(d.id, () => aprovar(id1));
+    const antesV = await viagem(viagemId);
+    expect(antesV.status).toBe("aprovado");
+    const [taxaItem] = await db.select().from(itensViagem).where(and(eq(itensViagem.viagemId, viagemId), eq(itensViagem.automatico, true)));
+    const taxaCots = () => db.select().from(cotacoes).where(eq(cotacoes.itemId, taxaItem.id));
+    const antesTaxa = await taxaCots();
+    const antesAud = await db.select().from(auditoria);
+
+    const vig = await comSessao(d.id, () => regrasVigentes());
+    const novas = { ...vig.valores, taxaRoteiro: { ...vig.valores.taxaRoteiro, valor: "77700" } };
+    expect((await comSessao(d.id, () => salvarRegras({ ...novas, margemAlvoPct: "93.000" }))).ok).toBe(true);
+    const audRegras = await db.select().from(auditoria);
+    // envio sem preço não calcula → recusa, nada muda
+    expect(await comSessao(u.id, () => enviarParaAprovacao(viagemId, { forma: CREDITO6, alteracao: "Taxa" }))).toEqual({
+      ok: false,
+      erro: "Não foi possível calcular o preço com os Parâmetros vigentes",
+    });
+    expect(await taxaCots()).toEqual(antesTaxa);
+    expect(await viagem(viagemId)).toEqual(antesV);
+    expect(await db.select().from(auditoria)).toHaveLength(audRegras.length);
+    expect(audRegras.length).toBeGreaterThan(antesAud.length);
+    expect(await versoesDa(viagemId)).toHaveLength(1);
+
+    // com Parâmetros que calculam, o envio sincroniza
+    expect((await comSessao(d.id, () => salvarRegras(novas))).ok).toBe(true);
+    await enviar(u.id, viagemId, { alteracao: "Taxa nova" });
+    expect((await taxaCots())[0].valorBrl).toBe(77700n);
   });
 
   it("envio sincroniza a taxa de roteiro com os Parâmetros vigentes antes do snapshot", async () => {
