@@ -91,8 +91,8 @@ function formatarEscala(v: bigint, casas: number): string {
   return `${neg ? "-" : ""}${abs / base}${dec}`;
 }
 
-/** Percentual de numerador/denominador com 1 casa ("19.0"). */
-function pct1(numerador: bigint, denominador: bigint): string {
+/** Percentual de numerador/denominador com 1 casa ("19.0"); denominador zero → "0.0". */
+export function pct1(numerador: bigint, denominador: bigint): string {
   if (denominador === 0n) return "0.0";
   return formatarEscala(arredondar(numerador * 1000n, denominador), 1);
 }
@@ -172,6 +172,12 @@ export function precoDoPacote(custo: bigint, f: FormaPagamento, r: Regras, marge
   return arredondar((E - t) * custo + taxa.fixo * E, den);
 }
 
+/** Imposto sobre a margem: imposto% × max(P − C, 0), meio para cima. Mesma conta na aprovação e na margem real. */
+export function impostoSobreMargem(precoP: bigint, custo: bigint, impostoPct: string): bigint {
+  const lucro = precoP - custo;
+  return arredondar(pct(impostoPct) * (lucro > 0n ? lucro : 0n), E);
+}
+
 /** Imposto (sobre max(P − C, 0)), taxas financeiras e margem líquida de um preço. */
 export function resultadoDoPreco(
   precoP: bigint,
@@ -180,7 +186,7 @@ export function resultadoDoPreco(
   r: Regras,
 ): { imposto: bigint; taxas: bigint; margemLiquida: bigint; margemLiquidaPct: string } {
   const lucro = precoP - custo;
-  const imposto = arredondar(pct(r.impostoSobreMargemPct) * (lucro > 0n ? lucro : 0n), E);
+  const imposto = impostoSobreMargem(precoP, custo, r.impostoSobreMargemPct);
   const taxa = taxaDaForma(f, r);
   const taxas = arredondar(pct(taxa.pct) * precoP, E) + taxa.fixo;
   const margemLiquida = lucro - imposto - taxas;

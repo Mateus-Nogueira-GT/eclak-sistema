@@ -99,7 +99,7 @@ export function hojeEmCuiaba(agora: Date = new Date()): string {
 // ---------- Alertas ----------
 
 export type AlertaCliente = {
-  tipo: "sem_passaporte" | "passaporte_vencido" | "aniversario";
+  tipo: "sem_passaporte" | "passaporte_vencido" | "passaporte_volta" | "aniversario";
   pessoa: string;
   /** Id da pessoa, quando ela já está gravada (a ficha destaca a linha por ele). */
   pessoaId?: string;
@@ -115,7 +115,24 @@ type PessoaAlerta = {
   validadePassaporte: string | null;
 };
 
+/** Viagem futura do cliente para o aviso de passaporte × volta (o chamador passa só as `aprovado`/`vendida`). */
+export type ViagemAlerta = {
+  destino: string;
+  /** Data da volta (AAAA-MM-DD). */
+  fim: string;
+  internacional: boolean;
+  /** Ids das pessoas que viajam. */
+  passageiros: string[];
+};
+
 const JANELA_ANIVERSARIO_DIAS = 30;
+/** Passaporte precisa valer 6 meses depois da volta (regra mais segura; a Europa pede 3). */
+export const DIAS_PASSAPORTE_APOS_VOLTA = 182;
+
+function somarDias(iso: string, dias: number): string {
+  const [a, m, d] = partes(iso);
+  return new Date((diaUtc(a, m, d) + dias) * 86_400_000).toISOString().slice(0, 10);
+}
 
 function dataBr(iso: string): string {
   const [a, m, d] = partes(iso);
@@ -136,29 +153,57 @@ function proximoAniversario(nascimento: string, hoje: string): { dias: number; d
   return { dias: o.dias - base, dia: o.dia, mes: o.mes };
 }
 
+/**
+ * Alertas da ficha: passaporte (sem cadastro, vencido, ou vencendo menos de 6 meses depois da volta de uma
+ * viagem internacional que ainda não terminou) e aniversário nos próximos 30 dias. Em grupo, documento só do
+ * titular. Sem passaporte (nem número, nem validade) e com viagem: um aviso por viagem, com destino e volta,
+ * no lugar do genérico.
+ */
 export function alertasDoCliente(
   c: { tipo: TipoCliente; pessoas: PessoaAlerta[] },
   hoje: string,
+  viagens: ViagemAlerta[] = [],
 ): AlertaCliente[] {
   const alertas: AlertaCliente[] = [];
+  const futuras = viagens.filter((v) => v.internacional && v.fim >= hoje);
   for (const p of c.pessoas) {
     const quem = { pessoa: p.nome, ...(p.id ? { pessoaId: p.id } : {}) };
     const checaDocumento = c.tipo !== "grupo" || p.titular;
+    const minhas = p.id ? futuras.filter((v) => v.passageiros.includes(p.id!)) : [];
     if (checaDocumento) {
       if (!p.validadePassaporte) {
-        alertas.push({
-          tipo: "sem_passaporte",
-          ...quem,
-          texto: p.passaporte?.trim()
-            ? `${p.nome} não tem a validade do passaporte cadastrada.`
-            : `${p.nome} não tem passaporte cadastrado.`,
-        });
+        const temNumero = !!p.passaporte?.trim();
+        if (!temNumero && minhas.length > 0) {
+          for (const v of minhas) {
+            alertas.push({
+              tipo: "sem_passaporte",
+              ...quem,
+              texto: `${p.nome} não tem passaporte cadastrado para ${v.destino} (${dataBr(v.fim)}).`,
+            });
+          }
+        } else {
+          alertas.push({
+            tipo: "sem_passaporte",
+            ...quem,
+            texto: temNumero ? `${p.nome} não tem a validade do passaporte cadastrada.` : `${p.nome} não tem passaporte cadastrado.`,
+          });
+        }
       } else if (p.validadePassaporte < hoje) {
         alertas.push({
           tipo: "passaporte_vencido",
           ...quem,
           texto: `Passaporte de ${p.nome} venceu em ${dataBr(p.validadePassaporte)}.`,
         });
+      } else {
+        for (const v of minhas) {
+          if (p.validadePassaporte < somarDias(v.fim, DIAS_PASSAPORTE_APOS_VOLTA)) {
+            alertas.push({
+              tipo: "passaporte_volta",
+              ...quem,
+              texto: `Passaporte de ${p.nome} vence em ${dataBr(p.validadePassaporte)}, menos de 6 meses depois da volta de ${v.destino}.`,
+            });
+          }
+        }
       }
     }
     if (p.nascimento) {
