@@ -34,6 +34,7 @@ const PROXIMO_PASSO: Record<StatusOrcamento, string> = {
   aguardando_aprovacao: "Pedido enviado. O Diretor aprova ou devolve com comentário. Responsável: Diretor.",
   aprovado: "Proposta liberada. Gere o PDF e envie ao cliente. Responsável: Consultor.",
   devolvido: "Devolvido pelo Diretor. Veja o comentário em Versões, ajuste e envie de novo. Responsável: Consultor.",
+  vendida: "Venda fechada. Acompanhe recebimentos e pagamentos a fornecedores. Responsável: Financeiro.",
 };
 
 export function Painel({

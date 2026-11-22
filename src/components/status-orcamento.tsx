@@ -6,6 +6,7 @@ const TOM: Record<StatusOrcamento, "cinza" | "ouro" | "agua"> = {
   aguardando_aprovacao: "ouro",
   aprovado: "agua",
   devolvido: "cinza",
+  vendida: "agua",
 };
 
 export function StatusOrcamentoBadge({ status }: { status: StatusOrcamento }) {

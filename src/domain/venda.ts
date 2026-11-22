@@ -156,6 +156,18 @@ export type ComissaoTipo = (typeof COMISSAO_TIPOS)[number];
 export const FORMAS_PAGAMENTO_FORNECEDOR = ["a_vista", "parcelado", "cartao_corporativo"] as const;
 export type FormaPagamentoFornecedorTipo = (typeof FORMAS_PAGAMENTO_FORNECEDOR)[number];
 
+export const STATUS_PARCELA = ["a_receber", "recebida", "cancelada"] as const;
+export type StatusParcela = (typeof STATUS_PARCELA)[number];
+
+export const STATUS_CONTA = ["a_pagar", "paga", "cancelada"] as const;
+export type StatusConta = (typeof STATUS_CONTA)[number];
+
+export const STATUS_PAGAMENTO = ["a_pagar", "pago"] as const;
+export type StatusPagamento = (typeof STATUS_PAGAMENTO)[number];
+
+export const STATUS_COMISSAO = ["prevista", "recebida", "nao_recebida"] as const;
+export type StatusComissao = (typeof STATUS_COMISSAO)[number];
+
 export type ComissaoGerada = {
   /** Valor em reais da cotação (cheio). */
   baseBrl: bigint;

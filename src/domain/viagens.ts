@@ -1,6 +1,6 @@
 // Regras puras de viagens (sem I/O).
 
-export const STATUS_ORCAMENTO = ["em_edicao", "aguardando_aprovacao", "aprovado", "devolvido"] as const;
+export const STATUS_ORCAMENTO = ["em_edicao", "aguardando_aprovacao", "aprovado", "devolvido", "vendida"] as const;
 export type StatusOrcamento = (typeof STATUS_ORCAMENTO)[number];
 
 export const ROTULOS_STATUS_ORCAMENTO: Record<StatusOrcamento, string> = {
@@ -8,6 +8,7 @@ export const ROTULOS_STATUS_ORCAMENTO: Record<StatusOrcamento, string> = {
   aguardando_aprovacao: "Aguardando aprovação",
   aprovado: "Aprovado",
   devolvido: "Devolvido",
+  vendida: "Vendida",
 };
 
 export const STATUS_VERSAO = ["aguardando", "aprovada", "aprovada_com_ajuste", "devolvida"] as const;
