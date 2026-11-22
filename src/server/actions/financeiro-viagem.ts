@@ -37,6 +37,7 @@ import {
   valorReaisSchema,
 } from "@/domain/venda-entrada";
 import { MSG_NAO_CALCULA } from "@/domain/aprovacoes";
+import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
@@ -60,8 +61,6 @@ import { travarViagem } from "@/server/trava-viagem";
 // passa pela trava da viagem (lock consultivo → viagem `for update`, a mesma da 3a) e depois trava a linha
 // alterada pela cadeia de dono (pagamento → conta → viagem; comissão → conta → viagem; parcela → viagem).
 // Viagem conciliada não muda até o Diretor desfazer a conciliação. Respostas só `{ ok }`.
-
-const PERFIS_FINANCEIRO = ["diretor", "fin_operacional", "fin_estrategico"] as const;
 
 type Falha = { ok: false; erro: string; campos?: Record<string, string> };
 type Ok = { ok: true };

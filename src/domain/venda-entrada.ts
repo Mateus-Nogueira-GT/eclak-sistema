@@ -31,7 +31,7 @@ export const MSG_ACEITE_FUTURO = "Data do aceite no futuro";
 export const ALTERACAO_NOVA_FORMA =
   "Nova forma de pagamento acordada com o cliente";
 
-const texto = (max: number) =>
+export const texto = (max: number) =>
   z
     .string({ error: "Texto inválido" })
     .trim()
@@ -39,10 +39,10 @@ const texto = (max: number) =>
     .nullish()
     .transform((v) => (v ? v : null));
 
-const obrigatorio = (msg: string, max: number) =>
+export const obrigatorio = (msg: string, max: number) =>
   z.string({ error: msg }).trim().min(1, msg).max(max, "Texto muito longo");
 
-const data = (msg: string) =>
+export const data = (msg: string) =>
   z.string({ error: msg }).trim().min(1, msg).refine(dataReal, "Data inválida");
 
 /**
@@ -139,9 +139,9 @@ function lerValor(v: string | null | undefined): bigint | null | string {
   return c > MAX_CENTAVOS ? "Valor muito alto" : c;
 }
 
-function reais(opcional: true): z.ZodType<bigint | null, string | null | undefined>;
-function reais(opcional: false): z.ZodType<bigint, string | null | undefined>;
-function reais(opcional: boolean): z.ZodType<bigint | null, string | null | undefined> {
+export function reais(opcional: true): z.ZodType<bigint | null, string | null | undefined>;
+export function reais(opcional: false): z.ZodType<bigint, string | null | undefined>;
+export function reais(opcional: boolean): z.ZodType<bigint | null, string | null | undefined> {
   return z
     .string({ error: "Valor inválido" })
     .nullish()
