@@ -28,9 +28,10 @@ export const statusVersao = pgEnum("status_versao", STATUS_VERSAO);
 export const tipoItem = pgEnum("tipo_item", TIPOS_ITEM);
 export const moedaEnum = pgEnum("moeda", MOEDAS);
 
-// RLS, a FK viagens.versao_aprovada_id -> versoes_precificacao (circular) e os índices parciais
-// (viagens_cliente_idx, itens_viagem_viagem_idx, cotacoes_item_idx, cotacoes_uma_escolhida, versoes_viagem_idx)
-// estão na migração custom 0011_rls_viagens.sql (o drizzle não os conhece).
+// RLS e os índices parciais (viagens_cliente_idx, itens_viagem_viagem_idx, cotacoes_item_idx,
+// cotacoes_uma_escolhida, versoes_viagem_idx) estão na migração custom 0011_rls_viagens.sql. A FK circular
+// viagens(id, versao_aprovada_id) -> versoes_precificacao(viagem_id, id), o único (viagem_id, id) e o gatilho
+// que só aceita versão aprovada estão na 0012_integridade_versao_aprovada.sql (o drizzle não os conhece).
 export const viagens = pgTable(
   "viagens",
   {

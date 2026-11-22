@@ -307,8 +307,11 @@ describe("decisão do Diretor", () => {
       decididoPor: d.id,
     });
     const snap = v2.snapshot as Snapshot;
-    expect(snap.itens.find((i) => i.id === passeio)!.ajuste).toEqual({ valorFornecedor: "40000", comissaoPct: "10.000" });
-    expect(snap.itens.find((i) => i.id === hotel)!.ajuste).toBeUndefined();
+    const p2 = snap.itens.find((i) => i.id === passeio)!;
+    expect(p2.ajuste).toBeUndefined();
+    expect(p2.precificada).toMatchObject({ valorBrl: "40000", valorOriginal: "40000", comissaoPct: "10.000", ajustadoPeloDiretor: true });
+    expect(p2.escolhida).toEqual(p2.precificada);
+    expect(snap.itens.find((i) => i.id === hotel)!.cotacoes.some((c) => c.ajustadoPeloDiretor)).toBe(false);
     // custo: hotel 3.300,00 + passeio 400,00 × 0,9 = 360,00
     expect((v2.resultado as ResultadoVersao).custo).toBe((330000n + 36000n).toString());
     expect(await viagem(viagemId)).toMatchObject({ status: "aprovado", versaoAprovadaId: v2.id });
@@ -333,18 +336,68 @@ describe("decisão do Diretor", () => {
     expect((v1.snapshot as Snapshot).itens[0].cotacoes.map((c) => c.id)).toEqual([a, b]);
     expect((v1.resultado as ResultadoVersao).margemExtra).toBe((100000n - 88000n).toString());
 
-    // comissão 0 nas duas: b (1.100,00) passa a ser o pior custo
-    const r = await comSessao(d.id, () => aprovarComAjuste(id1, { preco: "2.000,00", forma: CREDITO6, itens: [{ itemId: passeio, comissaoPct: "0" }] }));
+    // cotação que não é do item → recusa
+    const alheia = "00000000-0000-4000-8000-000000000001";
+    expect(await comSessao(d.id, () => aprovarComAjuste(id1, { preco: "2.000,00", forma: CREDITO6, itens: [{ itemId: passeio, cotacaoId: alheia, comissaoPct: "0" }] }))).toEqual({
+      ok: false,
+      erro: "Cotação não encontrada",
+    });
+    // comissão 0 só em b: b (1.100,00) passa a ser o pior custo; a não muda
+    const r = await comSessao(d.id, () => aprovarComAjuste(id1, { preco: "2.000,00", forma: CREDITO6, itens: [{ itemId: passeio, cotacaoId: b, comissaoPct: "0" }] }));
     expect(r.ok).toBe(true);
     const [, v2] = await versoesDa(viagemId);
     const it2 = (v2.snapshot as Snapshot).itens[0];
-    expect(it2).toMatchObject({ ajuste: { comissaoPct: "0.000" } });
+    expect(it2.precificada).toMatchObject({ id: b, comissaoPct: "0.000", ajustadoPeloDiretor: true });
+    expect(it2.cotacoes.find((c) => c.id === a)).toMatchObject({ valorBrl: "100000", comissaoPct: "0.000" });
+    expect(it2.cotacoes.find((c) => c.id === a)!.ajustadoPeloDiretor).toBeUndefined();
     expect(it2.precificada.id).toBe(b);
     expect(it2.escolhida.id).toBe(b);
     const res = v2.resultado as ResultadoVersao;
     expect(res.custo).toBe("110000");
     expect(res.margemExtra).toBe("0");
     expect(res.precoCalculado).toBe(precoDoPacote(110000n, CREDITO6, vig.valores).toString());
+  });
+
+  it("ajuste padrão vale só para a cotação precificada: a escolhida fica e a margem extra segue", async () => {
+    const { u, d, viagemId } = await cenario();
+    const { hotel, barata, cara } = await cotado(u.id, viagemId);
+    const id1 = await enviar(u.id, viagemId);
+    // hotel: precificada = cara (3.300,00), escolhida = barata (3.106,00 com 4%)
+    const r = await comSessao(d.id, () => aprovarComAjuste(id1, { preco: "6.000,00", forma: CREDITO6, itens: [{ itemId: hotel, valorFornecedor: "3.200,00" }] }));
+    expect(r.ok).toBe(true);
+    const [v1, v2] = await versoesDa(viagemId);
+    const h1 = (v1.snapshot as Snapshot).itens.find((i) => i.id === hotel)!;
+    const h2 = (v2.snapshot as Snapshot).itens.find((i) => i.id === hotel)!;
+    expect(h2.precificada).toMatchObject({ id: cara, valorBrl: "320000", ajustadoPeloDiretor: true });
+    expect(h2.escolhida).toEqual(h1.escolhida);
+    expect(h2.escolhida.id).toBe(barata);
+    const res = v2.resultado as ResultadoVersao;
+    const escolhidas = BigInt((v1.resultado as ResultadoVersao).custoEscolhidas);
+    expect(res.custoEscolhidas).toBe(escolhidas.toString());
+    expect(res.custo).toBe((320000n + 50000n).toString());
+    expect(res.margemExtra).toBe((320000n + 50000n - escolhidas).toString());
+  });
+
+  it("guarda na versão os valores para o cliente (taxa de serviço, preço ao cliente, por pessoa, passageiros)", async () => {
+    const { u, d, viagemId } = await cenario();
+    await cotado(u.id, viagemId);
+    const id1 = await enviar(u.id, viagemId);
+    const [v1] = await versoesDa(viagemId);
+    const taxa = 19n * 15000n;
+    expect(v1.resultado).toMatchObject({
+      taxaServico: taxa.toString(),
+      precoCliente: (v1.preco + taxa).toString(),
+      porPessoa: ((v1.preco + taxa + 1n) / 2n).toString(),
+      numeroPassageiros: 2,
+    });
+    expect((await comSessao(d.id, () => aprovarComAjuste(id1, { preco: "7.000,01", forma: CREDITO6 }))).ok).toBe(true);
+    const [, v2] = await versoesDa(viagemId);
+    expect(v2.resultado).toMatchObject({ taxaServico: taxa.toString(), precoCliente: (700001n + taxa).toString(), porPessoa: ((700001n + taxa + 1n) / 2n).toString(), numeroPassageiros: 2 });
+    // a proposta lê da versão
+    await db.update(versoesPrecificacao).set({ resultado: { ...(v2.resultado as ResultadoVersao), precoCliente: "123456", porPessoa: "61728", taxaServico: "1000" } }).where(eq(versoesPrecificacao.id, v2.id));
+    const p = await comSessao(u.id, () => obterProposta(viagemId));
+    if (!p.ok) throw new Error(p.erro);
+    expect(p.proposta).toMatchObject({ total: 123456n, porPessoa: 61728n, taxaServico: 1000n });
   });
 
   it("devolver exige motivo; pedido já decidido não se decide de novo", async () => {
@@ -383,7 +436,10 @@ describe("decisão do Diretor", () => {
       (await comSessao(u.id, () => alterarOrcamento(viagemId, { destino: "Itália e Suíça", inicio: "2027-08-14", fim: "2027-09-03", passageiros: [pessoas[0]] }, f.atualizadoEm))).ok,
     ).toBe(true);
     expect(await viagem(viagemId)).toMatchObject({ status: "em_edicao", versaoAprovadaId: id1 });
-    expect(await comSessao(u.id, () => obterProposta(viagemId))).toEqual(antes);
+    if (!antes.ok) throw new Error(antes.erro);
+    expect(antes.proposta.desatualizada).toBe(false);
+    const desatualizada = { ok: true, proposta: { ...antes.proposta, desatualizada: true } };
+    expect(await comSessao(u.id, () => obterProposta(viagemId))).toEqual(desatualizada);
 
     const r = await comSessao(u.id, () => enviarParaAprovacao(viagemId, { forma: CREDITO6, alteracao: "Passeio noturno" }));
     expect(r).toMatchObject({ ok: true, numero: 2 });
@@ -392,7 +448,7 @@ describe("decisão do Diretor", () => {
     expect((v2.snapshot as Snapshot).itens.find((i) => i.id === passeio)!.servico).toBe("Coliseu noturno");
     expect(await viagem(viagemId)).toMatchObject({ status: "aguardando_aprovacao", versaoAprovadaId: id1 });
     const ainda = await comSessao(u.id, () => obterProposta(viagemId));
-    expect(ainda).toEqual(antes);
+    expect(ainda).toEqual(desatualizada);
     if (!ainda.ok) throw new Error(ainda.erro);
     expect(ainda.proposta.itens.map((i) => i.servico)).toContain("Coliseu");
     expect(ainda.proposta.destino).toBe("Itália");
@@ -509,3 +565,58 @@ describe("pedidos e versões", () => {
     });
   });
 });
+
+describe("integridade da versão aprovada e proposta desatualizada", () => {
+  beforeEach(limparBanco);
+
+  it("o banco recusa versão aprovada de outra viagem ou versão não aprovada", async () => {
+    const { u, d, clienteId, pessoas, viagemId } = await cenario();
+    await cotado(u.id, viagemId);
+    const outra = await comSessao(u.id, () => criarOrcamento({ clienteId, destino: "Portugal", inicio: "2027-05-01", fim: "2027-05-10", passageiros: pessoas }));
+    if (!outra.ok) throw new Error(outra.erro);
+    await cotado(u.id, outra.id);
+    const daOutra = await enviar(u.id, outra.id);
+    await comSessao(d.id, () => aprovar(daOutra));
+    const aguardando = await enviar(u.id, viagemId);
+
+    const apontar = (versaoId: string) => db.update(viagens).set({ versaoAprovadaId: versaoId }).where(eq(viagens.id, viagemId));
+    await expect(apontar(daOutra)).rejects.toThrow(); // FK composta (viagem_id, id)
+    await expect(apontar(aguardando)).rejects.toThrow(); // gatilho: só aprovada / aprovada_com_ajuste
+    expect((await viagem(viagemId)).versaoAprovadaId).toBeNull();
+    await comSessao(d.id, () => aprovar(aguardando));
+    expect((await viagem(viagemId)).versaoAprovadaId).toBe(aguardando);
+  });
+
+  it("proposta desatualizada enquanto o orçamento não volta a ser aprovado; data da aprovação", async () => {
+    const { u, d, viagemId } = await cenario();
+    const { passeio } = await cotado(u.id, viagemId);
+    const id1 = await enviar(u.id, viagemId);
+    await comSessao(d.id, () => aprovar(id1));
+    const [v1] = await versoesDa(viagemId);
+    const p1 = await comSessao(u.id, () => obterProposta(viagemId));
+    expect(p1).toMatchObject({ ok: true, proposta: { desatualizada: false, numeroVersao: 1, aprovadaEm: v1.decididoEm } });
+
+    await item(u.id, viagemId, { servico: "Coliseu noturno" }, passeio);
+    expect(await comSessao(u.id, () => obterProposta(viagemId))).toMatchObject({ ok: true, proposta: { desatualizada: true, numeroVersao: 1 } });
+    const id2 = await enviar(u.id, viagemId, { alteracao: "Passeio noturno" });
+    expect(await comSessao(u.id, () => obterProposta(viagemId))).toMatchObject({ ok: true, proposta: { desatualizada: true, numeroVersao: 1 } });
+    await comSessao(d.id, () => aprovar(id2));
+    expect(await comSessao(u.id, () => obterProposta(viagemId))).toMatchObject({ ok: true, proposta: { desatualizada: false, numeroVersao: 2 } });
+  });
+
+  it("envio sincroniza a taxa de roteiro com os Parâmetros vigentes antes do snapshot", async () => {
+    const { u, d, viagemId } = await cenario();
+    await cotado(u.id, viagemId);
+    for (let i = 0; i < 4; i++) await cotacao(u.id, await item(u.id, viagemId, { servico: `Passeio ${i}` }), { valor: "100,00" });
+    const vig = await comSessao(d.id, () => regrasVigentes());
+    expect((await comSessao(d.id, () => salvarRegras({ ...vig.valores, taxaRoteiro: { ...vig.valores.taxaRoteiro, valor: "77700" } }))).ok).toBe(true);
+    // sem editar nada, envia
+    await enviar(u.id, viagemId);
+    const [v] = await versoesDa(viagemId);
+    const taxa = (v.snapshot as Snapshot).itens.find((i) => i.tipo === "Taxa")!;
+    expect(taxa.precificada).toMatchObject({ valorBrl: "77700", valorOriginal: "77700" });
+    const [cot] = await db.select().from(cotacoes).where(eq(cotacoes.id, taxa.precificada.id));
+    expect(cot.valorBrl).toBe(77700n);
+  });
+});
+

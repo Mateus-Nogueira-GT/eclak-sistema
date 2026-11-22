@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatarReais } from "@/domain/dinheiro";
 import { obterProposta } from "@/server/queries/viagens";
+import { dataCurta } from "../../formatos";
 import { BotaoImprimir } from "./imprimir";
 
 const data = (d: string) => d.split("-").reverse().join("/");
@@ -32,6 +33,13 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
         </Link>
         <BotaoImprimir />
       </div>
+
+      {p.desatualizada && (
+        // Visível também na impressão: uma proposta desatualizada nunca sai sem aviso.
+        <p role="status" className="mb-6 rounded-[5px] border border-ouro bg-ouro/15 px-4 py-3 text-[14px] text-texto print:bg-transparent">
+          Há alterações no orçamento ainda não aprovadas. Esta proposta mostra a versão {p.numeroVersao} aprovada em {p.aprovadaEm ? dataCurta(p.aprovadaEm) : ""}.
+        </p>
+      )}
 
       <header className="flex items-start justify-between gap-6 border-b-2 border-verde pb-5">
         {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -26,6 +26,7 @@
 - **Taxa de roteiro** entra como item automático sem margem nem compensação, com venda = R$ 250,00. O protótipo mostra R$ 259,69 nessa linha; a diferença só muda a divisão da compensação, não o preço do pacote. Registrar como pergunta ao Augusto.
 - **6x com antecipação:** taxa de antecipação interpolada linearmente entre 1 e 10 parcelas (Parâmetros dizem "intermediárias por interpolação"). O protótipo mostra 7,73% e preço 71.273,78, que não fecham exatamente com essa interpolação (dá 7,7367%); fica a fórmula, e a dúvida vai para o Augusto.
 - **Comparação de fornecedores:** um item pode ter várias cotações. O preço é calculado pelo **pior custo** (maior custo líquido) de cada item; a cotação escolhida define o custo esperado, e a diferença aparece como "margem extra, sem mexer no preço" (como no protótipo).
+- **Fatia 3b (decisão da revisão final):** Venda só pode ser fechada com `viagens.status = 'aprovado'`.
 
 ## Global Constraints
 

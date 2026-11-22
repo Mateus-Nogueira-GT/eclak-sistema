@@ -15,10 +15,8 @@ import { arredondar } from "@/domain/decimal";
 import {
   custoLiquido,
   FORMA_REFERENCIA,
-  FORMAS_SIMULADOR,
   margemDaAprovacao,
   precificar,
-  resultadoDoPreco,
   type FormaPagamento,
   type ItemCalc,
   type Precificacao,
@@ -114,7 +112,7 @@ export type FichaPrecificacao = {
   itens: ItemFicha[];
   /** Aéreo, vendido à parte (fora da precificação). */
   aereo: ItemFicha[];
-  /** Itens do terrestre sem cotação (ficam fora do cálculo). */
+  /** Itens sem cotação, Aéreo incluso (o envio exige cotação em todos), na ordem do envio. */
   itensSemCotacao: { id: string; servico: string }[];
   /** Versões enviadas, mais recentes primeiro. */
   versoes: VersaoFicha[];
@@ -128,6 +126,8 @@ export type FichaPrecificacao = {
    * e na forma de referência. Centavos como texto. `null` sem item cotado ou se o cálculo não for possível.
    */
   referencia: { precoCliente: string; porPessoa: string; forma: string } | null;
+  /** Visível a todos: há item cotado, mas os Parâmetros vigentes não permitem calcular o valor de referência. */
+  referenciaErro: boolean;
 };
 
 export type VersaoFicha = {
@@ -158,8 +158,8 @@ export type OrcamentoLista = {
   /** Número da versão aprovada. */
   versaoAprovada: number | null;
   /**
-   * Só para a camada estratégica: preço do pacote na forma de referência (pior custo) e a margem
-   * líquida desse preço com as cotações escolhidas. Nulos sem item cotado; `erro` quando as regras
+   * Só para a camada estratégica: preço do pacote e margem líquida na forma de referência, pelo pior custo
+   * (a mesma do cartão "Margem líquida" da ficha). Nulos sem item cotado; `erro` quando as regras
    * vigentes não permitem calcular (ex.: taxas e margem somam 100% ou mais).
    */
   estrategico?: { preco: bigint | null; margemPct: string | null } | { erro: string };
@@ -311,7 +311,6 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
   const estrategico = veCamadaEstrategica(usuario.perfil);
   const itens = estrategico ? await itensDe(ids) : null;
   const regras = estrategico ? (await regrasVigentes()).valores : null;
-  const ref = FORMAS_SIMULADOR[FORMA_REFERENCIA].forma;
 
   return linhas.map((l) => {
     const linha: OrcamentoLista = {
@@ -336,8 +335,9 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
         // Uma linha que não dá para calcular não derruba a lista inteira.
         try {
           const e = camadaEstrategica(doItem, diasDaViagem(l.v.inicio, l.v.fim), regras);
-          const preco = e.precificacao.porForma[FORMA_REFERENCIA].preco;
-          linha.estrategico = { preco, margemPct: resultadoDoPreco(preco, e.custoEscolhidas, ref, regras).margemLiquidaPct };
+          // Mesma margem do cartão da ficha: forma de referência, pelo pior custo.
+          const f = e.precificacao.porForma[FORMA_REFERENCIA];
+          linha.estrategico = { preco: f.preco, margemPct: f.margemLiquidaPct };
         } catch (e) {
           console.error("Erro ao calcular orçamento da lista", { viagemId: l.v.id, erro: (e as Error)?.message });
           linha.estrategico = { erro: "Não foi possível calcular" };
@@ -427,9 +427,10 @@ export async function obterPrecificacao(viagemId: string): Promise<FichaPrecific
     atualizadoEm: v.atualizadoEm.toISOString(),
     itens: terrestre.map(ficha),
     aereo: todos.filter((x) => x.item.tipo === "Aéreo").map(ficha),
-    itensSemCotacao: terrestre.filter((x) => x.cotacoes.length === 0).map((x) => ({ id: x.item.id, servico: x.item.servico })),
+    itensSemCotacao: todos.filter((x) => x.cotacoes.length === 0).map((x) => ({ id: x.item.id, servico: x.item.servico })),
     versoes: [],
     referencia: null,
+    referenciaErro: false,
   };
   const estrategico = veCamadaEstrategica(usuario.perfil);
   // A conta usa a camada estratégica, mas só o preço ao cliente sai dela.
@@ -444,6 +445,7 @@ export async function obterPrecificacao(viagemId: string): Promise<FichaPrecific
       };
     } catch (e) {
       console.error("Erro ao calcular o valor de referência", { viagemId: v.id, erro: (e as Error)?.message });
+      resposta.referenciaErro = true;
     }
   }
   resposta.versoes = await versoesDe(v.id, estrategico);
@@ -682,6 +684,10 @@ export type Proposta = {
   /** "Cartão em 6x". */
   forma: string;
   validade: string;
+  /** Quando o Diretor aprovou a versão. */
+  aprovadaEm: Date | null;
+  /** O orçamento mudou depois da aprovação (status ≠ aprovado): a proposta mostra a versão aprovada, não o atual. */
+  desatualizada: boolean;
 };
 
 /**
@@ -701,11 +707,20 @@ export async function obterProposta(viagemId: string): Promise<{ ok: true; propo
   if (!l) return naoEncontrado;
   if (!l.v.versaoAprovadaId) return { ok: false, erro: MSG_PROPOSTA_INDISPONIVEL };
   const [ver] = await db.select().from(versoesPrecificacao).where(eq(versoesPrecificacao.id, l.v.versaoAprovadaId));
-  const regras = await regrasDaVersao(ver.regrasVersaoId);
   const s = ver.snapshot as Snapshot;
-  const taxaServico = BigInt(ver.dias) * BigInt(regras.taxaServicoPorDia);
-  const total = ver.preco + taxaServico;
-  const n = BigInt(Math.max(s.passageiros.length, 1));
+  const res = ver.resultado as ResultadoVersao;
+  // Valores para o cliente gravados na versão; versões antigas, sem eles, recalculam com as regras da versão.
+  let taxaServico: bigint, total: bigint, porPessoa: bigint;
+  if (res.taxaServico !== undefined && res.precoCliente !== undefined && res.porPessoa !== undefined) {
+    taxaServico = BigInt(res.taxaServico);
+    total = BigInt(res.precoCliente);
+    porPessoa = BigInt(res.porPessoa);
+  } else {
+    const regras = await regrasDaVersao(ver.regrasVersaoId);
+    taxaServico = BigInt(ver.dias) * BigInt(regras.taxaServicoPorDia);
+    total = ver.preco + taxaServico;
+    porPessoa = arredondar(total, BigInt(Math.max(s.passageiros.length, 1)));
+  }
   return {
     ok: true,
     proposta: {
@@ -727,9 +742,11 @@ export async function obterProposta(viagemId: string): Promise<{ ok: true; propo
         ),
       total,
       taxaServico,
-      porPessoa: arredondar(total, n),
+      porPessoa,
       forma: rotuloForma(ver.forma as FormaPagamento),
       validade: VALIDADE_PROPOSTA,
+      aprovadaEm: ver.decididoEm,
+      desatualizada: l.v.status !== "aprovado",
     },
   };
 }
