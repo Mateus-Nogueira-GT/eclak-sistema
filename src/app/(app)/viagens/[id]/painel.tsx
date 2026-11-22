@@ -208,6 +208,11 @@ export function Painel({
           {!aguardando && (
             <Botao onClick={() => setEnviando((x) => !x)} aria-expanded={enviando}><Send size={15} /> Enviar para aprovação</Botao>
           )}
+          {ficha.status === "aprovado" && (
+            <Link href={`/vendas?viagem=${ficha.id}`} className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[5px] border border-[#C9CDD1] bg-white px-3.5 py-2 text-[14px] font-semibold text-texto hover:border-verde hover:text-verde">
+              Registrar resposta do cliente
+            </Link>
+          )}
           {pdf}
         </div>
       </div>

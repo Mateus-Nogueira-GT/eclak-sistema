@@ -10,7 +10,13 @@ import { cx } from "./ui";
 
 type Item = { href: string; label: string };
 const areas: { titulo: string; itens: Item[] }[] = [
-  { titulo: "Comercial", itens: [{ href: "/clientes", label: "Clientes" }] },
+  {
+    titulo: "Comercial",
+    itens: [
+      { href: "/clientes", label: "Clientes" },
+      { href: "/vendas", label: "Fechamento da venda" },
+    ],
+  },
   {
     titulo: "Operação",
     itens: [

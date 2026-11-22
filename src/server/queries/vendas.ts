@@ -39,6 +39,7 @@ import {
   fornecedores,
   itensViagem,
   pagamentosFornecedor,
+  pessoas,
   parcelasReceber,
   usuarios,
   vendas,
@@ -72,6 +73,13 @@ export type PropostaLista = {
   aprovadoPor: string | null;
   vendidaEm: Date | null;
   notaCliente: string | null;
+  /** Forma aprovada (estrutura), para o seletor da forma acordada. */
+  formaAprovada: FormaPagamento;
+  /** Titular do cliente, para preencher "Fatura em nome de" (nome e CPF formatado; vazio se não há). */
+  titularNome: string;
+  titularDocumento: string;
+  /** Só `vendida`: cronograma lançado (valores em centavos como texto). */
+  parcelasLancadas?: { numero: number; totalParcelas: number; vencimento: string; valor: string; meio: string }[];
 };
 
 const DIAS_VENDIDAS = 30;
@@ -96,6 +104,7 @@ export async function listarPropostas(): Promise<PropostaLista[]> {
       preco: versoesPrecificacao.preco,
       dias: versoesPrecificacao.dias,
       forma: versoesPrecificacao.forma,
+      clienteId: viagens.clienteId,
       aprovadoEm: versoesPrecificacao.decididoEm,
       // Só os campos usados do snapshot e do resultado (nunca custo, imposto ou margem).
       destino: sql<string>`${snap}->>'destino'`,
@@ -131,6 +140,26 @@ export async function listarPropostas(): Promise<PropostaLista[]> {
   const taxaPorRegras = new Map<string, bigint>();
   for (const id of semPreco) taxaPorRegras.set(id, BigInt((await regrasDaVersao(id)).taxaServicoPorDia));
 
+  const idsClientes = [...new Set(linhas.map((l) => l.clienteId))];
+  const titulares =
+    idsClientes.length === 0
+      ? []
+      : await db
+          .select({ clienteId: pessoas.clienteId, nome: pessoas.nome, cpf: pessoas.cpf })
+          .from(pessoas)
+          .where(and(inArray(pessoas.clienteId, idsClientes), eq(pessoas.titular, true), isNull(pessoas.removidoEm)));
+  const titularDe = new Map(titulares.map((t) => [t.clienteId, t]));
+
+  const idsVendidas = linhas.filter((l) => l.status === "vendida").map((l) => l.id);
+  const parcelas =
+    idsVendidas.length === 0
+      ? []
+      : await db
+          .select()
+          .from(parcelasReceber)
+          .where(inArray(parcelasReceber.viagemId, idsVendidas))
+          .orderBy(asc(parcelasReceber.numero));
+
   const lista = linhas.map(
     (l): PropostaLista => ({
       id: l.id,
@@ -149,6 +178,22 @@ export async function listarPropostas(): Promise<PropostaLista[]> {
       aprovadoPor: l.decisor ?? null,
       vendidaEm: l.vendidaEm,
       notaCliente: l.notaCliente,
+      formaAprovada: l.forma as FormaPagamento,
+      titularNome: titularDe.get(l.clienteId)?.nome ?? "",
+      titularDocumento: titularDe.get(l.clienteId)?.cpf ? formatarDocumento(titularDe.get(l.clienteId)!.cpf!) : "",
+      ...(l.status === "vendida"
+        ? {
+            parcelasLancadas: parcelas
+              .filter((p) => p.viagemId === l.id)
+              .map((p) => ({
+                numero: p.numero,
+                totalParcelas: p.totalParcelas,
+                vencimento: p.vencimento,
+                valor: p.valor.toString(),
+                meio: ROTULO_MEIO[p.meio],
+              })),
+          }
+        : {}),
     }),
   );
   const t = (x: PropostaLista) => (x.vendidaEm ?? x.aprovadoEm)?.getTime() ?? 0;

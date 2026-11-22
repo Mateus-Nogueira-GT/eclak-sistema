@@ -38,6 +38,14 @@ describe("perfis", () => {
       expect(podeAcessar(p, "/aprovacoes")).toBe(false);
     }
   });
+  it("vendas: consultor, operacional e diretor acessam; financeiros não", () => {
+    for (const p of ["consultor", "operacional", "diretor"] as const) {
+      expect(podeAcessar(p, "/vendas")).toBe(true);
+      expect(podeAcessar(p, "/vendas/x")).toBe(true);
+      expect(podeAcessar(p, "/vendasX")).toBe(false);
+    }
+    for (const p of ["fin_operacional", "fin_estrategico"] as const) expect(podeAcessar(p, "/vendas")).toBe(false);
+  });
   it("veCamadaEstrategica", () => {
     for (const p of ["diretor", "fin_operacional", "fin_estrategico"] as const)
       expect(veCamadaEstrategica(p)).toBe(true);
