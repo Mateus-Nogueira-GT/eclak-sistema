@@ -27,7 +27,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<B
           <FormularioOrcamento
             clienteId={c.id}
             pessoas={pessoas}
-            inicial={{ destino: "", inicio: "", fim: "", observacoes: "", passageiros: c.pessoas.map((p) => p.id) }}
+            inicial={{ destino: "", inicio: "", fim: "", observacoes: "", passageiros: c.pessoas.map((p) => p.id), internacional: true }}
           />
         </div>
       );

@@ -118,7 +118,7 @@ export function Painel({
             removidos={removidos}
             id={ficha.id}
             atualizadoEm={ficha.atualizadoEm}
-            inicial={{ destino: ficha.destino, inicio: ficha.inicio, fim: ficha.fim, observacoes: ficha.observacoes ?? "", passageiros: ficha.passageiros.map((p) => p.id) }}
+            inicial={{ destino: ficha.destino, inicio: ficha.inicio, fim: ficha.fim, observacoes: ficha.observacoes ?? "", passageiros: ficha.passageiros.map((p) => p.id), internacional: ficha.internacional }}
             onFechar={() => setEditando(false)}
           />
         </div>

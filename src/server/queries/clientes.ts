@@ -1,7 +1,8 @@
 import "server-only";
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import {
   alertasDoCliente,
+  type ViagemAlerta,
   formatarCodigoCliente,
   formatarCpf,
   formatarTelefone,
@@ -13,7 +14,7 @@ import type { Filial } from "@/domain/perfis";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { clientes, pessoas } from "@/server/db/schema";
+import { clientes, pessoas, viagemPassageiros, viagens } from "@/server/db/schema";
 
 export type PessoaFicha = {
   id: string;
@@ -62,7 +63,33 @@ export type ClienteLista = {
 /** Escapa curingas do LIKE para a busca ser literal. */
 const literal = (t: string) => t.replace(/[\\%_]/g, "\\$&");
 
-const AVISOS_DOCUMENTOS: AlertaCliente["tipo"][] = ["sem_passaporte", "passaporte_vencido"];
+const AVISOS_DOCUMENTOS: AlertaCliente["tipo"][] = ["sem_passaporte", "passaporte_vencido", "passaporte_volta"];
+
+/** Viagens `aprovado`/`vendida` que ainda não terminaram, por cliente, para o aviso de passaporte × volta. */
+async function viagensParaAlerta(ids: string[], hoje: string): Promise<Map<string, ViagemAlerta[]>> {
+  const mapa = new Map<string, ViagemAlerta[]>();
+  if (ids.length === 0) return mapa;
+  const vs = await db
+    .select({ id: viagens.id, clienteId: viagens.clienteId, destino: viagens.destino, fim: viagens.fim, internacional: viagens.internacional })
+    .from(viagens)
+    .where(and(inArray(viagens.clienteId, ids), inArray(viagens.status, ["aprovado", "vendida"]), gte(viagens.fim, hoje), isNull(viagens.excluidoEm)));
+  if (vs.length === 0) return mapa;
+  const pax = await db
+    .select({ viagemId: viagemPassageiros.viagemId, pessoaId: viagemPassageiros.pessoaId })
+    .from(viagemPassageiros)
+    .where(inArray(viagemPassageiros.viagemId, vs.map((v) => v.id)));
+  for (const v of vs) {
+    const lista = mapa.get(v.clienteId) ?? [];
+    lista.push({
+      destino: v.destino,
+      fim: v.fim,
+      internacional: v.internacional,
+      passageiros: pax.filter((p) => p.viagemId === v.id).map((p) => p.pessoaId),
+    });
+    mapa.set(v.clienteId, lista);
+  }
+  return mapa;
+}
 
 async function pessoasDe(ids: string[]) {
   if (ids.length === 0) return [];
@@ -114,11 +141,12 @@ export async function listarClientes(
     .orderBy(asc(clientes.grupo), asc(clientes.codigo));
   const todas = await pessoasDe(linhas.map((c) => c.id));
   const hoje = hojeEmCuiaba();
+  const futuras = await viagensParaAlerta(linhas.map((c) => c.id), hoje);
 
   const lista: ClienteLista[] = [];
   for (const c of linhas) {
     const doCliente = todas.filter((p) => p.clienteId === c.id);
-    const alertas = alertasDoCliente({ tipo: c.tipo, pessoas: doCliente }, hoje);
+    const alertas = alertasDoCliente({ tipo: c.tipo, pessoas: doCliente }, hoje, futuras.get(c.id));
     if (filtro.aviso === "documentos" && !alertas.some((a) => AVISOS_DOCUMENTOS.includes(a.tipo))) continue;
     if (filtro.aviso === "aniversario" && !alertas.some((a) => a.tipo === "aniversario")) continue;
     lista.push({
@@ -144,6 +172,7 @@ export async function obterCliente(id: string): Promise<ClienteFicha | null> {
   const [c] = await db.select().from(clientes).where(eq(clientes.id, id)).limit(1);
   if (!c) return null;
   const ps = await pessoasDe([c.id]);
+  const hoje = hojeEmCuiaba();
   return {
     id: c.id,
     codigo: formatarCodigoCliente(c.codigo),
@@ -168,7 +197,7 @@ export async function obterCliente(id: string): Promise<ClienteFicha | null> {
       passaporte: p.passaporte,
       validadePassaporte: p.validadePassaporte,
     })),
-    alertas: alertasDoCliente({ tipo: c.tipo, pessoas: ps }, hojeEmCuiaba()),
+    alertas: alertasDoCliente({ tipo: c.tipo, pessoas: ps }, hoje, (await viagensParaAlerta([c.id], hoje)).get(c.id)),
     excluidoEm: c.excluidoEm ? c.excluidoEm.toISOString() : null,
   };
 }

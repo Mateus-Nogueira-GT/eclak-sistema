@@ -7,7 +7,7 @@ import { Filtros } from "./filtros";
 
 type Busca = { busca?: string | string[]; tipo?: string | string[]; aviso?: string | string[] };
 const um = (v?: string | string[]) => (Array.isArray(v) ? v[0] : v) ?? "";
-const DOCUMENTOS = ["sem_passaporte", "passaporte_vencido"];
+const DOCUMENTOS = ["sem_passaporte", "passaporte_vencido", "passaporte_volta"];
 
 export default async function Pagina({ searchParams }: { searchParams: Promise<Busca> }) {
   const sp = await searchParams;

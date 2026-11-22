@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import { ShieldAlert } from "lucide-react";
+import { alertasDoCliente, hojeEmCuiaba } from "@/domain/clientes";
 import { margemDaAprovacao, FORMA_REFERENCIA, FORMAS_SIMULADOR, resultadoDoPreco } from "@/domain/precificacao";
 import { veCamadaEstrategica } from "@/domain/perfis";
 import { exigirPerfil } from "@/server/auth";
@@ -10,11 +12,38 @@ import { obterPrecificacao } from "@/server/queries/viagens";
 import { Painel, type Extras } from "./painel";
 import { ViagemVendidaView } from "./viagem-vendida";
 
+/** Passaporte dos passageiros × volta (só orçamento aprovado ou viagem vendida, internacional). */
+async function avisosDeEmbarque(ficha: NonNullable<Awaited<ReturnType<typeof obterPrecificacao>>>) {
+  if (!ficha.internacional || (ficha.status !== "aprovado" && ficha.status !== "vendida")) return [];
+  const cliente = await obterCliente(ficha.clienteId);
+  if (!cliente) return [];
+  const ids = ficha.passageiros.map((p) => p.id);
+  const pessoas = cliente.pessoas.filter((p) => ids.includes(p.id)).map((p) => ({ ...p, validadePassaporte: p.validadePassaporte }));
+  return alertasDoCliente(
+    { tipo: cliente.tipo, pessoas },
+    hojeEmCuiaba(),
+    [{ destino: ficha.destino, fim: ficha.fim, internacional: true, passageiros: ids }],
+  ).filter((a) => a.tipo !== "aniversario");
+}
+
+function BlocoEmbarque({ avisos }: { avisos: { texto: string }[] }) {
+  if (avisos.length === 0) return null;
+  return (
+    <div className="mb-5 rounded-[6px] border border-ouro bg-ouro/15 px-5 py-4">
+      <p className="flex items-center gap-2 text-[14px] font-semibold text-texto"><ShieldAlert size={17} /> Resolver antes do embarque</p>
+      <ul className="mt-1.5 space-y-0.5 pl-6 text-[14px] text-texto">
+        {avisos.map((a, i) => <li key={i} className="list-disc">{a.texto}</li>)}
+      </ul>
+    </div>
+  );
+}
+
 export default async function Pagina({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const usuario = await exigirPerfil();
   const ficha = await obterPrecificacao(id);
   if (!ficha) notFound();
+  const avisos = await avisosDeEmbarque(ficha);
 
   if (ficha.status === "vendida") {
     const vendida = await obterViagemVendida(id);
@@ -23,6 +52,7 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
       const regras = estrategico ? (await regrasVigentes()).valores : null;
       return (
         <div className="mx-auto max-w-[1240px]">
+          <BlocoEmbarque avisos={avisos} />
           <ViagemVendidaView
             v={vendida}
             ficha={ficha}
@@ -70,6 +100,7 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
 
   return (
     <div className="mx-auto max-w-[1240px]">
+      <BlocoEmbarque avisos={avisos} />
       <Painel
         ficha={ficha}
         pessoas={pessoas}

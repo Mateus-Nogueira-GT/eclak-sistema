@@ -1,5 +1,5 @@
 /**
- * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores os clientes fictícios do protótipo e três orçamentos (aguardando, aprovado e devolvido).
+ * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores, os clientes fictícios do protótipo, três orçamentos (aguardando, aprovado e devolvido) e duas viagens vendidas (Ribeiro, em viagem; e uma conciliada).
  * Recusa rodar se DATABASE_URL ou NEXT_PUBLIC_SUPABASE_URL não forem locais. Idempotente: o que já existe é pulado.
  */
 import { config } from "dotenv";
@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import { garantirBancoLocal } from "./local-guard";
 import { semearOrcamentos } from "./seed-orcamentos";
+import { semearVendas } from "./seed-vendas";
 
 config({ path: ".env.local", quiet: true });
 
@@ -53,6 +54,15 @@ const FORNECEDORES: SeedFornecedor[] = [
   { nome: "Maison Rivoli Seize", cidade: "Paris", tipos: ["Hotelaria"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "7% à vista ou 3x sem desconto" },
   { nome: "The Mayfair Row", cidade: "Londres", tipos: ["Hotelaria"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "Não oferece" },
   { nome: "Resort Ilha Serena", cidade: "Orlando", tipos: ["Hotelaria"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "5% à vista ou 4x sem desconto" },
+  { nome: "Palazzo Barocci", cidade: "Veneza", tipos: ["Hotelaria"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "4% à vista" },
+  { nome: "Orto de' Medici", cidade: "Florença", tipos: ["Hotelaria"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "4% à vista" },
+  { nome: "Il Borro", cidade: "Toscana", tipos: ["Hotelaria"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "4% à vista" },
+  { nome: "Hotel Belair", cidade: "Sorrento", tipos: ["Hotelaria"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "4% à vista" },
+  { nome: "Hotel Syrene", cidade: "Capri", tipos: ["Hotelaria"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "Não oferece" },
+  { nome: "Leonardo Boutique", cidade: "Roma", tipos: ["Hotelaria"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "Não oferece" },
+  { nome: "Trenitalia Parceiros", tipos: ["Trem"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "Não oferece" },
+  { nome: "Locadora Toscana Auto", tipos: ["Carro"], modalidade: "comissionado", comissaoPct: "10", tarifaFixa: 0n, descontoAVista: "Não oferece" },
+  { nome: "Ferry Golfo di Napoli", tipos: ["Outro"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "Não oferece" },
   { nome: "TransEuropa Transfers", tipos: ["Transfer"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "Não oferece" },
   { nome: "Mare Blu Barche", tipos: ["Passeio guiado"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "5% no Pix" },
   { nome: "Guias Privados Roma", tipos: ["Passeio guiado"], modalidade: "net", comissaoPct: "0", tarifaFixa: 0n, descontoAVista: "Não oferece" },
@@ -244,7 +254,8 @@ async function main() {
       clientesNovos++;
     }
     const orcamentosNovos = await semearOrcamentos(sql);
-    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s) e ${orcamentosNovos} orçamento(s) criados.`);
+    const vendasNovas = await semearVendas(sql);
+    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s) e ${vendasNovas} viagem(ns) vendida(s) criados.`);
     console.log(`Logins: ${USUARIOS.map((u) => u.email).join(", ")} (senha ${SENHA})`);
   } finally {
     await sql.end();

@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { db } from "@/server/db/client";
-import { auditoria, clientes, pessoas } from "@/server/db/schema";
+import { auditoria, clientes, pessoas, viagens } from "@/server/db/schema";
+import { criarOrcamento } from "@/server/actions/viagens";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { excluirCliente, salvarCliente, type ClienteEntrada } from "@/server/actions/clientes";
 import { listarClientes, obterCliente } from "@/server/queries/clientes";
@@ -355,5 +356,48 @@ describe("clientes", () => {
     const c = await criarUsuarioTeste("consultor");
     const { id } = await criar(c.id, { ...ribeiro, grupo: "Excursão Roma" });
     expect((await obterCliente2(c.id, id))?.grupo).toBe("Excursão Roma");
+  });
+});
+
+describe("aviso de passaporte pela data de volta", () => {
+  beforeEach(limparBanco);
+
+  async function comViagem(status: "aprovado" | "vendida" | "em_edicao", opcoes: { internacional?: boolean; fim?: string } = {}) {
+    const c = await criarUsuarioTeste("consultor");
+    const cli = await criar(c.id, {
+      ...ribeiro,
+      titular: { nome: "Carlos Ribeiro", cpf: "529.982.247-25", passaporte: "AB123", validadePassaporte: "2027-09-01" },
+      acompanhantes: [],
+    });
+    const [p] = await db.select().from(pessoas).where(eq(pessoas.clienteId, cli.id));
+    const o = await comSessao(c.id, () =>
+      criarOrcamento({ clienteId: cli.id, destino: "Portugal", inicio: opcoes.fim ? "2026-01-01" : "2027-05-10", fim: opcoes.fim ?? "2027-05-17", passageiros: [p.id], internacional: opcoes.internacional }),
+    );
+    if (!o.ok) throw new Error(o.erro);
+    await db.update(viagens).set({ status }).where(eq(viagens.id, o.id));
+    return { uid: c.id, clienteId: cli.id };
+  }
+
+  it("viagem vendida com passaporte vencendo antes da volta + 182 dias: aviso na ficha e no chip", async () => {
+    const x = await comViagem("vendida");
+    const f = (await comSessao(x.uid, () => obterCliente(x.clienteId)))!;
+    expect(f.alertas.filter((a) => a.tipo === "passaporte_volta")).toHaveLength(1);
+    const l = await comSessao(x.uid, () => listarClientes({ aviso: "documentos" }));
+    expect(l.map((c) => c.grupo)).toEqual(["Família Ribeiro"]);
+  });
+
+  it("aprovada também avisa; em edição, internacional=false ou volta passada não", async () => {
+    const a = await comViagem("aprovado");
+    expect((await comSessao(a.uid, () => obterCliente(a.clienteId)))!.alertas.some((x) => x.tipo === "passaporte_volta")).toBe(true);
+    await limparBanco();
+    const b = await comViagem("em_edicao");
+    expect((await comSessao(b.uid, () => obterCliente(b.clienteId)))!.alertas.some((x) => x.tipo === "passaporte_volta")).toBe(false);
+    await limparBanco();
+    const c = await comViagem("vendida", { internacional: false });
+    expect((await comSessao(c.uid, () => obterCliente(c.clienteId)))!.alertas.some((x) => x.tipo === "passaporte_volta")).toBe(false);
+    expect(await comSessao(c.uid, () => listarClientes({ aviso: "documentos" }))).toHaveLength(0);
+    await limparBanco();
+    const d = await comViagem("vendida", { fim: "2026-01-10" });
+    expect((await comSessao(d.uid, () => obterCliente(d.clienteId)))!.alertas.some((x) => x.tipo === "passaporte_volta")).toBe(false);
   });
 });
