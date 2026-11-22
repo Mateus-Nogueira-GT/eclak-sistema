@@ -120,6 +120,7 @@ export const MSG_PARCELA_EM_ABERTO = "Esta parcela não foi baixada";
 export const MSG_PAGAMENTO_PAGO = "Pagamento já baixado";
 export const MSG_PAGAMENTO_EM_ABERTO = "Este pagamento não foi baixado";
 export const MSG_COMISSAO_REGISTRADA = "Comissão já registrada";
+export const MSG_COMISSAO_CANCELADA = "Comissão cancelada";
 export const MSG_COMISSAO_EM_ABERTO = "Esta comissão não foi registrada";
 export const MSG_SEM_FORNECEDOR = "Conta sem fornecedor: a comissão só pode ser descontada";
 

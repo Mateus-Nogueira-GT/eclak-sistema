@@ -17,6 +17,7 @@ import {
   motivoSchema,
   msgEmAberto,
   MSG_CAMBIO_EFETIVO,
+  MSG_COMISSAO_CANCELADA,
   MSG_COMISSAO_EM_ABERTO,
   MSG_COMISSAO_REGISTRADA,
   MSG_CONCILIADA,
@@ -372,7 +373,7 @@ export async function definirComissaoTipo(contaId: string, dados: ComissaoTipoEn
         const [existente] = await tx.select().from(comissoes).where(eq(comissoes.contaId, conta.id)).for("update");
 
         if (tipo !== conta.comissaoTipo) {
-          if (existente && existente.status !== "prevista") return falha(MSG_COMISSAO_REGISTRADA);
+          if (existente && (existente.status === "recebida" || existente.status === "nao_recebida")) return falha(MSG_COMISSAO_REGISTRADA);
           const snapshot = await snapshotDaVenda(tx, v.id);
           if (!snapshot) return NAO_CALCULA;
           const atual = contaBase(snapshot, conta, conta.comissaoTipo, v.fim);
@@ -390,9 +391,22 @@ export async function definirComissaoTipo(contaId: string, dados: ComissaoTipoEn
           await tx.update(contasPagar).set(depois).where(eq(contasPagar.id, conta.id));
           await auditarAlteracao(tx, usuario.id, "contas_pagar", conta, depois);
 
-          if (tipo === "descontada" && existente) {
-            await tx.delete(comissoes).where(eq(comissoes.id, existente.id));
-            await registrarAuditoria(tx, { usuarioId: usuario.id, tabela: "comissoes", registroId: existente.id, acao: "excluir", antes: semId(existente) });
+          // Registro financeiro nunca é apagado: a comissão fica `cancelada` e volta a `prevista` se a conta voltar a `a_receber`.
+          if (tipo === "descontada" && existente && existente.status === "prevista") {
+            const cancelada = { status: "cancelada" as const };
+            await tx.update(comissoes).set(cancelada).where(eq(comissoes.id, existente.id));
+            await auditarAlteracao(tx, usuario.id, "comissoes", existente, cancelada);
+          }
+          if (tipo === "a_receber" && existente?.status === "cancelada" && nova.comissao) {
+            const reativada = {
+              status: "prevista" as const,
+              baseBrl: nova.comissao.baseBrl,
+              pct: nova.comissao.pct,
+              valorPrevisto: nova.comissao.valor,
+              previstaPara: previstaPara ?? nova.comissao.previstaPara,
+            };
+            await tx.update(comissoes).set(reativada).where(eq(comissoes.id, existente.id));
+            await auditarAlteracao(tx, usuario.id, "comissoes", existente, reativada);
           }
           if (tipo === "a_receber" && !existente && nova.comissao) {
             const [com] = await tx
@@ -409,7 +423,7 @@ export async function definirComissaoTipo(contaId: string, dados: ComissaoTipoEn
               .returning();
             await registrarAuditoria(tx, { usuarioId: usuario.id, tabela: "comissoes", registroId: com.id, acao: "criar", depois: semId(com) });
           }
-        } else if (tipo === "a_receber" && existente && previstaPara && previstaPara !== existente.previstaPara) {
+        } else if (tipo === "a_receber" && existente && existente.status !== "cancelada" && previstaPara && previstaPara !== existente.previstaPara) {
           if (existente.status !== "prevista") return falha(MSG_COMISSAO_REGISTRADA);
           await tx.update(comissoes).set({ previstaPara }).where(eq(comissoes.id, existente.id));
           await auditarAlteracao(tx, usuario.id, "comissoes", existente, { previstaPara });
@@ -674,6 +688,7 @@ function naComissao(
         .where(and(eq(comissoes.id, comissaoId), eq(comissoes.viagemId, v.id), eq(contasPagar.viagemId, v.id), isNull(contasPagar.excluidoEm)))
         .for("update");
       if (!c) return COMISSAO_NAO_ENCONTRADA;
+      if (c.c.status === "cancelada") return falha(MSG_COMISSAO_CANCELADA);
       const depois = mudar(c.c);
       if (ehFalha(depois)) return depois;
       await tx.update(comissoes).set(depois).where(eq(comissoes.id, comissaoId));

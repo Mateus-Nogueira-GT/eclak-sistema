@@ -544,6 +544,49 @@ describe("ponteDaMargem", () => {
     expect(somaMeio(p.linhas)).toBe(p.real.final - BigInt(resultado.final));
   });
 
+  it("EUR pago com desconto e câmbio maior: 'valor pago diferente' e 'Diferença de câmbio' separados; BRL só o pago diferente", () => {
+    const planejada = { custo: 915820n, imposto: 5892n, taxa: 0n, fixo: 0n, final: 1000000n - 915820n - 5892n };
+    const p = ponteDaMargem({
+      planejada,
+      preco: 1000000n,
+      impostoPct: "7.000",
+      taxaRoteiro: 0n,
+      contas: [
+        {
+          rotulo: "Hotel Paris",
+          aereo: false,
+          moeda: "EUR",
+          previstoVendaBrl: 615820n, // 1.000,00 EUR × 6,1582
+          previstoBrl: 615820n,
+          pagoBrl: 624000n, // 960,00 EUR (4% à vista) × 6,5000
+          pagos: [{ valorOriginalPago: 96000n, valorBrlPago: 624000n }],
+          cambioVenda: "6.1582",
+        },
+        {
+          rotulo: "Guia",
+          aereo: false,
+          moeda: "BRL",
+          previstoVendaBrl: 300000n,
+          previstoBrl: 300000n,
+          pagoBrl: 300500n,
+          pagos: [{ valorOriginalPago: 300500n, valorBrlPago: 300500n }],
+          cambioVenda: null,
+        },
+      ],
+      comissoes: [],
+      parcelas: [],
+    });
+    const linhas = Object.fromEntries(p.linhas.map((l) => [l.rotulo, l.valor]));
+    // câmbio: 624000 − 960,00 EUR pelo câmbio da venda (591187)
+    expect(linhas["Diferença de câmbio"]).toBe(-(624000n - 591187n));
+    // desconto: 40,00 EUR × 6,1582 ≈ 24633 a favor
+    expect(linhas["Hotel Paris: valor pago diferente"]).toBe(24633n);
+    expect(linhas["Guia: valor pago diferente"]).toBe(-500n);
+    expect(linhas["Hotel Paris: valor atualizado"]).toBeUndefined();
+    expect(linhas["Guia: valor atualizado"]).toBeUndefined();
+    expect(somaMeio(p.linhas)).toBe(p.real.final - planejada.final);
+  });
+
   it("Aéreo fica fora da ponte e da margem; comissão recebida com valor diferente aparece", () => {
     const planejada = { custo: 500000n, imposto: 35000n, taxa: 0n, fixo: 0n, final: 1000000n - 500000n - 35000n };
     const p = ponteDaMargem({

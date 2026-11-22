@@ -344,7 +344,8 @@ describe("baixa de pagamento ao fornecedor", () => {
 
     const r1 = await estrategico(x.fin.id, x.viagemId);
     expect(r1.real.custo).toBe(r0.real.custo + 2000n);
-    expect(r1.ponte).toContainEqual({ rotulo: "Roma Tours: valor atualizado", valor: -2000n });
+    expect(r1.ponte).toContainEqual({ rotulo: "Roma Tours: valor pago diferente", valor: -2000n });
+    expect(r1.ponte.map((l) => l.rotulo)).not.toContain("Roma Tours: valor atualizado");
     expect(r1.f.resumo.pagoFornecedores).toBe(52000n);
   });
 
@@ -378,6 +379,20 @@ describe("baixa de pagamento ao fornecedor", () => {
 
     const { ponte } = await estrategico(x.fin.id, x.viagemId);
     expect(ponte).toContainEqual({ rotulo: "Diferença de câmbio", valor: -(p.valorBrlPago! - p.valorBrlPrevisto) });
+    expect(ponte.map((l) => l.rotulo)).not.toContain("Euro Transfer: valor pago diferente");
+  });
+
+  it("EUR pago com desconto e câmbio maior: desconto em 'valor pago diferente', câmbio separado", async () => {
+    const x = await vendida();
+    const aplicado = x.transfer.cambioAplicado!;
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "960,00", cambioEfetivo: "6,5000" }))).toEqual({
+      ok: true,
+    });
+    const pago = converter(96000n, "6.5000");
+    const { ponte, real, planejada } = await estrategico(x.fin.id, x.viagemId);
+    expect(ponte).toContainEqual({ rotulo: "Diferença de câmbio", valor: -(pago - converter(96000n, aplicado)) });
+    expect(ponte).toContainEqual({ rotulo: "Euro Transfer: valor pago diferente", valor: -(converter(96000n, aplicado) - x.transfer.previstoBrl) });
+    expect(ponte.slice(1, -1).reduce((a, l) => a + l.valor, 0n)).toBe(real.final - planejada.final);
   });
 });
 
@@ -417,7 +432,27 @@ describe("comissões", () => {
     expect(await comSessao(x.fin.id, () => definirComissaoTipo(x.hotel.id, { tipo: "descontada" }))).toEqual({ ok: true });
     let [c] = await db.select().from(contasPagar).where(eq(contasPagar.id, x.hotel.id));
     expect(c).toMatchObject({ comissaoTipo: "descontada", previstoBrl: 298176n, previstoVendaBrl: 310600n });
-    expect(await db.select().from(comissoes).where(eq(comissoes.contaId, x.hotel.id))).toHaveLength(0);
+    // a comissão não é apagada: fica cancelada e some da ficha, da margem e da conciliação
+    const canc = await db.select().from(comissoes).where(eq(comissoes.contaId, x.hotel.id));
+    expect(canc).toHaveLength(1);
+    expect(canc[0]).toMatchObject({ id: x.comissao.id, status: "cancelada" });
+    const semComissao = await estrategico(x.fin.id, x.viagemId);
+    expect(semComissao.f.comissoes).toHaveLength(0);
+    expect(semComissao.f.contas.find((k) => k.id === x.hotel.id)!.comissao).toBeNull();
+    expect(semComissao.f.divergencias).toBe(1); // só o hotel (previsto atual ≠ o da venda); a comissão cancelada não conta
+    expect(semComissao.ponte.map((l) => l.rotulo).some((r) => r.startsWith("Comissão"))).toBe(false);
+    expect(await comSessao(x.fin.id, () => registrarComissao(x.comissao.id, { recebidaEm: "2026-11-21", valorRecebido: "1,00" }))).toEqual({
+      ok: false,
+      erro: "Comissão cancelada",
+    });
+    expect(await comSessao(x.fin.id, () => comissaoNaoRecebida(x.comissao.id, "x"))).toEqual({ ok: false, erro: "Comissão cancelada" });
+    expect(await comSessao(x.fin.id, () => desfazerComissao(x.comissao.id))).toEqual({ ok: false, erro: "Comissão cancelada" });
+    expect(await comSessao(x.fin.id, () => conciliar(x.viagemId))).toEqual({
+      ok: false,
+      erro: "Ainda há valores em aberto: Parcela 1/2, Parcela 2/2, Palazzo Barocci e mais 3",
+    });
+    // valor velho na linha cancelada: a reativação recalcula
+    await db.update(comissoes).set({ valorPrevisto: 1n, baseBrl: 1n }).where(eq(comissoes.id, x.comissao.id));
     let [p] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.hotel.id));
     // líquido 298176 com 4% à vista
     expect(p).toMatchObject({ valorOriginal: 286249n, valorBrlPrevisto: 286249n });
@@ -427,11 +462,14 @@ describe("comissões", () => {
     expect(c).toMatchObject({ comissaoTipo: "a_receber", previstoBrl: 310600n, previstoVendaBrl: 310600n });
     const cs = await db.select().from(comissoes).where(eq(comissoes.contaId, x.hotel.id));
     expect(cs).toHaveLength(1);
-    expect(cs[0]).toMatchObject({ valorPrevisto: 12424n, previstaPara: "2027-09-30", status: "prevista", baseBrl: 310600n });
+    expect(cs[0]).toMatchObject({ id: x.comissao.id, valorPrevisto: 12424n, previstaPara: "2027-09-30", status: "prevista", baseBrl: 310600n });
     [p] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.hotel.id));
     expect(p).toMatchObject({ valorOriginal: 298176n, valorBrlPrevisto: 298176n });
-    const aud = await db.select().from(auditoria).where(eq(auditoria.tabela, "comissoes"));
-    expect(aud.map((a) => a.acao)).toEqual(expect.arrayContaining(["criar", "excluir", "criar"]));
+    const aud = await db.select().from(auditoria).where(eq(auditoria.tabela, "comissoes")).orderBy(asc(auditoria.id));
+    expect(aud.map((a) => a.acao)).toEqual(["criar", "alterar", "alterar"]);
+    expect(aud[1]).toMatchObject({ antes: { status: "prevista" }, depois: { status: "cancelada" } });
+    expect(aud[2]).toMatchObject({ antes: { status: "cancelada", valorPrevisto: "1" }, depois: { status: "prevista", valorPrevisto: "12424" } });
+    expect((await ficha(x.fin.id, x.viagemId))!.comissoes).toMatchObject([{ id: x.comissao.id, pendente: true }]);
 
     // sem fornecedor não há comissão a receber
     expect(await comSessao(x.fin.id, () => definirComissaoTipo(x.aereo.id, { tipo: "a_receber" }))).toEqual({

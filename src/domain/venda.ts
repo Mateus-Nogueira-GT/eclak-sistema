@@ -1,5 +1,5 @@
 import { calcDe, type ResultadoVersao, type Snapshot } from "./aprovacoes";
-import type { Moeda } from "./cambio";
+import { converter, type Moeda } from "./cambio";
 import { cpfValido, formatarCpf } from "./clientes";
 import { arredondar, lerDecimal } from "./decimal";
 import { custoLiquido, impostoSobreMargem, pct1, type FormaPagamento, type TipoItem } from "./precificacao";
@@ -165,7 +165,7 @@ export type StatusConta = (typeof STATUS_CONTA)[number];
 export const STATUS_PAGAMENTO = ["a_pagar", "pago"] as const;
 export type StatusPagamento = (typeof STATUS_PAGAMENTO)[number];
 
-export const STATUS_COMISSAO = ["prevista", "recebida", "nao_recebida"] as const;
+export const STATUS_COMISSAO = ["prevista", "recebida", "nao_recebida", "cancelada"] as const;
 export type StatusComissao = (typeof STATUS_COMISSAO)[number];
 
 export type ComissaoGerada = {
@@ -401,6 +401,15 @@ export type ContaPonte = ContaMargem & {
   moeda: Moeda;
   /** Previsto gravado na venda (fixo, base da ponte). */
   previstoVendaBrl: bigint;
+  /**
+   * Linhas pagas (valor pago na moeda e em reais). Informadas, o pago diferente do previsto vira
+   * "<rótulo>: valor pago diferente" e, fora do real, a parte do câmbio (pago em reais − pago na moeda pelo câmbio
+   * da venda) vai para "Diferença de câmbio". Omitidas: o comportamento antigo (tudo em câmbio fora do real,
+   * em "valor atualizado" no real).
+   */
+  pagos?: { valorOriginalPago: bigint; valorBrlPago: bigint }[];
+  /** Câmbio da venda (o aplicado na cotação); nulo no real. */
+  cambioVenda?: string | null;
 };
 
 export type ComissaoPonte = {
@@ -460,6 +469,19 @@ export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: Linh
   for (const c of contas) {
     const pagoDiferente = c.pagoBrl === null ? 0n : c.pagoBrl - c.previstoBrl;
     const estrangeira = c.moeda !== "BRL";
+    if (c.pagos !== undefined) {
+      // Câmbio: só a diferença entre o pago em reais e o pago na moeda convertido pelo câmbio da venda; o resto
+      // do pago diferente (desconto à vista, preço do fornecedor) é "valor pago diferente".
+      const cambioVenda = c.cambioVenda;
+      const daConta =
+        estrangeira && cambioVenda
+          ? c.pagos.reduce((a, x) => a + x.valorBrlPago - converter(x.valorOriginalPago, cambioVenda), 0n)
+          : 0n;
+      cambio += daConta;
+      add(`${c.rotulo}: valor atualizado`, -(c.previstoBrl - c.previstoVendaBrl));
+      add(`${c.rotulo}: valor pago diferente`, -(pagoDiferente - daConta));
+      continue;
+    }
     if (estrangeira) cambio += pagoDiferente;
     add(`${c.rotulo}: valor atualizado`, -(c.previstoBrl - c.previstoVendaBrl + (estrangeira ? 0n : pagoDiferente)));
   }

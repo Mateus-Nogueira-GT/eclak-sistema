@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, gte, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { rotuloForma, type ResultadoVersao, type Snapshot } from "@/domain/aprovacoes";
 import type { Moeda } from "@/domain/cambio";
@@ -328,7 +328,8 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
       : await db
           .select()
           .from(comissoes)
-          .where(and(eq(comissoes.viagemId, v.id), inArray(comissoes.contaId, idsContas)))
+          // Canceladas (conta passou a `descontada`) ficam fora da ficha, da margem e da ponte.
+          .where(and(eq(comissoes.viagemId, v.id), inArray(comissoes.contaId, idsContas), ne(comissoes.status, "cancelada")))
           .orderBy(asc(comissoes.previstaPara));
 
   const parcelas = ps.map((p): ParcelaVendida => {
@@ -481,6 +482,10 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
         rotulo: c.fornecedor ?? c.descricao,
         moeda: c.moeda,
         previstoVendaBrl: c.previstoVendaBrl,
+        pagos: c.pagamentos
+          .filter((p) => p.status === "pago")
+          .map((p) => ({ valorOriginalPago: p.valorOriginalPago ?? 0n, valorBrlPago: p.valorBrlPago ?? 0n })),
+        cambioVenda: c.cambioAplicado,
       }));
       const parcelasMargem = ps
         .filter((p) => p.status !== "cancelada")

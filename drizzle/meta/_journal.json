@@ -113,6 +113,13 @@
       "when": 1795350213173,
       "tag": "0015_rls_venda",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795352159824,
+      "tag": "0016_comissao_cancelada",
+      "breakpoints": true
     }
   ]
 }
