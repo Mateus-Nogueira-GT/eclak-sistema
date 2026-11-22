@@ -25,6 +25,8 @@ import {
 } from "@/domain/precificacao";
 import { veCamadaEstrategica } from "@/domain/perfis";
 import type { Regras } from "@/domain/regras";
+import { hojeEmCuiaba } from "@/domain/clientes";
+import { ROTULO_STATUS_VIAGEM, statusDaViagem, type StatusViagem } from "@/domain/venda";
 import { diasDaViagem, formatarCodigoViagem, noites, type StatusOrcamento, type StatusVersao } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
@@ -41,6 +43,7 @@ import {
   viagens,
 } from "@/server/db/schema";
 import { regrasDaVersao, regrasVigentes } from "@/server/queries/regras";
+import { obterViagemVendida } from "@/server/queries/vendas";
 
 // Segurança: a camada estratégica (custo líquido, venda, compensação, margem) só é montada dentro de
 // `estrategico`, e só quando `veCamadaEstrategica(perfil)`. Para os demais perfis ela nunca é calculada.
@@ -167,6 +170,10 @@ export type OrcamentoLista = {
    * vigentes não permitem calcular (ex.: taxas e margem somam 100% ou mais).
    */
   estrategico?: { preco: bigint | null; margemPct: string | null } | { erro: string };
+  /** Só `vendida`: status derivado (Vendida, Em viagem, Recebendo, Conciliada). */
+  statusViagem?: { status: StatusViagem; rotulo: string };
+  /** Só `vendida` e camada estratégica: margem planejada × real (percentuais em texto; real nulo se não calculou). */
+  margemVendida?: { planejadaPct: string; realPct: string | null };
 };
 
 type ItemLinha = typeof itensViagem.$inferSelect;
@@ -316,7 +323,8 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
   const itens = estrategico ? await itensDe(ids) : null;
   const regras = estrategico ? (await regrasVigentes()).valores : null;
 
-  return linhas.map((l) => {
+  const hoje = hojeEmCuiaba();
+  return Promise.all(linhas.map(async (l) => {
     const linha: OrcamentoLista = {
       id: l.v.id,
       codigo: formatarCodigoViagem(l.clienteCodigo, l.v.seq),
@@ -330,6 +338,23 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
       status: l.v.status,
       versaoAprovada: l.versaoAprovada ?? null,
     };
+    if (l.v.status === "vendida") {
+      const status = statusDaViagem({
+        status: l.v.status,
+        inicio: l.v.inicio,
+        fim: l.v.fim,
+        conciliadaEm: l.v.conciliadaEm ? l.v.conciliadaEm.toISOString() : null,
+        hoje,
+      });
+      linha.statusViagem = { status, rotulo: ROTULO_STATUS_VIAGEM[status] };
+      if (estrategico) {
+        const vendida = await obterViagemVendida(l.v.id);
+        if (vendida?.estrategico) {
+          const { planejada, real } = vendida.estrategico;
+          linha.margemVendida = { planejadaPct: planejada.finalPct, realPct: "erro" in real ? null : real.finalPct };
+        }
+      }
+    }
     if (itens && regras) {
       const doItem = itens.get(l.v.id) ?? [];
       const cotados = doItem.filter((x) => x.item.tipo !== "Aéreo" && x.cotacoes.length > 0);
@@ -349,7 +374,7 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
       }
     }
     return linha;
-  });
+  }));
 }
 
 /** Sugestão de custo de referência por item da viagem (média em centavos de real, arredondada). */

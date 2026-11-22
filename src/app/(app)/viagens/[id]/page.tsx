@@ -1,17 +1,39 @@
 import { notFound } from "next/navigation";
 import { margemDaAprovacao, FORMA_REFERENCIA, FORMAS_SIMULADOR, resultadoDoPreco } from "@/domain/precificacao";
+import { veCamadaEstrategica } from "@/domain/perfis";
 import { exigirPerfil } from "@/server/auth";
 import { obterCliente } from "@/server/queries/clientes";
 import { listarFornecedores } from "@/server/queries/fornecedores";
 import { regrasVigentes } from "@/server/queries/regras";
+import { obterViagemVendida } from "@/server/queries/vendas";
 import { obterPrecificacao } from "@/server/queries/viagens";
 import { Painel, type Extras } from "./painel";
+import { ViagemVendidaView } from "./viagem-vendida";
 
 export default async function Pagina({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  await exigirPerfil();
+  const usuario = await exigirPerfil();
   const ficha = await obterPrecificacao(id);
   if (!ficha) notFound();
+
+  if (ficha.status === "vendida") {
+    const vendida = await obterViagemVendida(id);
+    if (vendida) {
+      const estrategico = veCamadaEstrategica(usuario.perfil);
+      const regras = estrategico ? (await regrasVigentes()).valores : null;
+      return (
+        <div className="mx-auto max-w-[1240px]">
+          <ViagemVendidaView
+            v={vendida}
+            ficha={ficha}
+            podeAgir={estrategico}
+            ehDiretor={usuario.perfil === "diretor"}
+            margem={regras ? { alvoPct: regras.margemAlvoPct, referenciaPct: regras.margemReferenciaPct } : null}
+          />
+        </div>
+      );
+    }
+  }
 
   const [cliente, fornecedores] = await Promise.all([obterCliente(ficha.clienteId), listarFornecedores()]);
   const ativas = cliente?.pessoas ?? [];
