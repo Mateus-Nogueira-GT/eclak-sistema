@@ -153,8 +153,8 @@ Cada entrega tem plano próprio em `docs/superpowers/plans/` e PR empilhado (4a 
 10. Centro de custo das linhas de viagem = filial da **viagem** (não a do cliente).
 11. Conta bancária obrigatória em toda baixa nova, inclusive na tela da viagem.
 12. Cartão e boleto entram no caixa pelo líquido (menos a taxa); crédito com antecipação projetado todo no primeiro vencimento.
-14. Cartão direto no fornecedor pela regra (a) acima, até a Valeska confirmar.
 13. Fatura: retrato fixo por emissão, reemissão manual com o mesmo número, aviso de "desatualizada".
+14. Cartão direto no fornecedor pela regra (a) acima, até a Valeska confirmar.
 
 ## 10. Pendências de material (não bloqueiam a 4a)
 
