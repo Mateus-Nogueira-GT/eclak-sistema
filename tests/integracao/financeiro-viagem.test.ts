@@ -3,6 +3,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { converter } from "@/domain/cambio";
+import { hojeEmCuiaba } from "@/domain/clientes";
 import { arredondar } from "@/domain/decimal";
 import type { FormaPagamento } from "@/domain/precificacao";
 import { db } from "@/server/db/client";
@@ -71,7 +72,7 @@ async function cotacao(uid: string, itemId: string, dados: Record<string, unknow
  * Viagem vendida em boleto 2x: hotel em fornecedor comissionado (3.106,00, 4% a receber, 4% à vista), passeio net
  * (500,00), transfer em EUR net (1.000,00 EUR), aéreo (8.000,00) e a taxa de roteiro automática.
  */
-async function vendida() {
+async function vendida(o: { florenca?: boolean } = {}) {
   const u = await criarUsuarioTeste("consultor");
   const d = await criarUsuarioTeste("diretor");
   const fin = await criarUsuarioTeste("fin_operacional");
@@ -99,6 +100,9 @@ async function vendida() {
   await cotacao(u.id, transfer, { moeda: "EUR", valor: "1.000,00", fornecedorId: euro });
   const aereo = await item(u.id, viagemId, { tipo: "Aéreo", servico: "GRU-FCO" });
   await cotacao(u.id, aereo, { valor: "8.000,00", comissao: "6" });
+  // Opcional: o hotel de Florença do caso Ribeiro (4.100,00 net, sem desconto à vista).
+  const florenca = o.florenca ? await item(u.id, viagemId, { tipo: "Hotelaria", servico: "Palazzo Lungarno Nove", cidade: "Florença", diarias: 3 }) : null;
+  if (florenca) await cotacao(u.id, florenca, { valor: "4.100,00", fornecedorId: await fornecedor(u.id, "Lungarno Hotels", "net", ["Hotelaria"]) });
   const e = await comSessao(u.id, () => enviarParaAprovacao(viagemId, { forma: BOLETO2, alteracao: "Primeira versão" }));
   if (!e.ok) throw new Error(e.erro);
   const a = await comSessao(d.id, () => aprovar(e.id));
@@ -130,6 +134,7 @@ async function vendida() {
     passeio: conta(passeio),
     transfer: conta(transfer),
     aereo: conta(aereo),
+    florenca: florenca ? conta(florenca) : null,
     pagHotel: await pagamentoDa(conta(hotel).id),
     pagPasseio: await pagamentoDa(conta(passeio).id),
     pagTransfer: await pagamentoDa(conta(transfer).id),
@@ -585,6 +590,84 @@ describe("contas a pagar", () => {
     expect(f.divergencias).toBe(4);
     const { ponte } = await estrategico(x.fin.id, x.viagemId);
     expect(ponte).toContainEqual({ rotulo: "Roma Tours: valor atualizado", valor: -18400n });
+  });
+});
+
+describe("previsto acima do já pago, sem linha em aberto", () => {
+  beforeEach(limparBanco);
+
+  it("Florença 4.100 pago inteiro → 5.940: nova linha em aberto de 1.840, conta a pagar, margem cai 1.840 (+ imposto); conciliar recusado", async () => {
+    const x = await vendida({ florenca: true });
+    const conta = x.florenca!;
+    const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
+    const [pag] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, conta.id));
+    expect(pag.valorBrlPrevisto).toBe(410000n);
+    expect(await fin(() => baixarPagamento(pag.id, { pagoEm: "2026-11-21", valorOriginalPago: "4.100,00" }))).toEqual({ ok: true });
+    expect((await db.select().from(contasPagar).where(eq(contasPagar.id, conta.id)))[0].status).toBe("paga");
+    const r0 = await estrategico(x.fin.id, x.viagemId);
+
+    expect(await fin(() => atualizarPrevisto(conta.id, "5.940,00", "Hotel cobrou R$ 1.840 a mais"))).toEqual({ ok: true });
+    const linhas = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, conta.id)).orderBy(asc(pagamentosFornecedor.numero));
+    expect(linhas).toHaveLength(2);
+    expect(linhas[0]).toMatchObject({ id: pag.id, status: "pago", valorBrlPago: 410000n });
+    expect(linhas[1]).toMatchObject({ numero: 2, status: "a_pagar", valorOriginal: 184000n, valorBrlPrevisto: 184000n, vencimento: hojeEmCuiaba() });
+    const [c] = await db.select().from(contasPagar).where(eq(contasPagar.id, conta.id));
+    expect(c).toMatchObject({ status: "a_pagar", previstoBrl: 594000n, previstoVendaBrl: 410000n });
+    const aud = await db.select().from(auditoria).where(eq(auditoria.registroId, linhas[1].id));
+    expect(aud).toHaveLength(1);
+    expect(aud[0]).toMatchObject({ usuarioId: x.fin.id, acao: "criar", tabela: "pagamentos_fornecedor" });
+    const audConta = await db.select().from(auditoria).where(eq(auditoria.registroId, conta.id)).orderBy(asc(auditoria.id));
+    expect(audConta.some((a) => (a.depois as Record<string, unknown>)?.status === "a_pagar")).toBe(true);
+
+    const r1 = await estrategico(x.fin.id, x.viagemId);
+    expect(r1.real.custo).toBe(r0.real.custo + 184000n);
+    expect(r1.real.imposto).toBe(r0.real.imposto - arredondar(184000n * 7n, 100n));
+    expect(r1.real.final).toBe(r0.real.final - 184000n + (r0.real.imposto - r1.real.imposto));
+    expect(r1.ponte).toContainEqual({ rotulo: "Lungarno Hotels: valor atualizado", valor: -184000n });
+
+    // em aberto: a conciliação lista a linha nova
+    for (const p of x.parcelas) expect(await fin(() => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: (p.valor / 100n).toString() + "," + (p.valor % 100n).toString().padStart(2, "0") }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagHotel.id, { pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagPasseio.id, BAIXA_PAGAMENTO))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagAereo.id, { pagoEm: "2026-11-21", valorOriginalPago: "7.520,00" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,1" }))).toEqual({ ok: true });
+    expect(await fin(() => comissaoNaoRecebida(x.comissao.id, "Hotel não pagou"))).toEqual({ ok: true });
+    expect(await fin(() => conciliar(x.viagemId))).toEqual({ ok: false, erro: "Ainda há valores em aberto: Palazzo Lungarno Nove (2/2)" });
+
+    // paga a linha nova: a conta volta a paga e a margem não muda
+    const antesDaBaixa = await estrategico(x.fin.id, x.viagemId);
+    expect(await fin(() => baixarPagamento(linhas[1].id, { pagoEm: hojeEmCuiaba(), valorOriginalPago: "1.840,00" }))).toEqual({ ok: true });
+    expect((await db.select().from(contasPagar).where(eq(contasPagar.id, conta.id)))[0].status).toBe("paga");
+    const r2 = await estrategico(x.fin.id, x.viagemId);
+    expect(r2.real.final).toBe(antesDaBaixa.real.final);
+    expect(await fin(() => conciliar(x.viagemId))).toEqual({ ok: true });
+    expect(await comSessao(x.d.id, () => desfazerConciliacao(x.viagemId))).toEqual({ ok: true });
+
+    // reenviar o mesmo previsto (ou baixar dentro do já pago) não cria linha
+    expect(await fin(() => atualizarPrevisto(conta.id, "5.940,00", "Conferido"))).toEqual({ ok: true });
+    expect(await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, conta.id))).toHaveLength(2);
+  });
+
+  it("EUR pago inteiro: a linha nova volta para a moeda pelo câmbio da conta; à vista com desconto: só o aumento", async () => {
+    const x = await vendida();
+    const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
+    expect(await fin(() => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,1" }))).toEqual({ ok: true });
+    const novo = x.transfer.previstoBrl + 61000n;
+    expect(await fin(() => atualizarPrevisto(x.transfer.id, (novo / 100n).toString() + "," + (novo % 100n).toString().padStart(2, "0"), "Hora extra do motorista"))).toEqual({ ok: true });
+    const lt = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.transfer.id)).orderBy(asc(pagamentosFornecedor.numero));
+    expect(lt).toHaveLength(2);
+    // pago 6.100,00; o aumento (610,00) cabe inteiro acima do pago
+    expect(lt[1].valorBrlPrevisto).toBe(61000n);
+    expect(lt[1].valorOriginal).toBe(arredondar(61000n * 10_000n, BigInt(x.transfer.cambioAplicado!.replace(".", ""))));
+
+    // hotel à vista com 4% de desconto: pago 2.981,76 sobre 3.106,00; previsto sobe 100,00 → linha de 100,00
+    expect(await fin(() => baixarPagamento(x.pagHotel.id, { pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
+    expect(await fin(() => atualizarPrevisto(x.hotel.id, "3.206,00", "Diária extra"))).toEqual({ ok: true });
+    const lh = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.hotel.id)).orderBy(asc(pagamentosFornecedor.numero));
+    expect(lh.map((l) => [l.numero, l.status, l.valorBrlPrevisto])).toEqual([
+      [1, "pago", 298176n],
+      [2, "a_pagar", 10000n],
+    ]);
   });
 });
 

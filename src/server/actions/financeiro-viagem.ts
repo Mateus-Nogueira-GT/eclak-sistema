@@ -4,6 +4,7 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { Snapshot } from "@/domain/aprovacoes";
 import { converter } from "@/domain/cambio";
+import { hojeEmCuiaba } from "@/domain/clientes";
 import { arredondar, lerDecimal } from "@/domain/decimal";
 import { formatarReais } from "@/domain/dinheiro";
 import { aplicarFormaFornecedor, contasDoSnapshot, reprevisarLinhas, type ComissaoTipo, type ContaGerada } from "@/domain/venda";
@@ -105,6 +106,8 @@ function texto(schema: import("zod").ZodType<string>, valor: unknown, campo: str
   const p = schema.safeParse(valor);
   return p.success ? p.data : falha(p.error.issues[0].message, campo);
 }
+
+const minimo = (a: bigint, b: bigint) => (a < b ? a : b);
 
 const semId = (x: Record<string, unknown>) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== "id"));
 
@@ -438,7 +441,8 @@ export async function definirComissaoTipo(contaId: string, dados: ComissaoTipoEn
 
 /**
  * Atualiza o previsto atual da conta em reais (o fornecedor cobrou diferente do orçado), com motivo obrigatório.
- * As linhas em aberto absorvem a diferença (`reprevisarLinhas`); o previsto na venda não muda.
+ * As linhas em aberto absorvem a diferença (`reprevisarLinhas`); sem linha em aberto, o aumento acima do já pago
+ * vira uma linha nova (vence hoje) e a conta volta a `a_pagar`. O previsto na venda não muda.
  */
 export async function atualizarPrevisto(contaId: string, valorBrl: string, motivo: string): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
@@ -468,7 +472,31 @@ export async function atualizarPrevisto(contaId: string, valorBrl: string, motiv
           { original: previstoNaMoeda(base, conta, conta.previstoBrl), brl: conta.previstoBrl },
           { original: previstoNaMoeda(base, conta, novo), brl: novo },
         );
-        const depois = { previstoBrl: novo, motivoPrevisto: m };
+        // Sem linha em aberto e o previsto subiu acima do já pago: o aumento vira uma linha nova em aberto
+        // (vence hoje), sem passar do novo previsto; a conta volta a `a_pagar`.
+        const complemento = linhas.some((l) => l.status !== "pago") ? 0n : minimo(novo - conta.previstoBrl, novo - jaPago);
+        if (complemento > 0n) {
+          const valorOriginal =
+            conta.moeda === "BRL" || !conta.cambioAplicado
+              ? complemento
+              : arredondar(complemento * 10_000n, lerDecimal(conta.cambioAplicado, 4));
+          const [linha] = await tx
+            .insert(pagamentosFornecedor)
+            .values({
+              contaId: conta.id,
+              numero: linhas.reduce((n, l) => Math.max(n, l.numero), 0) + 1,
+              vencimento: hojeEmCuiaba(),
+              valorOriginal,
+              valorBrlPrevisto: complemento,
+            })
+            .returning();
+          await registrarAuditoria(tx, { usuarioId: usuario.id, tabela: "pagamentos_fornecedor", registroId: linha.id, acao: "criar", depois: semId(linha) });
+        }
+        const depois = {
+          previstoBrl: novo,
+          motivoPrevisto: m,
+          ...(complemento > 0n && conta.status === "paga" ? { status: "a_pagar" as const } : {}),
+        };
         await tx.update(contasPagar).set(depois).where(eq(contasPagar.id, conta.id));
         await auditarAlteracao(tx, usuario.id, "contas_pagar", conta, depois);
         return OK;
