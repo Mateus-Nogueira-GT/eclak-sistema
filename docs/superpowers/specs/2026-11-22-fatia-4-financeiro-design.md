@@ -62,14 +62,14 @@ Todas as Global Constraints das fatias 1–3b (HANDOFF §4): centavos `bigint`, 
 | Fonte | Lado | Linha | Categoria | Centro de custo | Pessoa | Parcela n/N |
 |---|---|---|---|---|---|---|
 | `lancamentos` (novo) | pagar ou receber | cada lançamento | a escolhida | o escolhido | fornecedor, cliente ou texto livre | do parcelamento/recorrência |
-| `parcelas_receber` | receber | cada parcela | "Vendas de viagem" (fixa) | filial do cliente (Rondonópolis→MT, RS→RS) | nome da fatura da venda | `numero/total_parcelas` |
-| `pagamentos_fornecedor` | pagar | cada pagamento | "Fornecedores de viagem" (fixa) | filial do cliente | fornecedor da conta | `numero/N da conta` |
-| `comissoes` (tipo `a_receber`) | receber | cada comissão | "Comissões de hotel" (fixa; ver §9) | filial do cliente | fornecedor | — |
+| `parcelas_receber` | receber | cada parcela | "Vendas de viagem" (fixa) | filial da viagem (Rondonópolis→MT, RS→RS) | nome da fatura da venda | `numero/total_parcelas` |
+| `pagamentos_fornecedor` | pagar | cada pagamento | "Fornecedores de viagem" (fixa) | filial da viagem | fornecedor da conta | `numero/N da conta` |
+| `comissoes` (tipo `a_receber`) | receber | cada comissão | "Comissões de hotel" (fixa; ver §9) | filial da viagem | fornecedor | — |
 
 - Origem mostrada: "Viagem ECL-NNNN-NN" com link para a viagem (aba Entradas/Saídas); lançamentos manuais mostram "Lançado à mão".
 - Linhas de viagem são **só leitura** na lista, exceto baixa / desfazer baixa e anexos. Valor, vencimento e forma se mudam na viagem (como hoje).
 - Contas a pagar de viagem **ainda sem forma de pagamento ao fornecedor** (sem `pagamentos_fornecedor`) aparecem como uma linha "Forma a definir", vencimento = início da viagem, valor = `previsto_brl`, sem botão de baixa (link para a viagem). Assim o caixa não as esquece.
-- `cartao_fornecedor` (cliente paga direto ao fornecedor): parcelas aparecem com selo "Não transita pelo caixa" e **ficam fora** dos totais do topo e do fluxo de caixa. O pagamento correspondente ao fornecedor também.
+- `cartao_fornecedor` (cliente paga direto ao fornecedor) — **regra (a), Mateus 22/11/2026, a confirmar com a Valeska:** o cliente passa o pacote inteiro na maquininha de **um** fornecedor, que fica com o custo dele e repassa a diferença à ECLAK. A venda passa a registrar **qual fornecedor recebeu** (coluna nova em `vendas`, obrigatória para essa forma; nas vendas já existentes, pedida na tela da viagem com aviso até ser preenchida). Efeito na lista e no caixa: a parcela do cliente aparece como **"Repasse de <fornecedor>"**, a receber, pelo valor da parcela menos o previsto das contas desse fornecedor na viagem; as contas desse fornecedor ganham o selo "Pago pelo cliente no cartão do fornecedor" e ficam **fora** dos totais e do caixa. As contas dos demais fornecedores seguem normais. A margem real da 3b não muda (continua usando preço, custos e taxas como hoje).
 - Pagamentos com forma `cartao_corporativo`: na 4a aparecem como linha comum com a data informada; na 4b passam a compor a fatura do cartão (§6.5) e saem da lista como linhas soltas.
 - Cancelados (parcela cancelada, comissão não recebida, lançamento cancelado, pagamento de conta excluída) não entram nos totais; aparecem só com o filtro "Canceladas".
 
@@ -93,7 +93,8 @@ Todas as Global Constraints das fatias 1–3b (HANDOFF §4): centavos `bigint`, 
 ### 6.3 Baixa única e em lote
 
 - Baixa de linha de viagem pela lista chama **as mesmas funções** de `src/server/actions/financeiro-viagem.ts` (`baixarParcela`, `baixarPagamento`, `registrarComissao` e os "desfazer"). A lógica de escrita deve ficar numa função interna compartilhada que recebe a transação, para que lote e individual usem o mesmo código.
-- As três tabelas da 3b ganham `conta_bancaria_id` (nulo para baixas antigas). A tela da viagem passa a pedir a conta bancária na baixa também.
+- As três tabelas da 3b ganham `conta_bancaria_id` (nulo só para baixas antigas). **Conta bancária é obrigatória em toda baixa nova**, na lista e na tela da viagem; por isso o cadastro de contas bancárias vem antes das mudanças de baixa no plano.
+- **Valor que chega ao banco:** parcela de cartão de crédito entra no caixa pelo valor recebido **menos a taxa efetiva** (líquido); na projeção, valor da parcela menos a taxa prevista. Boleto, idem com a taxa por boleto. Data: a do vencimento da parcela; se a forma for crédito **com antecipação**, a projeção põe todas as parcelas em aberto na data do primeiro vencimento (a adquirente adianta tudo).
 - **Lote:** marcar várias linhas em aberto (manuais e/ou de viagem, mesmo lado) → informar data e conta bancária → cada uma é baixada pelo **valor previsto** numa única transação. Se alguma linha marcada exige dado individual, o lote inteiro é recusado e a tela diz quais linhas tirar. Exigem dado individual: pagamento em moeda estrangeira (exige câmbio efetivo), parcela de cartão com taxa a confirmar (se o builder concluir que a taxa prevista basta, pode aceitar), linhas "Forma a definir", "Não transita pelo caixa". Travas de viagem tomadas em ordem crescente de `viagem_id` para não haver impasse.
 - Pendências da 3b resolvidas aqui: `baixarParcela` passa a **acrescentar** a observação em vez de sobrescrever; **botão "Cancelar parcela"** na aba Entradas da viagem (a action já existe); `definirFormaFornecedor` deixa de apagar pagamentos em aberto quando houver vínculo (fatura de cartão na 4b) — recusa com mensagem até o vínculo ser desfeito; antes disso, segue como está.
 
@@ -102,7 +103,7 @@ Todas as Global Constraints das fatias 1–3b (HANDOFF §4): centavos `bigint`, 
 - Cada venda gera **uma fatura** (como no protótipo: "Fatura 1502, parcela 3/4"). O número é dado quando o financeiro **emite a fatura** na tela Faturas ("Vendas para faturar" → "Emitir fatura"), não no fechamento da venda — é o fluxo do protótipo e a Valeska emite as faturas hoje. (Corrige o que foi dito na conversa, que era no fechamento; ver §9.)
 - Numeração: tabela contadora de uma linha (`faturas_contador.proximo`), lida com `for update` dentro da transação que emite (depois da trava da viagem), incrementada e gravada; fatura com `numero` único. Sem `sequence` do Postgres (sequência pula número em rollback).
 - Número inicial **1405**; o Diretor pode ajustar o próximo número em Admin › Parâmetros **enquanto nenhuma fatura tiver sido emitida**; depois só avança.
-- Fatura nunca é apagada nem renumerada. Se a venda mudar (nova forma, ajuste), a fatura é **reemitida com o mesmo número** e versão (o PDF mostra a versão atual e a data). Cancelamento da venda não existe hoje; se existir, a fatura fica "cancelada" com o número preservado.
+- Fatura nunca é apagada nem renumerada. Cada emissão grava um **retrato fixo** (`faturas_versoes`: dados da fatura, total, parcelas com vencimento e valor). Se as parcelas da venda mudarem depois (nova forma, cancelamento, ajuste), a tela Faturas mostra "Fatura desatualizada" e o financeiro clica **Reemitir**: nova versão, **mesmo número**. Nenhuma action da 3b precisa mexer na fatura; a comparação é feita na leitura. O PDF mostra a versão escolhida (padrão: a última), com a data de emissão. Cancelamento da venda não existe hoje; se existir, a fatura fica "cancelada" com o número preservado.
 - Impressão/PDF como a proposta da 3a (página de impressão do navegador). Conteúdo mínimo: número, emissão, nome/CPF-CNPJ da fatura (já na venda), viagem e destino, valor total, forma e cronograma de parcelas com situação. **O layout final segue o modelo atual da ECLAK (FATURA_1405_ANGELOTHUM_ITALIA_….pdf)**, que ainda não foi enviado; até lá, layout do protótipo.
 - As parcelas da lista mostram "Fatura 1405" na descrição quando a fatura existe.
 
@@ -149,6 +150,11 @@ Cada entrega tem plano próprio em `docs/superpowers/plans/` e PR empilhado (4a 
 7. Telas do financeiro só para Diretor e os dois financeiros.
 8. Categorias iniciais do protótipo entram por migração (vão para produção), ajustáveis.
 9. Lançamentos manuais sem anexo na 4a (anexos chegam com o Storage na 4b).
+10. Centro de custo das linhas de viagem = filial da **viagem** (não a do cliente).
+11. Conta bancária obrigatória em toda baixa nova, inclusive na tela da viagem.
+12. Cartão e boleto entram no caixa pelo líquido (menos a taxa); crédito com antecipação projetado todo no primeiro vencimento.
+14. Cartão direto no fornecedor pela regra (a) acima, até a Valeska confirmar.
+13. Fatura: retrato fixo por emissão, reemissão manual com o mesmo número, aviso de "desatualizada".
 
 ## 10. Pendências de material (não bloqueiam a 4a)
 
