@@ -2,8 +2,7 @@ import { calcDe, type ResultadoVersao, type Snapshot } from "./aprovacoes";
 import type { Moeda } from "./cambio";
 import { cpfValido, formatarCpf } from "./clientes";
 import { arredondar, lerDecimal } from "./decimal";
-import { custoLiquido, impostoSobreMargem, pct1, taxaDaForma, type FormaPagamento, type TipoItem } from "./precificacao";
-import type { Regras } from "./regras";
+import { custoLiquido, impostoSobreMargem, pct1, type FormaPagamento, type TipoItem } from "./precificacao";
 
 // Venda fechada (sem I/O): cronograma de recebimento, contas a pagar a partir do snapshot aprovado,
 // margem real (mesma conta da aprovação), ponte da margem, status derivado da viagem e documento da fatura.
@@ -97,11 +96,19 @@ export function cronogramaRecebimento(total: bigint, n: number, primeiro: string
   }));
 }
 
-/** Taxa financeira prevista de uma parcela: % da forma × valor (meio para cima) + taxa por boleto, no boleto. */
-export function taxaPrevistaParcela(valor: bigint, forma: FormaPagamento, regras: Regras): bigint {
-  const t = taxaDaForma(forma, regras);
-  const porBoleto = forma.tipo === "boleto" ? BigInt(regras.taxas.boletoPorBoleto) : 0n;
-  return arredondar(pct(t.pct) * valor, E) + porBoleto;
+/**
+ * Taxas financeiras previstas por parcela: a `taxa` do `resultado` da versão aprovada repartida na proporção do
+ * valor de cada parcela sobre o total (meio para cima); a última absorve, então a soma é a taxa da aprovação.
+ */
+export function alocarTaxasPrevistas(resultadoTaxa: bigint, valoresParcelas: bigint[]): bigint[] {
+  if (valoresParcelas.length === 0) return [];
+  const total = valoresParcelas.reduce((a, v) => a + v, 0n);
+  let acumulado = 0n;
+  return valoresParcelas.map((v, i) => {
+    const t = i === valoresParcelas.length - 1 ? resultadoTaxa - acumulado : total === 0n ? 0n : arredondar(resultadoTaxa * v, total);
+    acumulado += t;
+    return t;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +323,7 @@ export type ParcelaMargem = {
   recebida: boolean;
   /** Taxa cobrada de fato (vale só com a parcela recebida); nula = usa a prevista. */
   taxaEfetiva: bigint | null;
+  /** Parte da taxa da aprovação (`alocarTaxasPrevistas`). */
   taxaPrevista: bigint;
 };
 
@@ -324,8 +332,6 @@ export type ContaMargem = { aereo: boolean; previstoBrl: bigint; pagoBrl: bigint
 export type EntradaMargemReal = {
   /** Preço do pacote da versão aprovada (sem a taxa de serviço). */
   preco: bigint;
-  /** Total a receber do cliente (preço ao cliente da versão). */
-  totalReceber: bigint;
   contas: ContaMargem[];
   /** Soma das comissões **recebidas** (sem as de Aéreo). */
   comissoesRecebidas: bigint;
@@ -344,14 +350,14 @@ export type MargemReal = { custo: bigint; imposto: bigint; taxas: bigint; fixo: 
 /**
  * Mesma conta de `margemDaAprovacao`, com o realizado: custo = Σ contas não-Aéreo (pago em reais, senão o
  * previsto atual) − comissões recebidas + taxa de roteiro; imposto = imposto% × max(P − custo, 0); taxas =
- * Σ parcelas (efetiva se recebida, senão prevista) × P ÷ total a receber (meio para cima); fixo da versão.
+ * Σ parcelas (efetiva se recebida e informada, senão a prevista alocada da aprovação) — com as previstas de
+ * `alocarTaxasPrevistas`, é a taxa da aprovação + Σ (efetiva − prevista) das recebidas; fixo da versão.
  */
 export function margemReal(e: EntradaMargemReal): MargemReal {
   const contas = e.contas.filter((c) => !c.aereo).reduce((a, c) => a + (c.pagoBrl ?? c.previstoBrl), 0n);
   const custo = contas - e.comissoesRecebidas + e.taxaRoteiro;
   const imposto = impostoSobreMargem(e.preco, custo, e.impostoPct);
-  const somaTaxas = e.parcelas.reduce((a, p) => a + (p.recebida && p.taxaEfetiva !== null ? p.taxaEfetiva : p.taxaPrevista), 0n);
-  const taxas = e.totalReceber === 0n ? 0n : arredondar(somaTaxas * e.preco, e.totalReceber);
+  const taxas = e.parcelas.reduce((a, p) => a + (p.recebida && p.taxaEfetiva !== null ? p.taxaEfetiva : p.taxaPrevista), 0n);
   const final = e.preco - custo - imposto - taxas - e.fixo;
   return { custo, imposto, taxas, fixo: e.fixo, final, finalPct: pct1(final, e.preco) };
 }
@@ -393,7 +399,6 @@ export type ComissaoPonte = {
 export type EntradaPonte = {
   planejada: Omit<MargemPlanejada, "finalPct">;
   preco: bigint;
-  totalReceber: bigint;
   impostoPct: string;
   taxaRoteiro: bigint;
   contas: ContaPonte[];
@@ -416,7 +421,6 @@ export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: Linh
   const comissoes = e.comissoes.filter((c) => !c.aereo);
   const real = margemReal({
     preco: e.preco,
-    totalReceber: e.totalReceber,
     contas,
     comissoesRecebidas: comissoes.reduce((a, c) => a + (c.valorRecebido ?? 0n), 0n),
     parcelas: e.parcelas,
@@ -476,8 +480,7 @@ export const ROTULO_STATUS_VIAGEM: Record<StatusViagem, string> = {
 
 /**
  * Status derivado: fora de `vendida` é orçamento; conciliada quando `conciliadaEm` está preenchido; antes do
- * início "Vendida", do início ao fim "Em viagem", depois do fim "Recebendo" se há algo em aberto (senão segue
- * "Vendida", à espera da conciliação).
+ * início "Vendida", do início ao fim "Em viagem", depois do fim "Recebendo" até a conciliação.
  */
 export function statusDaViagem(v: {
   status: string;
@@ -485,11 +488,10 @@ export function statusDaViagem(v: {
   fim: string;
   conciliadaEm: string | null;
   hoje: string;
-  emAberto: boolean;
 }): StatusViagem {
   if (v.status !== "vendida") return "orcamento";
   if (v.conciliadaEm) return "conciliada";
   if (v.hoje < v.inicio) return "vendida";
   if (v.hoje <= v.fim) return "em_viagem";
-  return v.emAberto ? "recebendo" : "vendida";
+  return "recebendo";
 }

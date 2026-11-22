@@ -17,7 +17,7 @@ import {
   ponteDaMargem,
   ROTULO_STATUS_VIAGEM,
   statusDaViagem,
-  taxaPrevistaParcela,
+  alocarTaxasPrevistas,
   taxaRoteiroDoSnapshot,
   type ContaGerada,
 } from "@/domain/venda";
@@ -123,14 +123,20 @@ describe("cronogramaRecebimento (Review Focus 3)", () => {
   });
 });
 
-describe("taxaPrevistaParcela", () => {
-  it("percentual da forma sobre a parcela, meio para cima; boleto soma a taxa fixa por boleto", () => {
-    const r = { ...R, taxas: { ...R.taxas, credito2a6x: "3.470", pix: "0.500" } };
-    // 3,47% de 33333 = 1156,6551 → 1157
-    expect(taxaPrevistaParcela(33333n, { tipo: "credito", parcelas: 3 }, r)).toBe(1157n);
-    // 0,5% de 101 = 0,505 → 1
-    expect(taxaPrevistaParcela(101n, { tipo: "pix", parcelas: 1 }, r)).toBe(1n);
-    expect(taxaPrevistaParcela(33333n, { tipo: "boleto", parcelas: 3 }, R)).toBe(250n);
+describe("alocarTaxasPrevistas", () => {
+  it("reparte a taxa da aprovação pelo valor das parcelas; a última absorve e a soma é exata", () => {
+    expect(alocarTaxasPrevistas(1000n, [33333n, 33333n, 33334n])).toEqual([333n, 333n, 334n]);
+    // 1001 × 1/3 = 333,67 → 334; a última fica com 333
+    expect(alocarTaxasPrevistas(1001n, [100n, 100n, 100n])).toEqual([334n, 334n, 333n]);
+    expect(alocarTaxasPrevistas(0n, [500n, 500n])).toEqual([0n, 0n]);
+    expect(alocarTaxasPrevistas(7n, [0n, 0n])).toEqual([0n, 7n]);
+    expect(alocarTaxasPrevistas(5n, [])).toEqual([]);
+    for (const taxa of [1n, 999n, 31337n, 123457n]) {
+      for (let n = 1; n <= 10; n++) {
+        const valores = cronogramaRecebimento(9_000_001n, n, "2026-11-20").map((p) => p.valor);
+        expect(alocarTaxasPrevistas(taxa, valores).reduce((x, y) => x + y, 0n)).toBe(taxa);
+      }
+    }
   });
 });
 
@@ -299,17 +305,23 @@ function vender(s: Snapshot, modalidade: Record<string, "net" | "comissionado">,
   const resultado = resultadoDaVersao(s, preco, forma, dias, "por_dia", R);
   const total = BigInt(resultado.precoCliente!);
   const contas = contasDoSnapshot(s, modalidade, s.fim);
-  const parcelas = cronogramaRecebimento(total, forma.parcelas, "2026-11-20").map((p) => ({
+  const crono = cronogramaRecebimento(total, forma.parcelas, "2026-11-20");
+  const previstas = alocarTaxasPrevistas(BigInt(resultado.taxa), crono.map((p) => p.valor));
+  const parcelas = crono.map((p, i) => ({
     valor: p.valor,
     recebida: false,
     taxaEfetiva: null as bigint | null,
-    taxaPrevista: taxaPrevistaParcela(p.valor, forma, R),
+    taxaPrevista: previstas[i],
   }));
   return { preco, resultado, total, contas, parcelas };
 }
 
 describe("margemReal", () => {
-  it("sem divergência, comissão recebida e taxas iguais: igual à margem da aprovação (mesma fórmula)", () => {
+  it.each<[string, FormaPagamento]>([
+    ["pix", { tipo: "pix", parcelas: 1 }],
+    ["boleto 4x", { tipo: "boleto", parcelas: 4 }],
+    ["cartão 6x", { tipo: "credito", parcelas: 6 }],
+  ])("sem divergência e comissão recebida (%s): igual à margem da aprovação (mesma fórmula)", (_, forma) => {
     seq = 0;
     const s = snapshot(
       [
@@ -322,12 +334,11 @@ describe("margemReal", () => {
       "2027-01-15",
       "2027-02-01",
     );
-    const forma: FormaPagamento = { tipo: "pix", parcelas: 1 };
-    const { preco, resultado, total, contas, parcelas } = vender(s, { "f-Operadora": "comissionado" }, forma, 18);
+    const { preco, resultado, contas, parcelas } = vender(s, { "f-Operadora": "comissionado" }, forma, 18);
+    if (forma.tipo !== "pix") expect(BigInt(resultado.taxa) > 0n).toBe(true);
     const comissao = contas.find((c) => c.comissao)!.comissao!;
     const m = margemReal({
       preco,
-      totalReceber: total,
       contas: contas.map((c) => ({ aereo: c.aereo, previstoBrl: c.previstoBrl, pagoBrl: null })),
       comissoesRecebidas: comissao.valor,
       parcelas,
@@ -345,7 +356,6 @@ describe("margemReal", () => {
     const ponte = ponteDaMargem({
       planejada: planejadaDaVersao(resultado),
       preco,
-      totalReceber: total,
       impostoPct: R.impostoSobreMargemPct,
       taxaRoteiro: taxaRoteiroDoSnapshot(s),
       contas: contas.map((c) => ({ rotulo: c.fornecedor ?? c.descricao, aereo: c.aereo, moeda: c.moeda, previstoVendaBrl: c.previstoBrl, previstoBrl: c.previstoBrl, pagoBrl: null })),
@@ -359,10 +369,9 @@ describe("margemReal", () => {
     ]);
   });
 
-  it("taxas: efetiva quando recebida, senão a prevista; proporcional ao preço do pacote sobre o total", () => {
+  it("taxas: efetiva quando recebida e informada, senão a prevista (sem escala)", () => {
     const m = margemReal({
       preco: 900000n,
-      totalReceber: 1000000n,
       contas: [{ aereo: false, previstoBrl: 500000n, pagoBrl: 510000n }, { aereo: true, previstoBrl: 999999n, pagoBrl: null }],
       comissoesRecebidas: 10000n,
       parcelas: [
@@ -378,16 +387,15 @@ describe("margemReal", () => {
     expect(m.custo).toBe(525000n);
     // 7% de 375000
     expect(m.imposto).toBe(26250n);
-    // (1000 + 17350 + 3) × 900000 / 1000000 = 16517,7 → 16518
-    expect(m.taxas).toBe(16518n);
-    expect(m.final).toBe(900000n - 525000n - 26250n - 16518n - 100000n);
-    expect(m.finalPct).toBe("25.8");
+    // 1000 (efetiva) + 17350 (recebida sem efetiva) + 3 (não recebida)
+    expect(m.taxas).toBe(18353n);
+    expect(m.final).toBe(900000n - 525000n - 26250n - 18353n - 100000n);
+    expect(m.finalPct).toBe("25.6");
   });
 
   it("custo acima do preço: imposto zero e margem negativa", () => {
     const m = margemReal({
       preco: 100000n,
-      totalReceber: 100000n,
       contas: [{ aereo: false, previstoBrl: 120000n, pagoBrl: null }],
       comissoesRecebidas: 0n,
       parcelas: [],
@@ -405,8 +413,10 @@ describe("ponteDaMargem", () => {
   it("Ribeiro: Florença 4100 → 5940 e comissão não recebida; a ponte explica a diferença exata", () => {
     const { s, modalidade } = ribeiro();
     const forma: FormaPagamento = { tipo: "boleto", parcelas: 5 };
-    const { preco, resultado, total, contas, parcelas } = vender(s, modalidade, forma, 18);
+    const { preco, resultado, contas, parcelas: previstas } = vender(s, modalidade, forma, 18);
     const planejada = planejadaDaVersao(resultado);
+    // 1º boleto recebido com taxa efetiva R$ 1,00 acima da prevista; os demais ainda em aberto
+    const parcelas = previstas.map((p, i) => (i === 0 ? { ...p, recebida: true, taxaEfetiva: p.taxaPrevista + 100n } : p));
     const entradaContas = contas.map((c) => ({
       rotulo: c.fornecedor ?? c.descricao,
       aereo: c.aereo,
@@ -418,7 +428,6 @@ describe("ponteDaMargem", () => {
     const p = ponteDaMargem({
       planejada,
       preco,
-      totalReceber: total,
       impostoPct: R.impostoSobreMargemPct,
       taxaRoteiro: taxaRoteiroDoSnapshot(s),
       contas: entradaContas,
@@ -427,7 +436,6 @@ describe("ponteDaMargem", () => {
     });
     const real = margemReal({
       preco,
-      totalReceber: total,
       contas: entradaContas,
       comissoesRecebidas: 0n,
       parcelas,
@@ -452,8 +460,9 @@ describe("ponteDaMargem", () => {
     expect(p.linhas[2].valor).toBe(-95000n);
     // custo sobe 279000 → imposto cai 7% disso
     expect(p.linhas[4].valor).toBe(19530n);
-    // boletos: 5 × R$ 2,50 na aprovação; na real, proporcional ao preço do pacote sobre o total a receber
-    expect(p.linhas[3].valor).toBe(1250n - real.taxas);
+    // boletos: 5 × R$ 2,50 na aprovação; só a diferença da taxa efetiva do 1º boleto aparece
+    expect(real.taxas).toBe(1350n);
+    expect(p.linhas[3].valor).toBe(-100n);
   });
 
   it("escolhida mais barata que a precificada: 'Fornecedores escolhidos' = margem extra; câmbio nas contas pagas em moeda estrangeira", () => {
@@ -470,12 +479,11 @@ describe("ponteDaMargem", () => {
       "2027-01-20",
     );
     const forma: FormaPagamento = { tipo: "credito", parcelas: 6 };
-    const { preco, resultado, total, contas, parcelas } = vender(s, {}, forma, 10);
+    const { preco, resultado, contas, parcelas } = vender(s, {}, forma, 10);
     expect(BigInt(resultado.margemExtra)).toBe(61582n);
     const p = ponteDaMargem({
       planejada: planejadaDaVersao(resultado),
       preco,
-      totalReceber: total,
       impostoPct: R.impostoSobreMargemPct,
       taxaRoteiro: taxaRoteiroDoSnapshot(s),
       contas: [
@@ -498,7 +506,6 @@ describe("ponteDaMargem", () => {
     const p = ponteDaMargem({
       planejada,
       preco: 1000000n,
-      totalReceber: 1000000n,
       impostoPct: "7.000",
       taxaRoteiro: 0n,
       contas: [
@@ -521,14 +528,14 @@ describe("ponteDaMargem", () => {
 });
 
 describe("statusDaViagem", () => {
-  const base = { status: "vendida", inicio: "2027-01-15", fim: "2027-02-01", conciliadaEm: null, emAberto: true };
+  const base = { status: "vendida", inicio: "2027-01-15", fim: "2027-02-01", conciliadaEm: null };
   it("deriva pela data e pela conciliação", () => {
     expect(statusDaViagem({ ...base, status: "aprovado", hoje: "2027-01-20" })).toBe("orcamento");
     expect(statusDaViagem({ ...base, hoje: "2027-01-14" })).toBe("vendida");
     expect(statusDaViagem({ ...base, hoje: "2027-01-15" })).toBe("em_viagem");
     expect(statusDaViagem({ ...base, hoje: "2027-02-01" })).toBe("em_viagem");
     expect(statusDaViagem({ ...base, hoje: "2027-02-02" })).toBe("recebendo");
-    expect(statusDaViagem({ ...base, hoje: "2027-02-02", emAberto: false })).toBe("vendida");
+    expect(statusDaViagem({ ...base, hoje: "2027-06-30" })).toBe("recebendo");
     expect(statusDaViagem({ ...base, hoje: "2027-01-10", conciliadaEm: "2027-03-01" })).toBe("conciliada");
   });
   it("rótulos", () => {
