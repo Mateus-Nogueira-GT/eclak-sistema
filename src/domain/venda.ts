@@ -340,7 +340,39 @@ export type ParcelaMargem = {
   taxaEfetiva: bigint | null;
   /** Parte da taxa da aprovação (`alocarTaxasPrevistas`). */
   taxaPrevista: bigint;
+  /** Valor recebido de fato (só com a parcela recebida); omitido ou nulo = o valor da parcela. */
+  valorRecebido?: bigint | null;
+  /** Parcela cancelada: sai da receita (parte do pacote) e das taxas. */
+  cancelada?: boolean;
+  /** "n de N" no rótulo da ponte da parcela cancelada. */
+  numero?: number;
+  totalParcelas?: number;
 };
+
+export type EfeitoRecebimento = { tipo: "a_menos" | "a_mais" | "cancelada"; parcela: ParcelaMargem; valor: bigint };
+
+/**
+ * Efeito de cada parcela na receita do pacote (centavos, com sinal): recebida com valor diferente → (recebido −
+ * valor); cancelada → −valor; cada um na parte do pacote (× preço ÷ total a receber, meio para cima), para a taxa
+ * de serviço não contar como receita do pacote. Total a receber = Σ valor de todas as parcelas (canceladas
+ * inclusive). Sem efeito fica de fora.
+ */
+export function efeitosDoRecebimento(preco: bigint, parcelas: ParcelaMargem[]): EfeitoRecebimento[] {
+  const total = parcelas.reduce((a, p) => a + p.valor, 0n);
+  if (total === 0n) return [];
+  const parte = (x: bigint) => arredondar(x * preco, total);
+  const efeitos: EfeitoRecebimento[] = [];
+  for (const p of parcelas) {
+    if (p.cancelada) {
+      const valor = parte(-p.valor);
+      if (valor !== 0n) efeitos.push({ tipo: "cancelada", parcela: p, valor });
+    } else if (p.recebida && p.valorRecebido !== undefined && p.valorRecebido !== null && p.valorRecebido !== p.valor) {
+      const valor = parte(p.valorRecebido - p.valor);
+      if (valor !== 0n) efeitos.push({ tipo: valor < 0n ? "a_menos" : "a_mais", parcela: p, valor });
+    }
+  }
+  return efeitos;
+}
 
 export type ContaMargem = { aereo: boolean; previstoBrl: bigint; pagoBrl: bigint | null };
 
@@ -350,7 +382,7 @@ export type EntradaMargemReal = {
   contas: ContaMargem[];
   /** Soma das comissões **recebidas** (sem as de Aéreo). */
   comissoesRecebidas: bigint;
-  /** Parcelas não canceladas. */
+  /** Todas as parcelas (as canceladas com `cancelada`). */
   parcelas: ParcelaMargem[];
   /** Custo fixo gravado no `resultado` da versão. */
   fixo: bigint;
@@ -360,21 +392,35 @@ export type EntradaMargemReal = {
   taxaRoteiro: bigint;
 };
 
-export type MargemReal = { custo: bigint; imposto: bigint; taxas: bigint; fixo: bigint; final: bigint; finalPct: string };
+export type MargemReal = {
+  /** Receita do pacote realizada: preço da versão + efeitos do recebimento (`efeitosDoRecebimento`). */
+  receita: bigint;
+  custo: bigint;
+  imposto: bigint;
+  taxas: bigint;
+  fixo: bigint;
+  final: bigint;
+  /** Sobre a receita realizada. */
+  finalPct: string;
+};
 
 /**
- * Mesma conta de `margemDaAprovacao`, com o realizado: custo = Σ contas não-Aéreo (pago em reais, senão o
- * previsto atual) − comissões recebidas + taxa de roteiro; imposto = imposto% × max(P − custo, 0); taxas =
- * Σ parcelas (efetiva se recebida e informada, senão a prevista alocada da aprovação) — com as previstas de
+ * Mesma conta de `margemDaAprovacao`, com o realizado: receita = P + efeitos do recebimento (recebido a menos ou a
+ * mais e parcelas canceladas, na parte do pacote); custo = Σ contas não-Aéreo (pago em reais, senão o previsto
+ * atual) − comissões recebidas + taxa de roteiro; imposto = imposto% × max(receita − custo, 0); taxas = Σ parcelas
+ * não canceladas (efetiva se recebida e informada, senão a prevista alocada da aprovação) — com as previstas de
  * `alocarTaxasPrevistas`, é a taxa da aprovação + Σ (efetiva − prevista) das recebidas; fixo da versão.
  */
 export function margemReal(e: EntradaMargemReal): MargemReal {
+  const receita = e.preco + efeitosDoRecebimento(e.preco, e.parcelas).reduce((a, x) => a + x.valor, 0n);
   const contas = e.contas.filter((c) => !c.aereo).reduce((a, c) => a + (c.pagoBrl ?? c.previstoBrl), 0n);
   const custo = contas - e.comissoesRecebidas + e.taxaRoteiro;
-  const imposto = impostoSobreMargem(e.preco, custo, e.impostoPct);
-  const taxas = e.parcelas.reduce((a, p) => a + (p.recebida && p.taxaEfetiva !== null ? p.taxaEfetiva : p.taxaPrevista), 0n);
-  const final = e.preco - custo - imposto - taxas - e.fixo;
-  return { custo, imposto, taxas, fixo: e.fixo, final, finalPct: pct1(final, e.preco) };
+  const imposto = impostoSobreMargem(receita, custo, e.impostoPct);
+  const taxas = e.parcelas
+    .filter((p) => !p.cancelada)
+    .reduce((a, p) => a + (p.recebida && p.taxaEfetiva !== null ? p.taxaEfetiva : p.taxaPrevista), 0n);
+  const final = receita - custo - imposto - taxas - e.fixo;
+  return { receita, custo, imposto, taxas, fixo: e.fixo, final, finalPct: pct1(final, receita) };
 }
 
 export type MargemPlanejada = { custo: bigint; imposto: bigint; taxa: bigint; fixo: bigint; final: bigint; finalPct: string };
@@ -459,6 +505,8 @@ export type LinhaPonte = { rotulo: string; valor: bigint };
  *   Sem `pagos`, todo o pago diferente das contas em moeda estrangeira vai para "Diferença de câmbio".
  * - "Comissão pendente: <f>", "Comissão não recebida: <f>" (marcada "não será recebida"), "Comissão recebida: <f>"
  *   (recebida com valor diferente do previsto) — sobre as comissões ativas de hoje.
+ * - "Recebido a menos", "Recebido a mais" (Σ das parcelas recebidas com valor diferente) e "Parcela cancelada: n de N",
+ *   na parte do pacote (`efeitosDoRecebimento`).
  * - "Taxas financeiras" e "Imposto".
  * As linhas do meio somam exatamente real.final − planejada.final (conferido; senão lança).
  */
@@ -519,6 +567,15 @@ export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: Linh
     if (c.naoRecebida) add(`Comissão não recebida: ${c.fornecedor}`, -c.valorPrevisto);
     else if (c.valorRecebido === null) add(`Comissão pendente: ${c.fornecedor}`, -c.valorPrevisto);
     else add(`Comissão recebida: ${c.fornecedor}`, c.valorRecebido - c.valorPrevisto);
+  }
+
+  const efeitos = efeitosDoRecebimento(e.preco, e.parcelas);
+  const somaDe = (tipo: EfeitoRecebimento["tipo"]) => efeitos.filter((x) => x.tipo === tipo).reduce((a, x) => a + x.valor, 0n);
+  add("Recebido a menos", somaDe("a_menos"));
+  add("Recebido a mais", somaDe("a_mais"));
+  for (const x of efeitos.filter((x) => x.tipo === "cancelada")) {
+    const n = x.parcela.numero !== undefined && x.parcela.totalParcelas !== undefined ? `: ${x.parcela.numero} de ${x.parcela.totalParcelas}` : "";
+    add(`Parcela cancelada${n}`, x.valor);
   }
 
   add("Taxas financeiras", -(real.taxas - e.planejada.taxa));

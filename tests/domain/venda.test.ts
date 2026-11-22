@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { itensDoSnapshot, resultadoDaVersao, type CotacaoLida, type ItemLido, type ItemSnapshot, type Snapshot } from "@/domain/aprovacoes";
-import { precoDoPacote, type FormaPagamento } from "@/domain/precificacao";
+import { arredondar } from "@/domain/decimal";
+import { impostoSobreMargem, pct1, precoDoPacote, type FormaPagamento } from "@/domain/precificacao";
 import { REGRAS_INICIAIS as R } from "@/domain/regras";
 import {
   aplicarFormaFornecedor,
@@ -446,7 +447,7 @@ describe("margemReal", () => {
       impostoPct: "7.000",
       taxaRoteiro: 0n,
     });
-    expect(m).toEqual({ custo: 120000n, imposto: 0n, taxas: 0n, fixo: 0n, final: -20000n, finalPct: "-20.0" });
+    expect(m).toEqual({ receita: 100000n, custo: 120000n, imposto: 0n, taxas: 0n, fixo: 0n, final: -20000n, finalPct: "-20.0" });
   });
 });
 
@@ -698,6 +699,123 @@ describe("ponteDaMargem", () => {
       ["Imposto", 3500n],
       ["Margem real", 418500n],
     ]);
+  });
+});
+
+describe("recebimento diferente do valor e parcela cancelada (decisão do Controller)", () => {
+  const somaMeio = (l: { valor: bigint }[]) => l.slice(1, -1).reduce((a, x) => a + x.valor, 0n);
+
+  /** Ribeiro em boleto 5x: cinco parcelas numeradas e a entrada da margem sem divergência de custo. */
+  function base() {
+    const { s, modalidade } = ribeiro();
+    const forma: FormaPagamento = { tipo: "boleto", parcelas: 5 };
+    const v = vender(s, modalidade, forma, 18);
+    const parcelas = v.parcelas.map((p, i) => ({ ...p, numero: i + 1, totalParcelas: 5 }));
+    const contas = v.contas.map((c) => ({
+      rotulo: c.fornecedor ?? c.descricao,
+      aereo: c.aereo,
+      moeda: c.moeda,
+      previstoVendaBrl: c.previstoBrl,
+      previstoBrl: c.previstoBrl,
+      pagoBrl: null as bigint | null,
+    }));
+    const comissao = v.contas.find((c) => c.comissao)!.comissao!;
+    const comum = {
+      preco: v.preco,
+      impostoPct: R.impostoSobreMargemPct,
+      taxaRoteiro: taxaRoteiroDoSnapshot(s),
+    };
+    const margem = (ps: typeof parcelas) =>
+      margemReal({ ...comum, contas, comissoesRecebidas: comissao.valor, parcelas: ps, fixo: BigInt(v.resultado.fixo) });
+    const ponte = (ps: typeof parcelas) =>
+      ponteDaMargem({
+        ...comum,
+        planejada: planejadaDaVersao(v.resultado),
+        contas,
+        comissoes: [{ fornecedor: "Operadora Mediterrânea", aereo: false, valorPrevisto: comissao.valor, valorRecebido: comissao.valor }],
+        parcelas: ps,
+      });
+    return { ...v, parcelas, margem, ponte };
+  }
+
+  it("recebido R$ 100 a menos: receita cai a parte do pacote (100 × P ÷ total, meio para cima), imposto recalculado", () => {
+    const b = base();
+    const r0 = b.margem(b.parcelas);
+    expect(r0.final).toBe(BigInt(b.resultado.final));
+    const ps = b.parcelas.map((p, i) => (i === 1 ? { ...p, recebida: true, valorRecebido: p.valor - 10000n } : p));
+    const r = b.margem(ps);
+    const efeito = arredondar(10000n * b.preco, b.total);
+    expect(b.total > b.preco).toBe(true);
+    expect(efeito < 10000n).toBe(true);
+    expect(r.receita).toBe(b.preco - efeito);
+    expect(r.custo).toBe(r0.custo);
+    expect(r.taxas).toBe(r0.taxas);
+    expect(r.imposto).toBe(impostoSobreMargem(b.preco - efeito, r0.custo, R.impostoSobreMargemPct));
+    expect(r.final).toBe(r0.final - efeito + (r0.imposto - r.imposto));
+
+    const p = b.ponte(ps);
+    expect(p.real).toEqual(r);
+    expect(p.linhas.map((l) => l.rotulo)).toEqual(["Margem planejada", "Recebido a menos", "Imposto", "Margem real"]);
+    expect(p.linhas[1].valor).toBe(-efeito);
+    expect(somaMeio(p.linhas)).toBe(r.final - BigInt(b.resultado.final));
+  });
+
+  it("recebido a mais: linha própria, positiva; igual ao valor: sem efeito", () => {
+    const b = base();
+    const ps = b.parcelas.map((p, i) =>
+      i === 0 ? { ...p, recebida: true, valorRecebido: p.valor + 5000n } : i === 1 ? { ...p, recebida: true, valorRecebido: p.valor } : p,
+    );
+    const p = b.ponte(ps);
+    expect(p.linhas[1]).toEqual({ rotulo: "Recebido a mais", valor: arredondar(5000n * b.preco, b.total) });
+    expect(p.real.receita).toBe(b.preco + arredondar(5000n * b.preco, b.total));
+    expect(somaMeio(p.linhas)).toBe(p.real.final - BigInt(b.resultado.final));
+  });
+
+  it("parcela cancelada: sai a parte do pacote do valor dela e a taxa prevista dela; ponte exata", () => {
+    const b = base();
+    const r0 = b.margem(b.parcelas);
+    const ps = b.parcelas.map((p, i) => (i === 4 ? { ...p, cancelada: true } : p));
+    const r = b.margem(ps);
+    const efeito = arredondar(b.parcelas[4].valor * b.preco, b.total);
+    expect(r.receita).toBe(b.preco - efeito);
+    expect(r.taxas).toBe(r0.taxas - b.parcelas[4].taxaPrevista);
+    expect(r.final).toBe(b.preco - efeito - r.custo - r.imposto - r.taxas - r.fixo);
+    expect(r.finalPct).toBe(pct1(r.final, r.receita));
+
+    const p = b.ponte(ps);
+    expect(p.real).toEqual(r);
+    expect(p.linhas.map((l) => [l.rotulo, l.valor])).toEqual([
+      ["Margem planejada", BigInt(b.resultado.final)],
+      ["Parcela cancelada: 5 de 5", -efeito],
+      ["Taxas financeiras", b.parcelas[4].taxaPrevista],
+      ["Imposto", r0.imposto - r.imposto],
+      ["Margem real", r.final],
+    ]);
+    expect(somaMeio(p.linhas)).toBe(r.final - BigInt(b.resultado.final));
+  });
+
+  it("a menos, a mais e cancelada juntas: a ponte continua exata", () => {
+    const b = base();
+    const ps = b.parcelas.map((p, i) =>
+      i === 0
+        ? { ...p, recebida: true, valorRecebido: p.valor - 3333n, taxaEfetiva: p.taxaPrevista + 7n }
+        : i === 1
+          ? { ...p, recebida: true, valorRecebido: p.valor + 1n }
+          : i === 2
+            ? { ...p, cancelada: true }
+            : p,
+    );
+    const p = b.ponte(ps);
+    expect(p.linhas.map((l) => l.rotulo)).toEqual([
+      "Margem planejada",
+      "Recebido a menos",
+      "Recebido a mais",
+      "Parcela cancelada: 3 de 5",
+      "Taxas financeiras",
+      "Imposto",
+      "Margem real",
+    ]);
+    expect(somaMeio(p.linhas)).toBe(p.real.final - BigInt(b.resultado.final));
   });
 });
 

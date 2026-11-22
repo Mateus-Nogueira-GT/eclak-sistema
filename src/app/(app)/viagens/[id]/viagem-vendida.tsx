@@ -146,13 +146,22 @@ function FormBaixaParcela({ parcela, onFechar }: { parcela: ParcelaVendida; onFe
   const [data, setData] = useState(hoje);
   const [valor, setValor] = useState(reaisParaCampo(parcela.valor));
   const [taxa, setTaxa] = useState("");
+  const [observacao, setObservacao] = useState("");
+  let diferente = false;
+  try {
+    diferente = lerReais(valor) !== parcela.valor;
+  } catch {
+    // valor ilegível: o servidor responde com o erro do campo
+  }
   return (
     <Formulario
       titulo={`Dar baixa na parcela ${parcela.numero}/${parcela.totalParcelas}`}
       acao={acao}
       rotuloEnviar="Confirmar baixa"
       onFechar={onFechar}
-      onEnviar={() => acao.executar(() => baixarParcela(parcela.id, { recebidaEm: data, valorRecebido: valor, taxaEfetiva: taxa || null }), onFechar)}
+      onEnviar={() =>
+        acao.executar(() => baixarParcela(parcela.id, { recebidaEm: data, valorRecebido: valor, taxaEfetiva: taxa || null, observacao: observacao || null }), onFechar)
+      }
     >
       <Campo label="Data do recebimento">
         <input type="date" max={hoje} className={`${inputCls} ${marca(acao, "recebidaEm")}`} value={data} onChange={(e) => setData(e.target.value)} />
@@ -162,6 +171,14 @@ function FormBaixaParcela({ parcela, onFechar }: { parcela: ParcelaVendida; onFe
       </Campo>
       <Campo label="Taxa efetiva (opcional)">
         <input className={`${inputCls} num ${marca(acao, "taxaEfetiva")}`} inputMode="decimal" placeholder="Deixe vazio para usar a prevista" value={taxa} onChange={(e) => setTaxa(e.target.value)} />
+      </Campo>
+      <Campo label={diferente ? "Observação (obrigatória: valor diferente da parcela)" : "Observação (opcional)"} className="sm:col-span-2 lg:col-span-4">
+        <input
+          className={`${inputCls} ${marca(acao, "observacao")}`}
+          placeholder={diferente ? "Explique a diferença do valor recebido" : ""}
+          value={observacao}
+          onChange={(e) => setObservacao(e.target.value)}
+        />
       </Campo>
     </Formulario>
   );
@@ -490,6 +507,9 @@ export function ViagemVendidaView({
           <Card key={rotulo} className="p-5">
             <Eyebrow>{rotulo}</Eyebrow>
             <p className="num mt-1.5 text-[20px] font-bold tracking-tight text-verde">{formatarReais(valor)}</p>
+            {rotulo === "A receber" && v.resumo.diferencaRecebimento !== 0n && (
+              <p className="num mt-1 text-[12.5px] text-texto">Diferença no recebimento: {comSinal(v.resumo.diferencaRecebimento)}</p>
+            )}
           </Card>
         ))}
         {est && (
@@ -562,9 +582,15 @@ function Entradas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: 
     dataBr(p.vencimento),
     formatarReais(p.valor),
     p.status === "recebida" ? (
-      <Badge key="s" tom="agua">Recebida em {dataBr(p.recebidaEm)}{p.valorRecebido !== null && p.valorRecebido !== p.valor ? ` (${formatarReais(p.valorRecebido)})` : ""}</Badge>
+      <span key="s" className="flex flex-col items-start gap-1">
+        <Badge tom="agua">Recebida em {dataBr(p.recebidaEm)}{p.valorRecebido !== null && p.valorRecebido !== p.valor ? ` (${formatarReais(p.valorRecebido)})` : ""}</Badge>
+        {p.observacao && <span className="text-[12px] text-cinza">{p.observacao}</span>}
+      </span>
     ) : p.status === "cancelada" ? (
-      <Badge key="s" tom="cinza">Cancelada</Badge>
+      <span key="s" className="flex flex-col items-start gap-1">
+        <Badge tom="cinza">Cancelada</Badge>
+        {p.observacao && <span className="text-[12px] text-cinza">{p.observacao}</span>}
+      </span>
     ) : (
       <Badge key="s" tom="cinza">A receber</Badge>
     ),
@@ -738,6 +764,9 @@ function Conciliacao({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abri
   const contas = v.contas.filter((c) => c.status !== "cancelada");
   const pendentes = v.comissoes.filter((c) => c.pendente);
   const tratadas = v.comissoes.filter((c) => !c.pendente);
+  const recebimentos = v.parcelas.filter(
+    (p) => p.status === "cancelada" || (p.status === "recebida" && p.valorRecebido !== null && p.valorRecebido !== p.valor),
+  );
   const situacao = (c: ContaVendida) =>
     c.contestada ? "Contestada com o fornecedor" : c.divergente ? `Valor atualizado${c.motivoPrevisto ? `: ${c.motivoPrevisto}` : ""}` : realizadoDaConta(c) !== c.previstoBrl ? "Pago diferente do previsto" : "Conforme";
 
@@ -778,6 +807,25 @@ function Conciliacao({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abri
           />
         </div>
       </Card>
+
+      {recebimentos.length > 0 && (
+        <Card>
+          <CardHeader title="Recebimentos com diferença" eyebrow="Parcelas recebidas com valor diferente do previsto ou canceladas." />
+          <div className="mt-3">
+            <Grade
+              head={["Parcela", "Valor", "Recebido", "Situação"]}
+              right={[1, 2]}
+              destaque={() => true}
+              rows={recebimentos.map((p) => [
+                `${p.numero}/${p.totalParcelas}`,
+                formatarReais(p.valor),
+                p.status === "cancelada" ? "-" : formatarReais(p.valorRecebido ?? p.valor),
+                `${p.status === "cancelada" ? "Cancelada" : (p.valorRecebido ?? p.valor) < p.valor ? "Recebido a menos" : "Recebido a mais"}${p.observacao ? `: ${p.observacao}` : ""}`,
+              ])}
+            />
+          </div>
+        </Card>
+      )}
 
       <Card>
         <CardHeader title="Comissões" eyebrow="Comissões a receber dos fornecedores." />

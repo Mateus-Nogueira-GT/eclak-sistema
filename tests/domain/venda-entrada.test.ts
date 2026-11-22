@@ -80,8 +80,11 @@ describe("entradas do financeiro da viagem", () => {
       recebidaEm: "2026-11-21",
       valorRecebido: 123456n,
       taxaEfetiva: null,
+      observacao: null,
     });
     expect(baixaParcelaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "10", taxaEfetiva: "1,50" }).taxaEfetiva).toBe(150n);
+    expect(baixaParcelaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "10", observacao: "  Tarifa  " }).observacao).toBe("Tarifa");
+    expect(baixaParcelaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "10", observacao: "  " }).observacao).toBeNull();
     expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "", valorRecebido: "10" }))).toBe("Informe a data");
     expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "2026-11-23", valorRecebido: "10" }))).toBe("Data no futuro");
     expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "2026-11-21", valorRecebido: "abc" }))).toBe("Valor inválido");

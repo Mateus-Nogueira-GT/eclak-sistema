@@ -146,7 +146,7 @@ async function vendida(o: { florenca?: boolean } = {}) {
 
 type Fixture = Awaited<ReturnType<typeof vendida>>;
 
-const BAIXA_PARCELA = { recebidaEm: "2026-11-21", valorRecebido: "1,00" };
+const BAIXA_PARCELA = { recebidaEm: "2026-11-21", valorRecebido: "1,00", observacao: "Teste com valor simbólico" };
 const BAIXA_PAGAMENTO = { pagoEm: "2026-11-21", valorOriginalPago: "500,00" };
 
 /** Todas as actions do financeiro da viagem, com entradas válidas. */
@@ -268,7 +268,7 @@ describe("baixa de parcela", () => {
     const p = x.parcelas[0];
     const r0 = await estrategico(x.fin.id, x.viagemId);
 
-    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-20", valorRecebido: "1.000,00", taxaEfetiva: "10,00" }))).toEqual({
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-20", valorRecebido: "1.000,00", taxaEfetiva: "10,00", observacao: "Recebido em partes" }))).toEqual({
       ok: true,
     });
     expect(await comSessao(x.fin.id, () => baixarParcela(p.id, BAIXA_PARCELA))).toEqual({ ok: false, erro: "Parcela já recebida" });
@@ -320,6 +320,66 @@ describe("baixa de parcela", () => {
       erro: "Valor inválido",
       campos: { valorRecebido: "Valor inválido" },
     });
+  });
+});
+
+describe("recebimento diferente do valor e parcela cancelada na margem real", () => {
+  beforeEach(limparBanco);
+
+  const reais = (c: bigint) => `${c / 100n},${(c % 100n).toString().padStart(2, "0")}`;
+
+  it("valor diferente exige observação; R$ 100 a menos reduz a margem real exatamente; ponte 'Recebido a menos'", async () => {
+    const x = await vendida();
+    const p = x.parcelas[0];
+    const r0 = await estrategico(x.fin.id, x.viagemId);
+    const menos = reais(p.valor - 10000n);
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: menos }))).toEqual({
+      ok: false,
+      erro: "Explique a diferença do valor recebido",
+      campos: { observacao: "Explique a diferença do valor recebido" },
+    });
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: menos, observacao: "  " }))).toMatchObject({
+      ok: false,
+      erro: "Explique a diferença do valor recebido",
+    });
+    expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0].status).toBe("a_receber");
+    expect(
+      await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: menos, observacao: "Cliente descontou a tarifa do boleto" })),
+    ).toEqual({ ok: true });
+    expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0]).toMatchObject({
+      status: "recebida",
+      valorRecebido: p.valor - 10000n,
+      observacao: "Cliente descontou a tarifa do boleto",
+    });
+
+    const r1 = await estrategico(x.fin.id, x.viagemId);
+    const total = x.parcelas.reduce((a, q) => a + q.valor, 0n);
+    const efeito = arredondar(10000n * r0.real.receita, total);
+    expect(r1.real.receita).toBe(r0.real.receita - efeito);
+    expect(r1.real.final).toBe(r0.real.final - efeito + (r0.real.imposto - r1.real.imposto));
+    expect(r1.ponte).toContainEqual({ rotulo: "Recebido a menos", valor: -efeito });
+    expect(r1.ponte.slice(1, -1).reduce((a, l) => a + l.valor, 0n)).toBe(r1.real.final - r1.planejada.final);
+    // o resumo mostra o caixa e a diferença; a divergência conta
+    expect(r1.f.resumo).toMatchObject({ recebido: p.valor - 10000n, aReceber: x.parcelas[1].valor, diferencaRecebimento: -10000n });
+    expect(r1.f.divergencias).toBe(r0.f.divergencias + 1);
+    // igual ao valor: observação opcional
+    expect(await comSessao(x.fin.id, () => baixarParcela(x.parcelas[1].id, { recebidaEm: "2026-11-21", valorRecebido: reais(x.parcelas[1].valor) }))).toEqual({ ok: true });
+  });
+
+  it("parcela cancelada sai da receita (parte do pacote) e das taxas; ponte 'Parcela cancelada: 2 de 2'", async () => {
+    const x = await vendida();
+    const p = x.parcelas[1];
+    const r0 = await estrategico(x.fin.id, x.viagemId);
+    expect(await comSessao(x.fin.id, () => cancelarParcela(p.id, "Cliente pagou à parte"))).toEqual({ ok: true });
+    const r1 = await estrategico(x.fin.id, x.viagemId);
+    const total = x.parcelas.reduce((a, q) => a + q.valor, 0n);
+    const efeito = arredondar(p.valor * r0.real.receita, total);
+    expect(r1.real.receita).toBe(r0.real.receita - efeito);
+    expect(r1.real.taxas).toBe(r0.real.taxas - p.taxaPrevista);
+    expect(r1.ponte).toContainEqual({ rotulo: "Parcela cancelada: 2 de 2", valor: -efeito });
+    expect(r1.ponte.slice(1, -1).reduce((a, l) => a + l.valor, 0n)).toBe(r1.real.final - r1.planejada.final);
+    expect(r1.f.divergencias).toBe(r0.f.divergencias + 1);
+    expect(r1.f.resumo.diferencaRecebimento).toBe(0n);
   });
 });
 

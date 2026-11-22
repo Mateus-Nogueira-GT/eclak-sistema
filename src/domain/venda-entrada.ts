@@ -116,6 +116,7 @@ export const MSG_CONTESTACAO = "Escreva a contestação";
 export const MSG_MOTIVO = "Escreva o motivo";
 export const MSG_PARCELA_RECEBIDA = "Parcela já recebida";
 export const MSG_PARCELA_CANCELADA = "Parcela cancelada";
+export const MSG_DIFERENCA_RECEBIDA = "Explique a diferença do valor recebido";
 export const MSG_PARCELA_EM_ABERTO = "Esta parcela não foi baixada";
 export const MSG_PAGAMENTO_PAGO = "Pagamento já baixado";
 export const MSG_PAGAMENTO_EM_ABERTO = "Este pagamento não foi baixado";
@@ -166,6 +167,8 @@ export function baixaParcelaSchema(hoje: string = hojeEmCuiaba()) {
     valorRecebido: reais(false),
     /** Taxa cobrada de fato (maquininha, boleto); vazia = a prevista. */
     taxaEfetiva: reais(true),
+    /** Obrigatória (na action) quando o valor recebido é diferente do valor da parcela. */
+    observacao: texto(2000),
   });
 }
 

@@ -24,6 +24,7 @@ import {
   MSG_COMISSAO_EM_ABERTO,
   MSG_COMISSAO_REGISTRADA,
   MSG_CONCILIADA,
+  MSG_DIFERENCA_RECEBIDA,
   MSG_JA_BAIXADO_NA_CONTA,
   MSG_NAO_CONCILIADA,
   MSG_NAO_VENDIDA,
@@ -531,7 +532,7 @@ export async function contestar(contaId: string, textoContestacao: string): Prom
 // Parcelas a receber
 // ---------------------------------------------------------------------------
 
-export type BaixaParcelaEntrada = { recebidaEm: string; valorRecebido: string; taxaEfetiva?: string | null };
+export type BaixaParcelaEntrada = { recebidaEm: string; valorRecebido: string; taxaEfetiva?: string | null; observacao?: string | null };
 
 async function parcelaTravada(tx: Transacao, parcelaId: string, viagemId: string) {
   const [p] = await tx
@@ -570,7 +571,10 @@ function naParcela(
 const recusaParcelaFechada = (p: ParcelaLinha): Falha | null =>
   p.status === "recebida" ? falha(MSG_PARCELA_RECEBIDA) : p.status === "cancelada" ? falha(MSG_PARCELA_CANCELADA) : null;
 
-/** Baixa da parcela: data, valor recebido e taxa efetiva (vazia = a prevista). */
+/**
+ * Baixa da parcela: data, valor recebido, taxa efetiva (vazia = a prevista) e observação, obrigatória quando o
+ * valor recebido é diferente do valor da parcela (a diferença entra na margem real).
+ */
 export async function baixarParcela(parcelaId: string, dados: BaixaParcelaEntrada): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
     if (!ehUuid(parcelaId)) return PARCELA_NAO_ENCONTRADA;
@@ -579,13 +583,18 @@ export async function baixarParcela(parcelaId: string, dados: BaixaParcelaEntrad
     return naParcela(
       parcelaId,
       "Erro ao baixar a parcela",
-      (p) =>
-        recusaParcelaFechada(p) ?? {
+      (p) => {
+        const recusa = recusaParcelaFechada(p);
+        if (recusa) return recusa;
+        if (b.data.valorRecebido !== p.valor && !b.data.observacao) return falha(MSG_DIFERENCA_RECEBIDA, "observacao");
+        return {
           status: "recebida",
           recebidaEm: b.data.recebidaEm,
           valorRecebido: b.data.valorRecebido,
           taxaEfetiva: b.data.taxaEfetiva,
-        },
+          observacao: b.data.observacao,
+        };
+      },
       usuario.id,
     );
   });

@@ -309,12 +309,15 @@ export type ViagemVendida = {
     comprovante: string | null;
     observacao: string | null;
   };
-  /** Centavos de real. */
-  resumo: { valorVendido: bigint; recebido: bigint; aReceber: bigint; pagoFornecedores: bigint; aPagar: bigint };
+  /**
+   * Centavos de real. `recebido` é o caixa; `diferencaRecebimento` = Σ (recebido − valor) das parcelas recebidas
+   * (negativo = recebido a menos).
+   */
+  resumo: { valorVendido: bigint; recebido: bigint; aReceber: bigint; diferencaRecebimento: bigint; pagoFornecedores: bigint; aPagar: bigint };
   parcelas: ParcelaVendida[];
   contas: ContaVendida[];
   comissoes: ComissaoVendida[];
-  /** Contas divergentes ou contestadas + comissões pendentes. */
+  /** Contas divergentes ou contestadas + comissões pendentes + parcelas recebidas com diferença ou canceladas. */
   divergencias: number;
   /** Só para quem vê a camada estratégica; montada só para esses perfis. */
   estrategico?: {
@@ -463,10 +466,12 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
   const ativas = contas.filter((c) => c.status !== "cancelada");
   const soma = (xs: bigint[]) => xs.reduce((a, x) => a + x, 0n);
   const linhasAtivas = ativas.flatMap((c) => c.pagamentos);
+  const recebidasComDiferenca = ps.filter((p) => p.status === "recebida" && p.valorRecebido !== null && p.valorRecebido !== p.valor);
   const resumo = {
     valorVendido: venda.total,
     recebido: soma(ps.filter((p) => p.status === "recebida").map((p) => p.valorRecebido ?? 0n)),
     aReceber: soma(ps.filter((p) => p.status === "a_receber").map((p) => p.valor)),
+    diferencaRecebimento: soma(recebidasComDiferenca.map((p) => p.valorRecebido! - p.valor)),
     pagoFornecedores: soma(linhasAtivas.filter((p) => p.status === "pago").map((p) => p.valorBrlPago ?? 0n)),
     aPagar: soma(linhasAtivas.filter((p) => p.status !== "pago").map((p) => p.valorBrlPrevisto)),
   };
@@ -507,7 +512,11 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
     parcelas,
     contas,
     comissoes: comissoesVendidas,
-    divergencias: contas.filter((c) => c.divergente || c.contestada).length + comissoesVendidas.filter((c) => c.pendente).length,
+    divergencias:
+      contas.filter((c) => c.divergente || c.contestada).length +
+      comissoesVendidas.filter((c) => c.pendente).length +
+      recebidasComDiferenca.length +
+      ps.filter((p) => p.status === "cancelada").length,
   };
 
   if (estrategico) {
@@ -555,9 +564,16 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
                 comissaoPrevista: c.comissao?.valorPrevisto ?? 0n,
               },
       }));
-      const parcelasMargem = ps
-        .filter((p) => p.status !== "cancelada")
-        .map((p) => ({ valor: p.valor, recebida: p.status === "recebida", taxaEfetiva: p.taxaEfetiva, taxaPrevista: p.taxaPrevista }));
+      const parcelasMargem = ps.map((p) => ({
+        valor: p.valor,
+        recebida: p.status === "recebida",
+        taxaEfetiva: p.taxaEfetiva,
+        taxaPrevista: p.taxaPrevista,
+        valorRecebido: p.valorRecebido,
+        cancelada: p.status === "cancelada",
+        numero: p.numero,
+        totalParcelas: p.totalParcelas,
+      }));
       const comissoesAtivas = comissoesVendidas.filter((c) => ativas.some((k) => k.id === c.contaId));
       try {
         real = margemReal({
