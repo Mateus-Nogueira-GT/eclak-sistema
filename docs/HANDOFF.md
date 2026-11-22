@@ -42,7 +42,7 @@ Cada PR mostra só a diferença da sua fatia; mergear na ordem.
 ## 3. Sobre o Mateus e o cliente (como trabalhar)
 
 - Mateus Nogueira conduz o projeto para o cliente Augusto Kraemer (ECLAK Viagens). Fala português-BR, prefere respostas diretas, resumo prático primeiro, depois detalhes; gosta de alternativas com recomendação; é iterativo. Datas e recortes sempre explícitos.
-- Valeska é do financeiro da ECLAK. **Pendente:** retorno do grupo e da Valeska sobre as telas novas do protótipo (Contas a pagar e receber, Reembolsos, Estoque, Caixa de experiência, Avisos por setor, Daily padrão). **Isso pesa na fatia 4** — vale perguntar ao Mateus se já chegou antes de planejar.
+- Valeska é do financeiro da ECLAK. **Retorno dela (confirmado pelo Mateus em 22/11/2026): o financeiro deve ser parecido com o Conta Azul** (contas a pagar e receber, categorias, competência, centro de custo, formas de pagamento, baixa, conciliação, fluxo de caixa, DRE). Ver a seção 8.1. Ainda pendente o retorno do grupo sobre Reembolsos, Estoque, Caixa de experiência, Avisos por setor e Daily padrão.
 - Pendente também: texto oficial de encerramento do daily (constante `ENCERRAMENTO` provisória em `eclak-mockup/src/app/dailies/page.tsx`).
 - A precificação é sigilosa.
 - **Regras de marca (valem para todo texto e tela):** azul #2E5C71 dominante; laranja #F26531 só em destaque; texto #333132; sem preto puro; **sem vermelho** (avisos em `ouro`); sem gradiente; sem ícone de estrelinha para IA; sem emoji em mensagens ao cliente; sem tag "Fase 2". Textos em pt-BR.
@@ -131,6 +131,15 @@ Do Claude (registradas nos planos, conferir com o Mateus):
 ## 8. Próximo passo: fatia 4 (Financeiro)
 
 Escopo previsto no desenho (seção 6, item 4): faturas numeradas a partir de **1502 sem buracos**, parcelas e baixa (já existe a baixa simples da 3b), contas a pagar e receber gerais com categorias, notas fiscais (anexo), lançamentos operacionais e contas fixas, faturas de cartão corporativo (custo variável), fluxo de caixa com projeção mínima de 12 meses, meta de reserva de 6 meses de custo fixo, extrato OFX. Referências no protótipo: `src/app/{contas,faturas,notas-fiscais,fluxo-de-caixa,relatorios}/page.tsx`, `src/components/{operacionais,reserva-projecao,cash-chart}.tsx`, `src/lib/{cadastros,calc}.ts`.
+
+### 8.1 Referência: Conta Azul (pedido da Valeska)
+- A fatia 4 deve seguir o modelo do **Conta Azul** no que a equipe usa no dia a dia: lista única de lançamentos a pagar e a receber com abas, filtros por período/situação/categoria/centro de custo, totais no topo (vencidos, vencem hoje, a vencer, pagos/recebidos), baixa individual e em lote, parcelamento e recorrência, anexos, e plano de categorias em dois níveis (grupo › categoria) editável.
+- Campos de cada lançamento como no Conta Azul: fornecedor/cliente, descrição, categoria, centro de custo (MT/RS), competência, data de emissão, vencimento, valor, forma de pagamento ("A prazo, Boleto bancário, Cartão de crédito, Cartão de débito, Débito em conta, Depósito bancário, Dinheiro, PIX, Transferência"), conta bancária, parcela "n/N", observação.
+- A tela `eclak-mockup/src/app/contas/page.tsx` já foi desenhada nesse padrão (categorias iniciais, formas, competência, centro, origem "Viagem ECL-…" para lançamentos gerados por viagens) — usar como ponto de partida.
+- **Integração com o que já existe:** parcelas a receber, contas a pagar ao fornecedor e comissões das viagens (fatia 3b) devem aparecer nessa mesma lista como lançamentos de origem "Viagem", sem duplicar dados (ler das tabelas da 3b ou espelhar com vínculo), e a baixa feita em qualquer um dos dois lugares precisa ser a mesma.
+- Plano de categorias: há uma migração "seed_conta_azul_categories" (modelo Conta Azul 2024) num projeto anterior do Mateus no Drive; serve de referência, adaptada às categorias da ECLAK do protótipo e à planilha `CUSTOS FIXOS.xlsx` da Valeska.
+- Materiais da Valeska no Drive (pasta compartilhada por `valeska@eclak.com.br`): `CUSTOS FIXOS.xlsx` (custos fixos por fornecedor/natureza), `PLANILHA NOTAS FISCAIS.xlsx` (comissões por empresa e competência), fatura `FATURA_1405_…pdf` (modelo atual de fatura; atenção: a numeração atual já está em 1405 — confirmar com o Mateus/Augusto se a sequência do sistema começa em 1502 como no protótipo).
+- Perguntar ao Mateus antes de planejar: quais telas do Conta Azul a Valeska mais usa (para priorizar), se haverá importação dos lançamentos atuais e se a conciliação bancária será por OFX (como previsto) ou também por integração.
 
 Já anotado para a fatia 4 (`docs/superpowers/plans/2026-11-22-fatia-3b-venda.md`, seção "Para a fatia 4"):
 - Cartão direto no fornecedor não transita pelo caixa (não contar duas vezes).
