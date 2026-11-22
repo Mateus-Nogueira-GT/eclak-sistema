@@ -52,6 +52,8 @@ const camposOrcamento = {
     .max(MAX_PASSAGEIROS, "Passageiros demais")
     .transform((ids) => [...new Set(ids.map((x) => x.toLowerCase()))]),
   observacoes: texto(4000),
+  /** Viagem internacional (aviso de passaporte × volta). Omitido: no novo, `true`; na edição, mantém. */
+  internacional: z.boolean({ error: "Valor inválido" }).optional(),
 };
 
 const voltaDepoisDaIda = (v: { inicio: string; fim: string }, ctx: z.RefinementCtx) => {

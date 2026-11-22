@@ -514,3 +514,16 @@ export function statusDaViagem(v: {
   if (v.hoje <= v.fim) return "em_viagem";
   return "recebendo";
 }
+
+// ---------------------------------------------------------------------------
+// Vencimento padrão do pagamento ao fornecedor
+// ---------------------------------------------------------------------------
+
+/** À vista padrão ao fechar a venda: 30 dias antes do início da viagem, nunca antes do aceite (o financeiro ajusta). */
+export function vencimentoPadraoFornecedor(inicio: string, aceiteEm: string): string {
+  const [a, m, d] = lerData(inicio);
+  lerData(aceiteEm);
+  const t = new Date(Date.UTC(a, m - 1, d - 30));
+  const venc = iso(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate());
+  return venc < aceiteEm ? aceiteEm : venc;
+}

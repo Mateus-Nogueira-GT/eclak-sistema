@@ -106,6 +106,10 @@ export type FichaPrecificacao = {
   status: StatusOrcamento;
   versaoAprovadaId: string | null;
   observacoes: string | null;
+  /** Viagem internacional (aviso de passaporte × volta). */
+  internacional: boolean;
+  /** Pedido de ajustes do cliente (registrado na resposta à proposta); limpo no próximo envio. */
+  notaCliente: string | null;
   /** ISO em milissegundos; devolvido em `alterarOrcamento` para controle de concorrência. */
   atualizadoEm: string;
   /** Itens do terrestre (sem Aéreo), na ordem; a taxa de roteiro por último. */
@@ -424,6 +428,8 @@ export async function obterPrecificacao(viagemId: string): Promise<FichaPrecific
     status: v.status,
     versaoAprovadaId: v.versaoAprovadaId,
     observacoes: v.observacoes,
+    internacional: v.internacional,
+    notaCliente: v.notaCliente,
     atualizadoEm: v.atualizadoEm.toISOString(),
     itens: terrestre.map(ficha),
     aereo: todos.filter((x) => x.item.tipo === "Aéreo").map(ficha),

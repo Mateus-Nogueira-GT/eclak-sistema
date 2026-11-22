@@ -18,6 +18,7 @@ import {
   ROTULO_STATUS_VIAGEM,
   statusDaViagem,
   alocarTaxasPrevistas,
+  vencimentoPadraoFornecedor,
   taxaRoteiroDoSnapshot,
   type ContaGerada,
 } from "@/domain/venda";
@@ -605,5 +606,14 @@ describe("statusDaViagem", () => {
       recebendo: "Recebendo",
       conciliada: "Conciliada",
     });
+  });
+});
+
+describe("vencimentoPadraoFornecedor", () => {
+  it("30 dias antes do início, nunca antes do aceite", () => {
+    expect(vencimentoPadraoFornecedor("2027-08-14", "2026-11-20")).toBe("2027-07-15");
+    expect(vencimentoPadraoFornecedor("2027-03-01", "2026-11-20")).toBe("2027-01-30");
+    expect(vencimentoPadraoFornecedor("2026-12-10", "2026-11-20")).toBe("2026-11-20");
+    expect(() => vencimentoPadraoFornecedor("2027-02-30", "2026-11-20")).toThrow("Data inválida");
   });
 });
