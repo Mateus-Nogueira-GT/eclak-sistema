@@ -68,7 +68,6 @@ Todas as Global Constraints das fatias 1–3b (HANDOFF §4): centavos `bigint`, 
 
 - Origem mostrada: "Viagem ECL-NNNN-NN" com link para a viagem (aba Entradas/Saídas); lançamentos manuais mostram "Lançado à mão".
 - Linhas de viagem são **só leitura** na lista, exceto baixa / desfazer baixa e anexos. Valor, vencimento e forma se mudam na viagem (como hoje).
-- Contas a pagar de viagem **ainda sem forma de pagamento ao fornecedor** (sem `pagamentos_fornecedor`) aparecem como uma linha "Forma a definir", vencimento = início da viagem, valor = `previsto_brl`, sem botão de baixa (link para a viagem). Assim o caixa não as esquece.
 - `cartao_fornecedor` (cliente paga direto ao fornecedor) — **regra (a), Mateus 22/11/2026, a confirmar com a Valeska:** o cliente passa o pacote inteiro na maquininha de **um** fornecedor, que fica com o custo dele e repassa a diferença à ECLAK. A venda passa a registrar **qual fornecedor recebeu** (coluna nova em `vendas`, obrigatória para essa forma; nas vendas já existentes, pedida na tela da viagem com aviso até ser preenchida). Efeito na lista e no caixa: a parcela do cliente aparece como **"Repasse de <fornecedor>"**, a receber, pelo valor da parcela menos o previsto das contas desse fornecedor na viagem; as contas desse fornecedor ganham o selo "Pago pelo cliente no cartão do fornecedor" e ficam **fora** dos totais e do caixa. As contas dos demais fornecedores seguem normais. A margem real da 3b não muda (continua usando preço, custos e taxas como hoje).
 - Pagamentos com forma `cartao_corporativo`: na 4a aparecem como linha comum com a data informada; na 4b passam a compor a fatura do cartão (§6.5) e saem da lista como linhas soltas.
 - Cancelados (parcela cancelada, comissão não recebida, lançamento cancelado, pagamento de conta excluída) não entram nos totais; aparecem só com o filtro "Canceladas".
@@ -144,7 +143,7 @@ Cada entrega tem plano próprio em `docs/superpowers/plans/` e PR empilhado (4a 
 1. **Fatura numerada na emissão pelo financeiro**, não no fechamento da venda (segue o protótipo; corrige o que disse na conversa).
 2. Fatura reemitida mantém o número (versão nova) quando a venda muda.
 3. Comissões a receber entram como "Comissões de hotel"; se o fornecedor for operadora, deveria ser "Comissões de operadora" — o builder usa o tipo do fornecedor se existir esse dado; senão, "Comissões de hotel".
-4. Conta de fornecedor sem forma definida aparece como "Forma a definir" com vencimento no início da viagem.
+4. (Retirada: toda conta de viagem já nasce com pagamento à vista no fechamento da venda; não existe conta "sem forma".)
 5. Lote recusado inteiro quando tem linha que exige dado individual (moeda estrangeira etc.).
 6. Custo fixo da reserva = o valor de Parâmetros (o mesmo usado na margem). Calcular das contas fixas fica para depois, com o histórico real.
 7. Telas do financeiro só para Diretor e os dois financeiros.
