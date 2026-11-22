@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { alteracaoNovaForma, fechamentoSchema, novaFormaSchema, pedidoClienteSchema } from "@/domain/venda-entrada";
 
+const HOJE = "2026-11-22";
 const base = {
   aceiteEm: "2026-11-20",
   forma: { tipo: "boleto", parcelas: 4 },
@@ -10,15 +11,15 @@ const base = {
   faturaDocumento: "529.982.247-25",
 };
 const erro = (x: Record<string, unknown>) => {
-  const r = fechamentoSchema.safeParse({ ...base, ...x });
+  const r = fechamentoSchema(HOJE).safeParse({ ...base, ...x });
   return r.success ? null : r.error.issues[0].message;
 };
 
 describe("fechamentoSchema", () => {
   it("normaliza o documento e os textos opcionais", () => {
-    const r = fechamentoSchema.parse({ ...base, comprovante: "  ", observacao: " Emitir fatura " });
+    const r = fechamentoSchema(HOJE).parse({ ...base, comprovante: "  ", observacao: " Emitir fatura " });
     expect(r).toMatchObject({ faturaDocumento: "52998224725", comprovante: null, observacao: "Emitir fatura", forma: { tipo: "boleto", parcelas: 4 } });
-    expect(fechamentoSchema.parse({ ...base, faturaDocumento: "11.222.333/0001-81" }).faturaDocumento).toBe("11222333000181");
+    expect(fechamentoSchema(HOJE).parse({ ...base, faturaDocumento: "11.222.333/0001-81" }).faturaDocumento).toBe("11222333000181");
   });
 
   it("mensagens", () => {
@@ -34,6 +35,15 @@ describe("fechamentoSchema", () => {
     expect(erro({ parcelas: 11 })).toBe("Número de parcelas inválido");
     expect(erro({ forma: { tipo: "pix", parcelas: 2 } })).toBe("Parcelas inválidas");
     expect(erro({ extra: 1 })).not.toBeNull();
+    expect(erro({ primeiroVencimento: "2026-11-19" })).toBe("O primeiro vencimento não pode ser antes do aceite");
+    expect(erro({ primeiroVencimento: "2026-11-20" })).toBeNull();
+    expect(erro({ aceiteEm: "2026-11-23", primeiroVencimento: "2026-12-10" })).toBe("Data do aceite no futuro");
+    expect(erro({ aceiteEm: "2026-11-22" })).toBeNull();
+    // só pontuação de CPF/CNPJ e espaços saem; outro caractere invalida
+    expect(erro({ faturaDocumento: " 529 982 247 25 " })).toBeNull();
+    expect(erro({ faturaDocumento: "CPF 529.982.247-25" })).toBe("CPF ou CNPJ inválido");
+    expect(erro({ faturaDocumento: "529.982.247-25x" })).toBe("CPF ou CNPJ inválido");
+    expect(erro({ faturaDocumento: "529,982,247-25" })).toBe("CPF ou CNPJ inválido");
   });
 });
 

@@ -1,13 +1,13 @@
 import "server-only";
-import { and, eq, gte, isNotNull, isNull, or } from "drizzle-orm";
+import { and, eq, gte, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { rotuloForma, type ResultadoVersao, type Snapshot } from "@/domain/aprovacoes";
+import { rotuloForma } from "@/domain/aprovacoes";
 import type { FormaPagamento } from "@/domain/precificacao";
 import { formatarCodigoViagem } from "@/domain/viagens";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { clientes, regrasVersoes, usuarios, versoesPrecificacao, viagens } from "@/server/db/schema";
-import { normalizarRegras } from "@/domain/regras";
+import { clientes, usuarios, versoesPrecificacao, viagens } from "@/server/db/schema";
+import { regrasDaVersao } from "@/server/queries/regras";
 
 /** Estado da proposta no Fechamento da venda. */
 export type EstadoProposta = "aguardando" | "vendida" | "ajustes";
@@ -46,21 +46,36 @@ const decisor = alias(usuarios, "decisor");
 export async function listarPropostas(): Promise<PropostaLista[]> {
   await exigirPerfil();
   const desde = new Date(Date.now() - DIAS_VENDIDAS * 86_400_000);
+  const snap = versoesPrecificacao.snapshot;
   const linhas = await db
     .select({
-      v: viagens,
-      ver: versoesPrecificacao,
+      id: viagens.id,
+      seq: viagens.seq,
+      status: viagens.status,
+      vendidaEm: viagens.vendidaEm,
+      notaCliente: viagens.notaCliente,
+      numeroVersao: versoesPrecificacao.numero,
+      preco: versoesPrecificacao.preco,
+      dias: versoesPrecificacao.dias,
+      forma: versoesPrecificacao.forma,
+      aprovadoEm: versoesPrecificacao.decididoEm,
+      // Só os campos usados do snapshot e do resultado (nunca custo, imposto ou margem).
+      destino: sql<string>`${snap}->>'destino'`,
+      inicio: sql<string>`${snap}->>'inicio'`,
+      fim: sql<string>`${snap}->>'fim'`,
+      passageiros: sql<string[]>`(select coalesce(jsonb_agg(p.e->>'nome' order by p.n), '[]'::jsonb)
+        from jsonb_array_elements(${snap}->'passageiros') with ordinality as p(e, n))`,
+      precoCliente: sql<string | null>`${versoesPrecificacao.resultado}->>'precoCliente'`,
+      regrasVersaoId: versoesPrecificacao.regrasVersaoId,
       clienteCodigo: clientes.codigo,
       cliente: clientes.grupo,
       consultor: usuarios.nome,
       decisor: decisor.nome,
-      regras: regrasVersoes.valores,
     })
     .from(viagens)
     .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
     .innerJoin(usuarios, eq(usuarios.id, viagens.consultorId))
     .innerJoin(versoesPrecificacao, eq(versoesPrecificacao.id, viagens.versaoAprovadaId))
-    .innerJoin(regrasVersoes, eq(regrasVersoes.id, versoesPrecificacao.regrasVersaoId))
     .leftJoin(decisor, eq(decisor.id, versoesPrecificacao.decididoPor))
     .where(
       and(
@@ -73,31 +88,31 @@ export async function listarPropostas(): Promise<PropostaLista[]> {
       ),
     );
 
-  const lista = linhas.map(({ v, ver, ...l }): PropostaLista => {
-    const s = ver.snapshot as Snapshot;
-    const res = ver.resultado as ResultadoVersao;
-    // Versões antigas, sem o preço ao cliente gravado, recalculam com as regras da versão.
-    const precoCliente =
-      res.precoCliente ?? (ver.preco + BigInt(ver.dias) * BigInt(normalizarRegras(l.regras).taxaServicoPorDia)).toString();
-    return {
-      id: v.id,
-      codigo: formatarCodigoViagem(l.clienteCodigo, v.seq),
-      estado: v.status === "vendida" ? "vendida" : v.status === "aprovado" ? "aguardando" : "ajustes",
-      numeroVersao: ver.numero,
+  // Versões antigas, sem o preço ao cliente gravado, recalculam com as regras da versão.
+  const semPreco = [...new Set(linhas.filter((l) => l.precoCliente === null).map((l) => l.regrasVersaoId))];
+  const taxaPorRegras = new Map<string, bigint>();
+  for (const id of semPreco) taxaPorRegras.set(id, BigInt((await regrasDaVersao(id)).taxaServicoPorDia));
+
+  const lista = linhas.map(
+    (l): PropostaLista => ({
+      id: l.id,
+      codigo: formatarCodigoViagem(l.clienteCodigo, l.seq),
+      estado: l.status === "vendida" ? "vendida" : l.status === "aprovado" ? "aguardando" : "ajustes",
+      numeroVersao: l.numeroVersao,
       cliente: l.cliente,
-      destino: s.destino,
-      inicio: s.inicio,
-      fim: s.fim,
-      passageiros: s.passageiros.map((p) => p.nome),
+      destino: l.destino,
+      inicio: l.inicio,
+      fim: l.fim,
+      passageiros: l.passageiros,
       consultor: l.consultor,
-      precoCliente,
-      forma: rotuloForma(ver.forma as FormaPagamento),
-      aprovadoEm: ver.decididoEm,
+      precoCliente: l.precoCliente ?? (l.preco + BigInt(l.dias) * taxaPorRegras.get(l.regrasVersaoId)!).toString(),
+      forma: rotuloForma(l.forma as FormaPagamento),
+      aprovadoEm: l.aprovadoEm,
       aprovadoPor: l.decisor ?? null,
-      vendidaEm: v.vendidaEm,
-      notaCliente: v.notaCliente,
-    };
-  });
+      vendidaEm: l.vendidaEm,
+      notaCliente: l.notaCliente,
+    }),
+  );
   const t = (x: PropostaLista) => (x.vendidaEm ?? x.aprovadoEm)?.getTime() ?? 0;
   return lista.sort((a, b) => t(b) - t(a));
 }

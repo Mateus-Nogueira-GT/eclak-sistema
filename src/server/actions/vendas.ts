@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { MSG_NAO_CALCULA, resultadoDaVersao, type ResultadoVersao, type Snapshot } from "@/domain/aprovacoes";
 import type { FormaPagamento, Rateio } from "@/domain/precificacao";
@@ -40,6 +40,7 @@ import {
   viagens,
 } from "@/server/db/schema";
 import { regrasDaVersao } from "@/server/queries/regras";
+import { travarViagem } from "@/server/trava-viagem";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -104,17 +105,6 @@ function falhaDeValidacao(erro: import("zod").ZodError): Falha {
 
 const semId = (x: Record<string, unknown>) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== "id"));
 
-/** Lock consultivo da viagem (até o fim da transação) e a viagem `for update`. */
-async function travarViagem(tx: Transacao, viagemId: string): Promise<ViagemLinha | null> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"viagem:" + viagemId}))`);
-  const [v] = await tx
-    .select()
-    .from(viagens)
-    .where(and(eq(viagens.id, viagemId), isNull(viagens.excluidoEm)))
-    .for("update");
-  return v ?? null;
-}
-
 /**
  * Viagem travada em `aprovado`, com a versão aprovada travada. `vendida` → `vendidaFalha`; editada depois da
  * aprovação (em edição ou devolvida, com versão aprovada) → "O orçamento mudou…".
@@ -153,10 +143,10 @@ const mesmaForma = (a: FormaPagamento, b: FormaPagamento) =>
   a.tipo === b.tipo && a.parcelas === b.parcelas && Boolean(a.antecipado) === Boolean(b.antecipado);
 
 /** Preço ao cliente gravado na versão; versões antigas, sem ele, recalculam com as regras da versão. */
-async function totalAReceber(ver: VersaoLinha): Promise<bigint> {
+async function totalAReceber(tx: Transacao, ver: VersaoLinha): Promise<bigint> {
   const res = ver.resultado as ResultadoVersao;
   if (res.precoCliente !== undefined) return BigInt(res.precoCliente);
-  const regras = await regrasDaVersao(ver.regrasVersaoId);
+  const regras = await regrasDaVersao(ver.regrasVersaoId, tx);
   return ver.preco + BigInt(ver.dias) * BigInt(regras.taxaServicoPorDia);
 }
 
@@ -180,7 +170,7 @@ function revalidar(viagemId: string) {
 export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): Promise<{ ok: true; id: string } | Falha> {
   return comPerfil([...PERFIS_VENDA], async (usuario) => {
     if (!ehUuid(viagemId)) return ORCAMENTO_NAO_ENCONTRADO;
-    const p = fechamentoSchema.safeParse(dados);
+    const p = fechamentoSchema().safeParse(dados);
     if (!p.success) return falhaDeValidacao(p.error);
     const e = p.data;
 
@@ -195,7 +185,7 @@ export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): P
         const aprovadaForma = ver.forma as FormaPagamento;
         if (!mesmaForma(e.forma, aprovadaForma) || e.parcelas !== aprovadaForma.parcelas) return FORMA_DIFERENTE;
 
-        const total = await totalAReceber(ver);
+        const total = await totalAReceber(tx, ver);
         if (BigInt(e.parcelas) > total) return PARCELAS;
         const res = ver.resultado as ResultadoVersao;
         const cronograma = cronogramaRecebimento(total, e.parcelas, e.primeiroVencimento);
@@ -349,7 +339,7 @@ export async function pedirNovaForma(
         const t = await travarAprovada(tx, viagemId, VENDIDA);
         if (ehFalha(t)) return t;
         const { v, ver } = t;
-        const regras = await regrasDaVersao(ver.regrasVersaoId);
+        const regras = await regrasDaVersao(ver.regrasVersaoId, tx);
         const p = novaFormaSchema(regras.parcelamentoMaximo).safeParse(dados);
         if (!p.success) return falhaDeValidacao(p.error);
         const { forma, nota } = p.data;
@@ -357,7 +347,7 @@ export async function pedirNovaForma(
         const snapshot = ver.snapshot as Snapshot;
         let resultado: ResultadoVersao;
         try {
-          resultado = resultadoDaVersao(snapshot, ver.preco, forma, ver.dias, ver.rateio as Rateio, regras);
+          resultado = { ...resultadoDaVersao(snapshot, ver.preco, forma, ver.dias, ver.rateio as Rateio, regras), origem: "nova_forma" };
         } catch {
           return NAO_CALCULA;
         }

@@ -118,7 +118,7 @@ async function conferirPassageiros(tx: Transacao, clienteId: string, ids: string
  * Trava a viagem (`for update`) para uma alteração de item/cotação/cabeçalho.
  * Em `aguardando_aprovacao` ou `vendida` recusa.
  */
-async function travarViagem(tx: Transacao, viagemId: string): Promise<ViagemLinha | Falha> {
+async function travarViagemEdicao(tx: Transacao, viagemId: string): Promise<ViagemLinha | Falha> {
   const [v] = await tx
     .select()
     .from(viagens)
@@ -292,7 +292,7 @@ export async function salvarItem(
     let r: { id: string } | Falha;
     try {
       r = await db.transaction(async (tx) => {
-        const v = await travarViagem(tx, viagemId);
+        const v = await travarViagemEdicao(tx, viagemId);
         if (ehFalha(v)) return v;
         const agora = new Date();
         let linha: ItemLinha;
@@ -362,7 +362,7 @@ export async function removerItem(itemId: string): Promise<{ ok: true } | Falha>
     let r: Falha | null;
     try {
       r = await db.transaction(async (tx) => {
-        const v = await travarViagem(tx, viagemId);
+        const v = await travarViagemEdicao(tx, viagemId);
         if (ehFalha(v)) return v.erro === ORCAMENTO_NAO_ENCONTRADO.erro ? ITEM_NAO_ENCONTRADO : v;
         const i = await travarItem(tx, viagemId, itemId);
         if (ehFalha(i)) return i;
@@ -424,7 +424,7 @@ export async function salvarCotacao(
     let r: { id: string } | Falha;
     try {
       r = await db.transaction(async (tx) => {
-        const v = await travarViagem(tx, viagemId);
+        const v = await travarViagemEdicao(tx, viagemId);
         if (ehFalha(v)) return v.erro === ORCAMENTO_NAO_ENCONTRADO.erro ? ITEM_NAO_ENCONTRADO : v;
         const i = await travarItem(tx, viagemId, itemId);
         if (ehFalha(i)) return i;
@@ -518,7 +518,7 @@ async function abrirCotacao(
   let r: Falha | null;
   try {
     r = await db.transaction(async (tx) => {
-      const v = await travarViagem(tx, ref.viagemId);
+      const v = await travarViagemEdicao(tx, ref.viagemId);
       if (ehFalha(v)) return v.erro === ORCAMENTO_NAO_ENCONTRADO.erro ? COTACAO_NAO_ENCONTRADA : v;
       const i = await travarItem(tx, ref.viagemId, ref.itemId);
       if (ehFalha(i)) return i.erro === ITEM_NAO_ENCONTRADO.erro ? COTACAO_NAO_ENCONTRADA : i;

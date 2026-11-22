@@ -4,7 +4,8 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import type { ResultadoVersao, Snapshot } from "@/domain/aprovacoes";
 import type { FormaPagamento } from "@/domain/precificacao";
-import { db } from "@/server/db/client";
+import { db, sql } from "@/server/db/client";
+import { chaveTrava } from "@/server/trava-viagem";
 import {
   auditoria,
   comissoes,
@@ -19,7 +20,7 @@ import { salvarCliente, type ClienteEntrada } from "@/server/actions/clientes";
 import { salvarFornecedor } from "@/server/actions/fornecedores";
 import { salvarRegras } from "@/server/actions/regras";
 import { regrasVigentes } from "@/server/queries/regras";
-import { aprovar, enviarParaAprovacao } from "@/server/actions/aprovacoes";
+import { aprovar, devolver, enviarParaAprovacao } from "@/server/actions/aprovacoes";
 import { alterarOrcamento, criarOrcamento, escolherCotacao, salvarCotacao, salvarItem, type ItemEntrada } from "@/server/actions/viagens";
 import { fecharVenda, pedirNovaForma, registrarAjustesCliente, type FechamentoEntrada } from "@/server/actions/vendas";
 import { obterCliente } from "@/server/queries/clientes";
@@ -117,6 +118,65 @@ async function nadaGravado(viagemId: string) {
   expect(await db.select().from(contasPagar).where(eq(contasPagar.viagemId, viagemId))).toHaveLength(0);
   expect(await db.select().from(comissoes).where(eq(comissoes.viagemId, viagemId))).toHaveLength(0);
 }
+
+/** Segura o lock consultivo da viagem (chaveTrava) em outra conexão enquanto `acao` roda; diz se ela esperou. */
+async function comTravaSegura<T>(viagemId: string, acao: () => Promise<T>): Promise<{ esperou: boolean; r: T }> {
+  let soltar!: () => void;
+  const solto = new Promise<void>((ok) => (soltar = ok));
+  let travou!: () => void;
+  const travado = new Promise<void>((ok) => (travou = ok));
+  const segurando = sql.begin(async (t) => {
+    await t`select pg_advisory_xact_lock(hashtext(${chaveTrava(viagemId)}))`;
+    travou();
+    await solto;
+  });
+  await travado;
+  let terminou = false;
+  const p = acao().then((r) => {
+    terminou = true;
+    return r;
+  });
+  await new Promise((ok) => setTimeout(ok, 400));
+  const esperou = !terminou;
+  soltar();
+  await segurando;
+  return { esperou, r: await p };
+}
+
+describe("trava compartilhada da viagem", () => {
+  beforeEach(limparBanco);
+
+  it("venda (vendas.ts) e decisão/envio (aprovacoes.ts) esperam o mesmo lock consultivo (chaveTrava)", async () => {
+    const { u, d, viagemId } = await aprovada();
+    const n = await comSessao(u.id, () => pedirNovaForma(viagemId, { forma: { tipo: "pix", parcelas: 1 } }));
+    if (!n.ok) throw new Error(n.erro);
+    const dev = await comTravaSegura(viagemId, () => comSessao(d.id, () => devolver(n.id, "Mantenha o boleto")));
+    expect(dev).toEqual({ esperou: true, r: { ok: true } });
+    const venda = await comTravaSegura(viagemId, () => comSessao(u.id, () => fecharVenda(viagemId, fechamento)));
+    expect(venda.esperou).toBe(true);
+    expect(venda.r).toMatchObject({ ok: true });
+    const envio = await comTravaSegura(viagemId, () => comSessao(u.id, () => enviarParaAprovacao(viagemId, { forma: BOLETO4, alteracao: "" })));
+    expect(envio).toEqual({ esperou: true, r: VENDIDA });
+  });
+
+  it("fecharVenda e pedirNovaForma ao mesmo tempo: só uma vale", async () => {
+    const { u, viagemId } = await aprovada();
+    const rs = await comSessao(u.id, () =>
+      Promise.all([fecharVenda(viagemId, fechamento), pedirNovaForma(viagemId, { forma: { tipo: "pix", parcelas: 1 } })]),
+    );
+    expect(rs.filter((r) => r.ok)).toHaveLength(1);
+    const v = await viagem(viagemId);
+    if (rs[0].ok) {
+      expect(rs[1]).toEqual(VENDIDA);
+      expect(v.status).toBe("vendida");
+      expect(await versoesDa(viagemId)).toHaveLength(1);
+    } else {
+      expect(rs[0]).toEqual({ ok: false, erro: "Orçamento aguardando aprovação do Diretor" });
+      expect(v.status).toBe("aguardando_aprovacao");
+      await nadaGravado(viagemId);
+    }
+  });
+});
 
 describe("fecharVenda", () => {
   beforeEach(limparBanco);
@@ -259,6 +319,8 @@ describe("fecharVenda", () => {
     expect(await f({ faturaNome: " " })).toMatchObject({ ok: false, erro: "Informe o nome da fatura" });
     expect(await f({ faturaDocumento: "111.111.111-11" })).toMatchObject({ ok: false, erro: "CPF ou CNPJ inválido" });
     expect(await f({ parcelas: 0 })).toMatchObject({ ok: false, erro: "Número de parcelas inválido" });
+    expect(await f({ aceiteEm: "2999-01-01", primeiroVencimento: "2999-02-01" })).toMatchObject({ ok: false, erro: "Data do aceite no futuro" });
+    expect(await f({ primeiroVencimento: "2026-11-19" })).toMatchObject({ ok: false, erro: "O primeiro vencimento não pode ser antes do aceite" });
     expect(await comSessao(u.id, () => fecharVenda("x", fechamento))).toEqual({ ok: false, erro: "Orçamento não encontrado" });
     await nadaGravado(viagemId);
 
@@ -353,6 +415,32 @@ describe("pedirNovaForma", () => {
     expect(ps).toHaveLength(6);
     expect(ps.every((p) => p.meio === "cartao_credito")).toBe(true);
     expect(ps.reduce((a, p) => a + p.taxaPrevista, 0n)).toBe(BigInt(r2.taxa));
+  });
+
+  it("nova forma devolvida pelo Diretor: viagem volta a aprovado e a forma original ainda fecha", async () => {
+    const { u, d, viagemId, versaoId } = await aprovada();
+    const n = await comSessao(u.id, () => pedirNovaForma(viagemId, { forma: { tipo: "credito", parcelas: 6 }, nota: "Cartão" }));
+    if (!n.ok) throw new Error(n.erro);
+    expect(((await versao(n.id)).resultado as ResultadoVersao).origem).toBe("nova_forma");
+    expect(await comSessao(d.id, () => devolver(n.id, "Mantenha o boleto"))).toEqual({ ok: true });
+    expect(await versao(n.id)).toMatchObject({ status: "devolvida", comentario: "Mantenha o boleto", decididoPor: d.id });
+    expect(await viagem(viagemId)).toMatchObject({ status: "aprovado", versaoAprovadaId: versaoId });
+    const audV = await db.select().from(auditoria).where(eq(auditoria.registroId, viagemId)).orderBy(asc(auditoria.id));
+    expect(audV.at(-1)).toMatchObject({ antes: { status: "aguardando_aprovacao" }, depois: { status: "aprovado" } });
+    const f = await comSessao(u.id, () => fecharVenda(viagemId, fechamento));
+    expect(f.ok).toBe(true);
+    const [venda] = await db.select().from(vendas).where(eq(vendas.viagemId, viagemId));
+    expect(venda).toMatchObject({ versaoId, forma: BOLETO4 });
+  });
+
+  it("versão enviada normalmente e devolvida continua indo a devolvido", async () => {
+    const { u, d, viagemId } = await aprovada();
+    await cotacao(u.id, await item(u.id, viagemId, { servico: "Vaticano" }), { valor: "300,00" });
+    const e = await comSessao(u.id, () => enviarParaAprovacao(viagemId, { forma: BOLETO4, alteracao: "Vaticano" }));
+    if (!e.ok) throw new Error(e.erro);
+    expect(((await versao(e.id)).resultado as ResultadoVersao).origem).toBeUndefined();
+    expect(await comSessao(d.id, () => devolver(e.id, "Caro demais"))).toEqual({ ok: true });
+    expect((await viagem(viagemId)).status).toBe("devolvido");
   });
 
   it("forma igual ou inválida para os Parâmetros recusada; só com aprovado", async () => {

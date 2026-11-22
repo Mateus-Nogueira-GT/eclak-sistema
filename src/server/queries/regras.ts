@@ -75,9 +75,9 @@ export async function historicoRegras(): Promise<LinhaHistorico[]> {
 }
 
 /** Valores de uma versão de regras pelo id (as versões não mudam depois de criadas). Exige login. */
-export async function regrasDaVersao(versaoId: string): Promise<Regras> {
+export async function regrasDaVersao(versaoId: string, executor: typeof db | Transacao = db): Promise<Regras> {
   await exigirPerfil();
-  const [v] = await db.select({ valores: regrasVersoes.valores }).from(regrasVersoes).where(eq(regrasVersoes.id, versaoId));
+  const [v] = await executor.select({ valores: regrasVersoes.valores }).from(regrasVersoes).where(eq(regrasVersoes.id, versaoId));
   if (!v) throw new Error("Versão de regras não encontrada");
   return normalizarRegras(v.valores);
 }

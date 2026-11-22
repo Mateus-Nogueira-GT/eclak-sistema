@@ -28,6 +28,7 @@ import { db, type Transacao } from "@/server/db/client";
 import { cotacoes, fornecedores, itensViagem, pessoas, versoesPrecificacao, viagemPassageiros, viagens } from "@/server/db/schema";
 import { regrasDaVersao, regrasVigentes } from "@/server/queries/regras";
 import { sincronizarTaxaRoteiro } from "@/server/taxa-roteiro";
+import { travarViagem } from "@/server/trava-viagem";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -91,17 +92,6 @@ function falhaDeValidacao(erro: import("zod").ZodError): Falha {
 }
 
 const semId = (x: Record<string, unknown>) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== "id"));
-
-/** Lock consultivo da viagem (até o fim da transação) e a viagem `for update`. */
-async function travarViagem(tx: Transacao, viagemId: string): Promise<ViagemLinha | null> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"viagem:" + viagemId}))`);
-  const [v] = await tx
-    .select()
-    .from(viagens)
-    .where(and(eq(viagens.id, viagemId), isNull(viagens.excluidoEm)))
-    .for("update");
-  return v ?? null;
-}
 
 /** Itens ativos da viagem com as cotações ativas (mais antigas primeiro); taxa automática por último. */
 async function lerItens(tx: Transacao, viagemId: string): Promise<ItemLido[]> {
@@ -362,7 +352,11 @@ export async function aprovar(versaoId: string): Promise<{ ok: true } | Falha> {
   );
 }
 
-/** Devolve a versão com o motivo (obrigatório): viagem `devolvido`; a última versão aprovada, se houver, fica. */
+/**
+ * Devolve a versão com o motivo (obrigatório): viagem `devolvido`; a última versão aprovada, se houver, fica.
+ * Nova forma recusada (`resultado.origem = "nova_forma"`): a viagem volta a `aprovado` com a versão aprovada
+ * anterior (a forma original continua valendo para fechar a venda).
+ */
 export async function devolver(versaoId: string, comentario: string): Promise<{ ok: true } | Falha> {
   return comPerfil(["diretor"], async (usuario) => {
     const m = motivoSchema.safeParse(comentario);
@@ -371,7 +365,8 @@ export async function devolver(versaoId: string, comentario: string): Promise<{ 
       versaoId,
       async (tx, { v, ver, agora }) => {
         await decidirVersao(tx, usuario.id, ver, "devolvida", m.data, agora);
-        await mudarStatusViagem(tx, usuario.id, v, { status: "devolvido" }, agora);
+        const novaForma = (ver.resultado as ResultadoVersao).origem === "nova_forma" && v.versaoAprovadaId !== null;
+        await mudarStatusViagem(tx, usuario.id, v, { status: novaForma ? "aprovado" : "devolvido" }, agora);
         return {};
       },
       "Erro ao devolver",
