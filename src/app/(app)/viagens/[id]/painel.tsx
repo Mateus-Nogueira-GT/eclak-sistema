@@ -19,7 +19,14 @@ import type { FornecedorOpcao } from "./formularios";
 import { estrategicoOk, Vendas } from "./vendas";
 import { Versoes } from "./versoes";
 
-export type Extras = { semCompensacaoPct: string | null; diasCobertos: string | null; limiteDiaria: bigint };
+export type Extras = {
+  semCompensacaoPct: string | null;
+  diasCobertos: string | null;
+  limiteDiaria: bigint;
+  /** Parâmetros vigentes do semáforo da margem. */
+  margemAlvoPct: string;
+  margemReferenciaPct: string;
+};
 type Aba = "vendas" | "comparacao" | "simulador" | "avista" | "produto";
 
 const PROXIMO_PASSO: Record<StatusOrcamento, string> = {
@@ -44,6 +51,7 @@ export function Painel({
 }) {
   const est = estrategicoOk(ficha);
   const erroEst = ficha.estrategico && "erro" in ficha.estrategico ? ficha.estrategico.erro : null;
+  const erroRef = ficha.referenciaErro || erroEst !== null;
   const [aba, setAba] = useState<Aba>("vendas");
   const [editando, setEditando] = useState(false);
   const [versoes, setVersoes] = useState(false);
@@ -138,10 +146,10 @@ export function Painel({
             </>
           ) : (
             <>
-              <p className="mt-1.5 text-[20px] font-bold text-cinza">{erroEst ? "Indisponível" : "A definir"}</p>
+              <p className="mt-1.5 text-[20px] font-bold text-cinza">{erroRef ? "Indisponível" : "A definir"}</p>
               <p className="mt-1 text-[13px] leading-relaxed text-cinza">
-                {erroEst
-                  ? "Não foi possível calcular com os Parâmetros vigentes. Fale com o Diretor."
+                {erroRef
+                  ? "Não foi possível calcular o valor com os Parâmetros vigentes. Fale com o Diretor."
                   : "Cote ao menos um item para ver o valor. Orçamento sem caráter de reserva; os valores podem variar conforme as datas. Não inclui aéreo."}
               </p>
             </>
@@ -156,7 +164,7 @@ export function Painel({
                 <>
                   <p className="num mt-1.5 text-[26px] font-bold text-verde">{pct1(ref.margemLiquidaPct)}</p>
                   <p className="num text-[13px] text-cinza">{formatarReais(ref.margemLiquida)} em 2x a 6x</p>
-                  <div className="mt-2"><Semaforo margem={Number(ref.margemLiquidaPct)} /></div>
+                  {extras && <div className="mt-2"><Semaforo margemPct={ref.margemLiquidaPct} alvoPct={extras.margemAlvoPct} referenciaPct={extras.margemReferenciaPct} /></div>}
                 </>
               ) : <p className="mt-1.5 text-[14px] text-cinza">Sem itens cotados.</p>}
             </Card>

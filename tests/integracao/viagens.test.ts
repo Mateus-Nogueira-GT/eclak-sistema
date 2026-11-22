@@ -482,6 +482,42 @@ describe("precificação", () => {
     expect(lista.find((x) => x.id === b.id)!.estrategico).toEqual({ preco: null, margemPct: null });
   });
 
+  it("listarOrcamentos: a margem da lista é a do cartão da ficha (forma de referência, pior custo), mesmo com escolhida ≠ pior", async () => {
+    const { u, clienteId, pessoas } = await cenario();
+    const d = await criarUsuarioTeste("diretor");
+    const { id } = await novoOrcamento(u.id, clienteId, pessoas);
+    const hotel = await item(u.id, id, { tipo: "Hotelaria", servico: "Palazzo Barocci", diarias: 3 });
+    await cotacao(u.id, hotel, { valor: "3.106,00", comissao: "4" }); // escolhida (mais barata)
+    await cotacao(u.id, hotel, { valor: "3.300,00" }); // pior custo
+    await cotacao(u.id, await item(u.id, id, { servico: "Coliseu" }), { valor: "500,00" });
+    const ficha = (await comSessao(d.id, () => obterPrecificacao(id)))!;
+    const e = ficha.estrategico as CamadaEstrategica;
+    expect(e.custoEscolhidas).toBeLessThan(e.precificacao.custo);
+    const cartao = e.precificacao.porForma[2];
+    const linha = (await comSessao(d.id, () => listarOrcamentos())).find((x) => x.id === id)!;
+    expect(linha.estrategico).toEqual({ preco: cartao.preco, margemPct: cartao.margemLiquidaPct });
+  });
+
+  it("valor de referência que não calcula: aviso para todos os perfis; Aéreo sem cotação entra nos itens sem cotação", async () => {
+    const { u, clienteId, pessoas } = await cenario();
+    const d = await criarUsuarioTeste("diretor");
+    const { id } = await novoOrcamento(u.id, clienteId, pessoas);
+    await cotacao(u.id, await item(u.id, id, { servico: "Coliseu" }), { valor: "500,00" });
+    const aereo = await item(u.id, id, { tipo: "Aéreo", servico: "GRU-FCO" });
+    const ok = (await comSessao(u.id, () => obterPrecificacao(id)))!;
+    expect(ok.referenciaErro).toBe(false);
+    expect(ok.itensSemCotacao).toEqual([{ id: aereo, servico: "GRU-FCO" }]);
+
+    const vig = await comSessao(d.id, () => regrasVigentes());
+    expect((await comSessao(d.id, () => salvarRegras({ ...vig.valores, margemAlvoPct: "93.000" }))).ok).toBe(true);
+    const f = (await comSessao(u.id, () => obterPrecificacao(id)))!;
+    expect(f).toMatchObject({ referencia: null, referenciaErro: true });
+    expect("estrategico" in f).toBe(false);
+    // sem item cotado não é erro
+    const { id: vazio } = await novoOrcamento(u.id, clienteId, pessoas);
+    expect((await comSessao(u.id, () => obterPrecificacao(vazio)))!).toMatchObject({ referencia: null, referenciaErro: false });
+  });
+
   it("obterPrecificacao: id inválido ou inexistente → null", async () => {
     const { u } = await cenario();
     expect(await comSessao(u.id, () => obterPrecificacao("x"))).toBeNull();

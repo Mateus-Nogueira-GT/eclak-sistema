@@ -30,7 +30,13 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
     const regras = (await regrasVigentes()).valores;
     const forma = FORMAS_SIMULADOR[FORMA_REFERENCIA].forma;
     const p = est.precificacao;
-    const e: Extras = { semCompensacaoPct: null, diasCobertos: null, limiteDiaria: BigInt(regras.limiteDiariaSemReajuste) };
+    const e: Extras = {
+      semCompensacaoPct: null,
+      diasCobertos: null,
+      limiteDiaria: BigInt(regras.limiteDiariaSemReajuste),
+      margemAlvoPct: regras.margemAlvoPct,
+      margemReferenciaPct: regras.margemReferenciaPct,
+    };
     try {
       e.semCompensacaoPct = resultadoDoPreco(p.somaVendas, p.custo, forma, regras).margemLiquidaPct;
       e.diasCobertos = margemDaAprovacao(p.porForma[FORMA_REFERENCIA].preco, p.custo, forma, ficha.dias, regras.rateio.metodo, regras).diasCobertos;

@@ -44,13 +44,12 @@ export function CardHeader({ eyebrow, title, right }: { eyebrow?: string; title:
   );
 }
 
-type Tom = "verde" | "agua" | "ouro" | "alerta" | "cinza" | "grafite";
+type Tom = "verde" | "agua" | "ouro" | "cinza" | "grafite";
 
 const pontos: Record<Tom, string> = {
   verde: "bg-verde",
   agua: "bg-agua",
   ouro: "bg-ouro",
-  alerta: "bg-alerta",
   cinza: "bg-[#A7A9AC]",
   grafite: "",
 };
@@ -66,12 +65,11 @@ export function Badge({ tom = "cinza", children, className }: { tom?: Tom; child
   );
 }
 
-type Variante = "primario" | "secundario" | "alerta" | "fantasma";
+type Variante = "primario" | "secundario" | "fantasma";
 
 const variantes: Record<Variante, string> = {
   primario: "bg-verde text-white hover:bg-[#254B5C] disabled:bg-[#C9D2D7] disabled:text-white",
   secundario: "border border-[#C9CDD1] bg-white text-texto hover:border-verde hover:text-verde disabled:border-linha disabled:text-cinza",
-  alerta: "bg-alerta text-white hover:bg-[#7A2843]",
   fantasma: "text-verde hover:bg-verde/8",
 };
 
@@ -94,11 +92,11 @@ export function BotaoLink({ href, children, className }: { href: string; childre
   );
 }
 
-export function Stat({ label, value, sub, tom, grande }: { label: string; value: ReactNode; sub?: ReactNode; tom?: "alerta" | "verde" | "ouro"; grande?: boolean }) {
+export function Stat({ label, value, sub, grande }: { label: string; value: ReactNode; sub?: ReactNode; grande?: boolean }) {
   return (
     <div>
       <Eyebrow>{label}</Eyebrow>
-      <div className={cx("num mt-1 font-bold tracking-tight", grande ? "text-[28px]" : "text-[21px]", tom === "alerta" ? "text-alerta" : "text-verde")}>{value}</div>
+      <div className={cx("num mt-1 font-bold tracking-tight", grande ? "text-[28px]" : "text-[21px]", "text-verde")}>{value}</div>
       {sub && <div className="mt-0.5 text-[13px] text-cinza">{sub}</div>}
     </div>
   );
