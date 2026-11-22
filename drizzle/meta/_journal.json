@@ -120,6 +120,13 @@
       "when": 1795352159824,
       "tag": "0016_comissao_cancelada",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795352702447,
+      "tag": "0017_comissao_tipo_venda",
+      "breakpoints": true
     }
   ]
 }

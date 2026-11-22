@@ -221,6 +221,9 @@ export const motivoPrevistoSchema = obrigatorio(MSG_MOTIVO_PREVISTO, 2000);
 export const contestacaoSchema = obrigatorio(MSG_CONTESTACAO, 4000);
 export const motivoSchema = obrigatorio(MSG_MOTIVO, 2000);
 
+/** "O valor previsto não pode ser menor que o já pago (R$ 7.520,00)". */
+export const msgPrevistoAbaixoDoPago = (pago: string) => `O valor previsto não pode ser menor que o já pago (${pago})`;
+
 /** "Ainda há valores em aberto: a, b, c e mais N" (até 3 nomes). */
 export function msgEmAberto(itens: string[]): string {
   const nomes = itens.slice(0, 3).join(", ");

@@ -410,6 +410,17 @@ export type ContaPonte = ContaMargem & {
   pagos?: { valorOriginalPago: bigint; valorBrlPago: bigint }[];
   /** Câmbio da venda (o aplicado na cotação); nulo no real. */
   cambioVenda?: string | null;
+  /**
+   * Comissão a receber da conta como vendida (0 se vendida `descontada`). Informada em todas as contas, o custo na
+   * venda sai das contas como vendidas (Σ previsto na venda − comissão na venda) e não das comissões de hoje, então
+   * "Fornecedores escolhidos" não mexe depois da venda. Omitida: as comissões de hoje (comportamento antigo).
+   */
+  comissaoNaVenda?: bigint;
+  /**
+   * Tipo de comissão trocado depois da venda: o novo tipo, o previsto que a conta teria na venda com ele e a
+   * comissão prevista hoje (0 sem comissão ativa). A troca vira uma linha só, com o efeito real na margem.
+   */
+  trocaDeTipo?: { para: ComissaoTipo; previstoNaVenda: bigint; comissaoPrevista: bigint };
 };
 
 export type ComissaoPonte = {
@@ -436,12 +447,20 @@ export type LinhaPonte = { rotulo: string; valor: bigint };
 
 /**
  * Da margem planejada à real, em reais de margem (positivo = melhora). Linhas do meio sem efeito ficam de fora:
- * "Fornecedores escolhidos" (custo planejado pelo pior − custo das escolhidas na venda); por conta,
- * "<rótulo>: valor atualizado" (previsto atual − previsto na venda, e o pago diferente do previsto em reais);
- * "Diferença de câmbio" (pago − previsto nas contas pagas em moeda estrangeira); "Comissão pendente: <f>";
- * "Comissão não recebida: <f>" (marcada "não será recebida");
- * "Comissão recebida: <f>" (recebida com valor diferente do previsto); "Taxas financeiras"; "Imposto".
- * As linhas do meio somam exatamente real.final − planejada.final.
+ * - "Fornecedores escolhidos": custo planejado (pelo pior) − custo das contas como vendidas (Σ previsto na venda −
+ *   comissão na venda, com `comissaoNaVenda`; sem ele, as comissões de hoje). Não muda depois da venda.
+ * - "Comissão: <rótulo> passou a ser descontada|a receber" (`trocaDeTipo`): efeito real da troca = −(previsto na
+ *   venda no novo tipo − previsto na venda + comissão na venda − comissão prevista hoje); 0 (sem linha) quando a
+ *   comissão de hoje é a diferença entre cheio e líquido.
+ * - "<rótulo>: valor atualizado": previsto atual − previsto na venda (no tipo atual, se trocado). Sem `pagos`, inclui
+ *   também o pago diferente do previsto nas contas em reais.
+ * - Com `pagos`: "<rótulo>: valor pago diferente" (pago − previsto, sem a parte do câmbio: desconto à vista, preço
+ *   do fornecedor) e, fora do real, "Diferença de câmbio" = Σ pago em reais − pago na moeda pelo câmbio da venda.
+ *   Sem `pagos`, todo o pago diferente das contas em moeda estrangeira vai para "Diferença de câmbio".
+ * - "Comissão pendente: <f>", "Comissão não recebida: <f>" (marcada "não será recebida"), "Comissão recebida: <f>"
+ *   (recebida com valor diferente do previsto) — sobre as comissões ativas de hoje.
+ * - "Taxas financeiras" e "Imposto".
+ * As linhas do meio somam exatamente real.final − planejada.final (conferido; senão lança).
  */
 export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: LinhaPonte[] } {
   const contas = e.contas.filter((c) => !c.aereo);
@@ -461,14 +480,23 @@ export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: Linh
     if (valor !== 0n) meio.push({ rotulo, valor });
   };
 
-  const custoNaVenda =
-    contas.reduce((a, c) => a + c.previstoVendaBrl, 0n) - comissoes.reduce((a, c) => a + c.valorPrevisto, 0n) + e.taxaRoteiro;
+  const comissaoNaVenda = contas.every((c) => c.comissaoNaVenda !== undefined)
+    ? contas.reduce((a, c) => a + c.comissaoNaVenda!, 0n)
+    : comissoes.reduce((a, c) => a + c.valorPrevisto, 0n);
+  const custoNaVenda = contas.reduce((a, c) => a + c.previstoVendaBrl, 0n) - comissaoNaVenda + e.taxaRoteiro;
   add("Fornecedores escolhidos", e.planejada.custo - custoNaVenda);
 
   let cambio = 0n;
   for (const c of contas) {
     const pagoDiferente = c.pagoBrl === null ? 0n : c.pagoBrl - c.previstoBrl;
     const estrangeira = c.moeda !== "BRL";
+    const t = c.trocaDeTipo;
+    // Base do "valor atualizado": o previsto na venda no tipo atual.
+    const previstoBase = t ? t.previstoNaVenda : c.previstoVendaBrl;
+    if (t) {
+      const efeito = t.previstoNaVenda - c.previstoVendaBrl + (c.comissaoNaVenda ?? 0n) - t.comissaoPrevista;
+      add(`Comissão: ${c.rotulo} passou a ser ${t.para === "descontada" ? "descontada" : "a receber"}`, -efeito);
+    }
     if (c.pagos !== undefined) {
       // Câmbio: só a diferença entre o pago em reais e o pago na moeda convertido pelo câmbio da venda; o resto
       // do pago diferente (desconto à vista, preço do fornecedor) é "valor pago diferente".
@@ -478,12 +506,12 @@ export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: Linh
           ? c.pagos.reduce((a, x) => a + x.valorBrlPago - converter(x.valorOriginalPago, cambioVenda), 0n)
           : 0n;
       cambio += daConta;
-      add(`${c.rotulo}: valor atualizado`, -(c.previstoBrl - c.previstoVendaBrl));
+      add(`${c.rotulo}: valor atualizado`, -(c.previstoBrl - previstoBase));
       add(`${c.rotulo}: valor pago diferente`, -(pagoDiferente - daConta));
       continue;
     }
     if (estrangeira) cambio += pagoDiferente;
-    add(`${c.rotulo}: valor atualizado`, -(c.previstoBrl - c.previstoVendaBrl + (estrangeira ? 0n : pagoDiferente)));
+    add(`${c.rotulo}: valor atualizado`, -(c.previstoBrl - previstoBase + (estrangeira ? 0n : pagoDiferente)));
   }
   add("Diferença de câmbio", -cambio);
 

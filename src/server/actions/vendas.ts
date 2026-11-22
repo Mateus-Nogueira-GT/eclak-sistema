@@ -269,6 +269,7 @@ export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): P
               previstoBrl: c.previstoBrl,
               comissaoPct: c.comissaoPct,
               comissaoTipo: c.comissaoTipo,
+              comissaoTipoVenda: c.comissaoTipo,
               descontoAVistaPct: c.descontoAVistaPct,
               forma: "a_vista",
             })

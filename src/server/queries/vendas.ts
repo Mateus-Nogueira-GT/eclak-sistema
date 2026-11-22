@@ -7,6 +7,7 @@ import { hojeEmCuiaba } from "@/domain/clientes";
 import { veCamadaEstrategica } from "@/domain/perfis";
 import type { FormaPagamento } from "@/domain/precificacao";
 import {
+  contasDoSnapshot,
   formatarDocumento,
   margemReal,
   planejadaDaVersao,
@@ -219,6 +220,8 @@ export type ContaVendida = {
   previstoBrl: bigint;
   comissaoPct: string;
   comissaoTipo: ComissaoTipo;
+  /** Tipo como vendido. */
+  comissaoTipoVenda: ComissaoTipo;
   descontoAVistaPct: string | null;
   forma: FormaPagamentoFornecedorTipo | null;
   status: StatusConta;
@@ -386,6 +389,7 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
     previstoBrl: c.previstoBrl,
     comissaoPct: c.comissaoPct,
     comissaoTipo: c.comissaoTipo,
+    comissaoTipoVenda: c.comissaoTipoVenda,
     descontoAVistaPct: c.descontoAVistaPct,
     forma: c.forma,
     status: c.status,
@@ -475,6 +479,16 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
         c.pagamentos.some((p) => p.status === "pago")
           ? soma(c.pagamentos.map((p) => (p.status === "pago" ? (p.valorBrlPago ?? 0n) : p.valorBrlPrevisto)))
           : null;
+      /** Previsto e comissão que a conta teria na venda com o tipo `tipo` (snapshot da versão vendida). */
+      const naVenda = (c: ContaVendida, tipo: ComissaoTipo) => {
+        const itemId = contaPorId.get(c.id)!.c.itemId;
+        const modalidade: Record<string, "net" | "comissionado"> = c.fornecedorId
+          ? { [c.fornecedorId]: tipo === "a_receber" ? "comissionado" : "net" }
+          : {};
+        const g = contasDoSnapshot(snapshot, modalidade, v.fim).find((x) => x.itemId === itemId);
+        if (!g) throw new Error(MSG_NAO_CALCULA_MARGEM);
+        return { previsto: g.previstoBrl, comissao: g.comissao?.valor ?? 0n };
+      };
       const contasMargem = ativas.map((c) => ({
         aereo: c.aereo,
         previstoBrl: c.previstoBrl,
@@ -486,6 +500,15 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
           .filter((p) => p.status === "pago")
           .map((p) => ({ valorOriginalPago: p.valorOriginalPago ?? 0n, valorBrlPago: p.valorBrlPago ?? 0n })),
         cambioVenda: c.cambioAplicado,
+        comissaoNaVenda: c.comissaoTipoVenda === "a_receber" ? naVenda(c, "a_receber").comissao : 0n,
+        trocaDeTipo:
+          c.comissaoTipo === c.comissaoTipoVenda
+            ? undefined
+            : {
+                para: c.comissaoTipo,
+                previstoNaVenda: naVenda(c, c.comissaoTipo).previsto,
+                comissaoPrevista: c.comissao?.valorPrevisto ?? 0n,
+              },
       }));
       const parcelasMargem = ps
         .filter((p) => p.status !== "cancelada")

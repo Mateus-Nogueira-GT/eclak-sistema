@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import type { Snapshot } from "@/domain/aprovacoes";
 import { converter } from "@/domain/cambio";
 import { arredondar, lerDecimal } from "@/domain/decimal";
+import { formatarReais } from "@/domain/dinheiro";
 import { aplicarFormaFornecedor, contasDoSnapshot, reprevisarLinhas, type ComissaoTipo, type ContaGerada } from "@/domain/venda";
 import {
   baixaPagamentoSchema,
@@ -16,6 +17,7 @@ import {
   motivoPrevistoSchema,
   motivoSchema,
   msgEmAberto,
+  msgPrevistoAbaixoDoPago,
   MSG_CAMBIO_EFETIVO,
   MSG_COMISSAO_CANCELADA,
   MSG_COMISSAO_EM_ABERTO,
@@ -454,6 +456,8 @@ export async function atualizarPrevisto(contaId: string, valorBrl: string, motiv
         const conta = await contaTravada(tx, contaId, v.id);
         if (!conta) return CONTA_NAO_ENCONTRADA;
         const linhas = await linhasDaConta(tx, conta.id);
+        const jaPago = linhas.reduce((t, l) => t + (l.status === "pago" ? (l.valorBrlPago ?? 0n) : 0n), 0n);
+        if (novo < jaPago) return falha(msgPrevistoAbaixoDoPago(formatarReais(jaPago)), "valorBrl");
         const snapshot = await snapshotDaVenda(tx, v.id);
         if (!snapshot) return NAO_CALCULA;
         const base = contaBase(snapshot, conta, conta.comissaoTipo, v.fim);

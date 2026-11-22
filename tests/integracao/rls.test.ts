@@ -115,6 +115,7 @@ describe("RLS: anon não lê nada", () => {
         previstoBrl: 100000n,
         comissaoPct: "10.000",
         comissaoTipo: "a_receber",
+        comissaoTipoVenda: "a_receber",
       })
       .returning();
     await db.insert(pagamentosFornecedor).values({

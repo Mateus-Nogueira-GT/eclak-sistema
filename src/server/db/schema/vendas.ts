@@ -111,6 +111,8 @@ export const contasPagar = pgTable(
     previstoBrl: centavos("previsto_brl").notNull(),
     comissaoPct: numeric("comissao_pct", { precision: 6, scale: 3 }).notNull().default(sql`0`),
     comissaoTipo: comissaoTipoEnum("comissao_tipo").notNull(),
+    /** Tipo como vendido (fixo): base da ponte quando o tipo é trocado depois. */
+    comissaoTipoVenda: comissaoTipoEnum("comissao_tipo_venda").notNull(),
     descontoAVistaPct: numeric("desconto_a_vista_pct", { precision: 6, scale: 3 }),
     forma: formaPagamentoFornecedorEnum("forma"),
     status: statusContaEnum("status").notNull().default("a_pagar"),

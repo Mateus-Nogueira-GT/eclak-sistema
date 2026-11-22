@@ -428,7 +428,9 @@ describe("comissões", () => {
 
   it("definirComissaoTipo: recalcula o previsto e cria/cancela a comissão; previsto na venda não muda; recusado depois de baixa", async () => {
     const x = await vendida();
-    expect(x.hotel).toMatchObject({ comissaoTipo: "a_receber", previstoBrl: 310600n, previstoVendaBrl: 310600n });
+    expect(x.hotel).toMatchObject({ comissaoTipo: "a_receber", comissaoTipoVenda: "a_receber", previstoBrl: 310600n, previstoVendaBrl: 310600n });
+    const r0 = await estrategico(x.fin.id, x.viagemId);
+    const valorDe = (ponte: { rotulo: string; valor: bigint }[], rotulo: string) => ponte.find((l) => l.rotulo === rotulo)?.valor;
     expect(await comSessao(x.fin.id, () => definirComissaoTipo(x.hotel.id, { tipo: "descontada" }))).toEqual({ ok: true });
     let [c] = await db.select().from(contasPagar).where(eq(contasPagar.id, x.hotel.id));
     expect(c).toMatchObject({ comissaoTipo: "descontada", previstoBrl: 298176n, previstoVendaBrl: 310600n });
@@ -441,6 +443,15 @@ describe("comissões", () => {
     expect(semComissao.f.contas.find((k) => k.id === x.hotel.id)!.comissao).toBeNull();
     expect(semComissao.f.divergencias).toBe(1); // só o hotel (previsto atual ≠ o da venda); a comissão cancelada não conta
     expect(semComissao.ponte.map((l) => l.rotulo).some((r) => r.startsWith("Comissão"))).toBe(false);
+    // sem linhas fantasma: "Fornecedores escolhidos" não mexe, nada de "valor atualizado"; a troca (cheio → líquido,
+    // sem comissão) não muda a margem, então a ponte é só planejada → real
+    expect(valorDe(semComissao.ponte, "Fornecedores escolhidos")).toBe(valorDe(r0.ponte, "Fornecedores escolhidos"));
+    expect(semComissao.ponte.map((l) => l.rotulo).some((r) => r.endsWith("valor atualizado"))).toBe(false);
+    expect(semComissao.ponte.slice(1, -1).reduce((a, l) => a + l.valor, 0n)).toBe(semComissao.real.final - semComissao.planejada.final);
+    // margem real sobe: a comissão pendente deixou de ser um custo a recuperar
+    expect(semComissao.real.final - r0.real.final).toBe(
+      -(valorDe(r0.ponte, "Comissão pendente: Palazzo Hotels") ?? 0n) + (valorDe(semComissao.ponte, "Imposto") ?? 0n) - (valorDe(r0.ponte, "Imposto") ?? 0n),
+    );
     expect(await comSessao(x.fin.id, () => registrarComissao(x.comissao.id, { recebidaEm: "2026-11-21", valorRecebido: "1,00" }))).toEqual({
       ok: false,
       erro: "Comissão cancelada",
@@ -465,6 +476,10 @@ describe("comissões", () => {
     expect(cs[0]).toMatchObject({ id: x.comissao.id, valorPrevisto: 12424n, previstaPara: "2027-09-30", status: "prevista", baseBrl: 310600n });
     [p] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.hotel.id));
     expect(p).toMatchObject({ valorOriginal: 298176n, valorBrlPrevisto: 298176n });
+    // de volta ao tipo vendido: a ponte é a mesma do começo
+    const r2 = await estrategico(x.fin.id, x.viagemId);
+    expect(r2.ponte).toEqual(r0.ponte);
+    expect(r2.real).toEqual(r0.real);
     const aud = await db.select().from(auditoria).where(eq(auditoria.tabela, "comissoes")).orderBy(asc(auditoria.id));
     expect(aud.map((a) => a.acao)).toEqual(["criar", "alterar", "alterar"]);
     expect(aud[1]).toMatchObject({ antes: { status: "prevista" }, depois: { status: "cancelada" } });
@@ -537,6 +552,14 @@ describe("contas a pagar", () => {
       erro: "Escreva o motivo da alteração",
     });
     expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.passeio.id, "x", "Reajuste"))).toMatchObject({ ok: false, erro: "Valor inválido" });
+    // abaixo do já pago: recusado
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagAereo.id, { pagoEm: "2026-11-21", valorOriginalPago: "7.520,00" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.aereo.id, "7.519,99", "Reembolso"))).toEqual({
+      ok: false,
+      erro: "O valor previsto não pode ser menor que o já pago (R$ 7.520,00)",
+      campos: { valorBrl: "O valor previsto não pode ser menor que o já pago (R$ 7.520,00)" },
+    });
+    expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.aereo.id, "7.520,00", "Valor final"))).toEqual({ ok: true });
     expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.passeio.id, "684,00", "Fornecedor cobrou R$ 184 a mais"))).toEqual({ ok: true });
     const [c] = await db.select().from(contasPagar).where(eq(contasPagar.id, x.passeio.id));
     expect(c).toMatchObject({ previstoBrl: 68400n, previstoVendaBrl: 50000n, motivoPrevisto: "Fornecedor cobrou R$ 184 a mais" });
@@ -616,7 +639,7 @@ describe("obterViagemVendida", () => {
       const f = (await ficha(uid, x.viagemId))!;
       expect(f.estrategico).toBeUndefined();
       const s = json(f);
-      expect(s).not.toMatch(/margem|ponte|imposto/i);
+      expect(s).not.toMatch(/margem|ponte|imposto|planejada|fixo|"real"|taxaPrevista|taxaEfetiva/i);
       expect(f.parcelas[0]).not.toHaveProperty("taxaPrevista");
     }
 

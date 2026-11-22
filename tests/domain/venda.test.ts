@@ -587,6 +587,76 @@ describe("ponteDaMargem", () => {
     expect(somaMeio(p.linhas)).toBe(p.real.final - planejada.final);
   });
 
+  describe("troca do tipo de comissão depois da venda", () => {
+    // Hotel cheio 310600, líquido 298176, comissão 12424; preço 1.000.000; imposto 7%.
+    const planejada = { custo: 298176n, imposto: 49128n, taxa: 0n, fixo: 0n, final: 652696n };
+    const base = { planejada, preco: 1000000n, impostoPct: "7.000", taxaRoteiro: 0n, parcelas: [] };
+    const hotel = { rotulo: "Hotel", aereo: false, moeda: "BRL" as const, pagoBrl: null };
+
+    it("vendida a receber, passou a descontada: nenhuma linha fantasma", () => {
+      const p = ponteDaMargem({
+        ...base,
+        contas: [
+          {
+            ...hotel,
+            previstoVendaBrl: 310600n,
+            previstoBrl: 298176n,
+            comissaoNaVenda: 12424n,
+            trocaDeTipo: { para: "descontada", previstoNaVenda: 298176n, comissaoPrevista: 0n },
+          },
+        ],
+        comissoes: [],
+      });
+      expect(p.linhas).toEqual([
+        { rotulo: "Margem planejada", valor: 652696n },
+        { rotulo: "Margem real", valor: 652696n },
+      ]);
+    });
+
+    it("vendida descontada, passou a a receber: só a comissão pendente (e o imposto)", () => {
+      const p = ponteDaMargem({
+        ...base,
+        contas: [
+          {
+            ...hotel,
+            previstoVendaBrl: 298176n,
+            previstoBrl: 310600n,
+            comissaoNaVenda: 0n,
+            trocaDeTipo: { para: "a_receber", previstoNaVenda: 310600n, comissaoPrevista: 12424n },
+          },
+        ],
+        comissoes: [{ fornecedor: "Hotel", aereo: false, valorPrevisto: 12424n, valorRecebido: null }],
+      });
+      expect(p.linhas).toEqual([
+        { rotulo: "Margem planejada", valor: 652696n },
+        { rotulo: "Comissão pendente: Hotel", valor: -12424n },
+        { rotulo: "Imposto", valor: 870n },
+        { rotulo: "Margem real", valor: 641142n },
+      ]);
+    });
+
+    it("troca que muda o valor: uma linha com o efeito; previsto atualizado depois conta à parte", () => {
+      const p = ponteDaMargem({
+        ...base,
+        contas: [
+          {
+            ...hotel,
+            previstoVendaBrl: 298176n,
+            previstoBrl: 311600n,
+            comissaoNaVenda: 0n,
+            trocaDeTipo: { para: "a_receber", previstoNaVenda: 310600n, comissaoPrevista: 12000n },
+          },
+        ],
+        comissoes: [{ fornecedor: "Hotel", aereo: false, valorPrevisto: 12000n, valorRecebido: 12000n }],
+      });
+      const linhas = p.linhas.map((l) => l.rotulo);
+      expect(linhas).not.toContain("Fornecedores escolhidos");
+      expect(p.linhas).toContainEqual({ rotulo: "Comissão: Hotel passou a ser a receber", valor: -424n });
+      expect(p.linhas).toContainEqual({ rotulo: "Hotel: valor atualizado", valor: -1000n });
+      expect(somaMeio(p.linhas)).toBe(p.real.final - planejada.final);
+    });
+  });
+
   it("Aéreo fica fora da ponte e da margem; comissão recebida com valor diferente aparece", () => {
     const planejada = { custo: 500000n, imposto: 35000n, taxa: 0n, fixo: 0n, final: 1000000n - 500000n - 35000n };
     const p = ponteDaMargem({
