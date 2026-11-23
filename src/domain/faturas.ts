@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { StatusParcela } from "./venda";
 
 // Faturas (spec §6.4): uma por venda, numeradas na emissão pelo financeiro; reemissão mantém o número com um novo
 // retrato fixo. "Desatualizada" é calculada na leitura: o retrato da última versão comparado às parcelas atuais
@@ -49,4 +50,23 @@ export function totaisDaFatura(d: {
     numerosCancelados: (d.parcelasCanceladas ?? []).map((p) => `${p.numero}/${p.total}`).join(", "),
     aPagar: d.parcelas.reduce((s, p) => s + BigInt(p.valor), 0n),
   };
+}
+
+/** Situação atual de uma parcela do cliente (na fatura e na impressão: a da data de hoje, não a da emissão). */
+export type SituacaoParcela = "recebida" | "cancelada" | "vencida" | "vence_hoje" | "a_vencer";
+
+export const ROTULO_SITUACAO_PARCELA: Record<SituacaoParcela, string> = {
+  recebida: "Recebida",
+  cancelada: "Cancelada",
+  vencida: "Vencida",
+  vence_hoje: "Vence hoje",
+  a_vencer: "A vencer",
+};
+
+/** Recebida e cancelada pelo status; em aberto, pela data de vencimento comparada a `hoje` (AAAA-MM-DD). */
+export function situacaoDaParcela(p: { status: StatusParcela; vencimento: string }, hoje: string): SituacaoParcela {
+  if (p.status === "recebida") return "recebida";
+  if (p.status === "cancelada") return "cancelada";
+  if (p.vencimento < hoje) return "vencida";
+  return p.vencimento === hoje ? "vence_hoje" : "a_vencer";
 }

@@ -1,13 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { hojeEmCuiaba } from "@/domain/clientes";
 import { formatarReais } from "@/domain/dinheiro";
+import { ROTULO_SITUACAO_PARCELA, situacaoDaParcela } from "@/domain/faturas";
 import { formatarDocumento } from "@/domain/venda";
-import { obterFatura } from "@/server/queries/faturas";
+import { obterFatura, type ParcelaDaFatura } from "@/server/queries/faturas";
 import { BotaoImprimir } from "../../../../viagens/[id]/proposta/imprimir";
 import { dataBr, dataCurta } from "../../../../viagens/formatos";
 
 // Página de impressão da fatura (mesmo padrão da proposta): mostra o retrato fixo da versão escolhida (padrão: a
-// última). Layout provisório do protótipo até chegar o modelo FATURA_1405.
+// última) e, ao lado de cada parcela do retrato, a situação atual dela (na data da impressão, não na da emissão).
+// Layout provisório do protótipo até chegar o modelo FATURA_1405.
 
 export default async function Pagina({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ versao?: string }> }) {
   const { id } = await params;
@@ -18,6 +21,8 @@ export default async function Pagina({ params, searchParams }: { params: Promise
   const d = f.dados;
   const t = f.totais;
   const ultima = f.versao === f.versoes.at(-1);
+  const hoje = hojeEmCuiaba();
+  const atual = new Map(f.parcelas.map((p) => [p.numero, p]));
 
   return (
     <article className="mx-auto max-w-[820px] text-texto print:max-w-none">
@@ -104,7 +109,10 @@ export default async function Pagina({ params, searchParams }: { params: Promise
             <tr className="border-b border-linha text-left text-[11px] font-bold uppercase tracking-[0.06em] text-cinza">
               <th className="py-2 pr-3">Parcela</th>
               <th className="py-2 pr-3">Vencimento</th>
-              <th className="py-2 text-right">Valor</th>
+              <th className="py-2 pr-3 text-right">Valor</th>
+              <th className="py-2 pl-3">
+                Situação em <span className="num">{dataBr(hoje)}</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -114,12 +122,33 @@ export default async function Pagina({ params, searchParams }: { params: Promise
                   {p.numero}/{p.total}
                 </td>
                 <td className="num py-2 pr-3">{dataBr(p.vencimento)}</td>
-                <td className="num py-2 text-right">{formatarReais(BigInt(p.valor))}</td>
+                <td className="num py-2 pr-3 text-right">{formatarReais(BigInt(p.valor))}</td>
+                <td className="py-2 pl-3">
+                  <SituacaoImpressa parcela={atual.get(p.numero)} hoje={hoje} />
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        <p className="mt-2 text-[12px] text-cinza">
+          Situação de cada parcela na data da impressão (<span className="num">{dataBr(hoje)}</span>); os valores e vencimentos são os da emissão.
+        </p>
       </section>
     </article>
   );
+}
+
+/** Situação atual da parcela do retrato (por número). Vencida em ouro, com borda (a impressão descarta fundos). */
+function SituacaoImpressa({ parcela, hoje }: { parcela: ParcelaDaFatura | undefined; hoje: string }) {
+  if (!parcela) return <span className="text-cinza">—</span>;
+  const s = situacaoDaParcela(parcela, hoje);
+  const rotulo = ROTULO_SITUACAO_PARCELA[s];
+  if (s === "vencida") return <span className="rounded-[4px] border border-ouro px-1.5 py-0.5 text-[12.5px] font-semibold text-ouro">{rotulo}</span>;
+  if (s === "recebida")
+    return (
+      <span className="text-[12.5px] font-semibold text-verde">
+        {rotulo} <span className="num font-normal text-cinza">em {dataBr(parcela.recebidaEm)}</span>
+      </span>
+    );
+  return <span className={s === "cancelada" ? "text-[12.5px] text-cinza line-through" : "text-[12.5px] text-texto"}>{rotulo}</span>;
 }

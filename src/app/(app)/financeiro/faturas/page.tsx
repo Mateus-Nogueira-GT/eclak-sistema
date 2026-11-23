@@ -4,6 +4,7 @@ import { Badge, Card, CardHeader, Eyebrow, PageHeader } from "@/components/ui";
 import { Grade } from "@/components/kit";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { formatarReais } from "@/domain/dinheiro";
+import { ROTULO_SITUACAO_PARCELA, situacaoDaParcela, type SituacaoParcela } from "@/domain/faturas";
 import { formatarDocumento } from "@/domain/venda";
 import { listarFaturas, obterFatura, proximoNumeroFatura, vendasParaFaturar, type ParcelaDaFatura } from "@/server/queries/faturas";
 import { dataBr, dataCurta } from "../../viagens/formatos";
@@ -13,12 +14,16 @@ type Params = Record<string, string | string[] | undefined>;
 
 const primeiro = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) || undefined;
 
+const TOM_SITUACAO: Record<SituacaoParcela, "agua" | "ouro" | "verde" | undefined> = { recebida: "agua", cancelada: undefined, vencida: "ouro", vence_hoje: "verde", a_vencer: undefined };
+
 function Situacao({ p, hoje }: { p: ParcelaDaFatura; hoje: string }) {
-  if (p.status === "recebida") return <Badge tom="agua">Recebida em {dataBr(p.recebidaEm)}</Badge>;
-  if (p.status === "cancelada") return <Badge>Cancelada</Badge>;
-  if (p.vencimento < hoje) return <Badge tom="ouro">Vencida</Badge>;
-  if (p.vencimento === hoje) return <Badge tom="verde">Vence hoje</Badge>;
-  return <Badge>A vencer</Badge>;
+  const s = situacaoDaParcela(p, hoje);
+  return (
+    <Badge tom={TOM_SITUACAO[s]}>
+      {ROTULO_SITUACAO_PARCELA[s]}
+      {s === "recebida" ? ` em ${dataBr(p.recebidaEm)}` : ""}
+    </Badge>
+  );
 }
 
 export default async function Pagina({ searchParams }: { searchParams: Promise<Params> }) {

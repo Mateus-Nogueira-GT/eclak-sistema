@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { numeroFaturaSchema, parcelasMudaram, totaisDaFatura, type ParcelaRetrato } from "@/domain/faturas";
+import { ROTULO_SITUACAO_PARCELA, numeroFaturaSchema, parcelasMudaram, situacaoDaParcela, totaisDaFatura, type ParcelaRetrato } from "@/domain/faturas";
 
 const p = (numero: number, vencimento: string, valor: string, total = 2): ParcelaRetrato => ({ numero, total, vencimento, valor });
 
@@ -44,5 +44,17 @@ describe("totaisDaFatura", () => {
 
   it("versão antiga sem `canceladas`: zero", () => {
     expect(totaisDaFatura(base)).toEqual({ venda: 9_000_000n, canceladas: 0n, numerosCancelados: "", aPagar: 3_800_000n });
+  });
+});
+
+describe("situacaoDaParcela (achado 7: situação na impressão)", () => {
+  const hoje = "2026-11-22";
+  it("recebida, cancelada, vencida, vence hoje e a vencer; status vence a data", () => {
+    expect(situacaoDaParcela({ status: "recebida", vencimento: "2026-01-01" }, hoje)).toBe("recebida");
+    expect(situacaoDaParcela({ status: "cancelada", vencimento: "2026-01-01" }, hoje)).toBe("cancelada");
+    expect(situacaoDaParcela({ status: "a_receber", vencimento: "2026-11-21" }, hoje)).toBe("vencida");
+    expect(situacaoDaParcela({ status: "a_receber", vencimento: hoje }, hoje)).toBe("vence_hoje");
+    expect(situacaoDaParcela({ status: "a_receber", vencimento: "2026-11-23" }, hoje)).toBe("a_vencer");
+    expect(ROTULO_SITUACAO_PARCELA).toEqual({ recebida: "Recebida", cancelada: "Cancelada", vencida: "Vencida", vence_hoje: "Vence hoje", a_vencer: "A vencer" });
   });
 });
