@@ -3,7 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { hojeEmCuiaba } from "@/domain/clientes";
-import { competenciaDe, type Origem } from "@/domain/financeiro";
+import { competenciaDe, desfazerDaParcela, type Origem } from "@/domain/financeiro";
 import { MSG_LOTE_LADOS, MSG_LOTE_RECUSADO } from "@/domain/financeiro-entrada";
 import { MSG_CONCILIADA, MSG_PARCELA_RECEBIDA } from "@/domain/venda-entrada";
 import { ErroAcesso } from "@/server/auth";
@@ -18,8 +18,8 @@ import {
   parcelasReceber,
   viagens,
 } from "@/server/db/schema";
-import { baixarEmLote, baixarLancamento, baixarLinha, baixarRepasse, criarLancamento, desfazerBaixaLinha } from "@/server/actions/financeiro";
-import { baixarPagamento, baixarParcela, definirFormaFornecedor } from "@/server/actions/financeiro-viagem";
+import { baixarEmLote, baixarLancamento, baixarLinha, baixarRepasse, criarLancamento, desfazerBaixaLinha, desfazerRepasse } from "@/server/actions/financeiro";
+import { baixarPagamento, baixarParcela, cancelarParcela, definirFormaFornecedor } from "@/server/actions/financeiro-viagem";
 import { listarLancamentos } from "@/server/queries/financeiro";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
@@ -302,6 +302,26 @@ describe("lista única de lançamentos", () => {
     const [rep] = (await listar(x.fin.id)).linhas.filter((l) => l.origem === "parcela");
     expect(await comSessao(x.fin.id, () => baixarRepasse(x.parcelas[0].id, { data: hoje, valorRepassado: reais(rep.valorPrevisto), contaBancariaId: cb }))).toEqual({ ok: true });
     expect((await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, x.pagHotel.id)))[0]).toMatchObject({ status: "pago", repasseParcelaId: x.parcelas[0].id });
+  });
+
+  it("achado 3: desfazer cancelamento na linha cancelada da parcela, pelo caminho certo (boleto e cartão direto)", async () => {
+    const x = await vendida();
+    const y = await vendida({ cartao: "hotel" });
+    for (const p of [x.parcelas[1], y.parcelas[0]]) {
+      expect(await comSessao(x.fin.id, () => cancelarParcela(p.id, "Cliente pediu"))).toEqual({ ok: true });
+    }
+    const canceladas = (await listar(x.fin.id, { situacao: "cancelada" })).linhas.filter((l) => l.origem === "parcela");
+    expect(canceladas.map((l) => l.id).sort()).toEqual([x.parcelas[1].id, y.parcelas[0].id].sort());
+    for (const l of canceladas) {
+      const via = desfazerDaParcela(l.forma);
+      expect(via).toBe(l.id === y.parcelas[0].id ? "repasse" : "parcela");
+      const r = await comSessao(x.fin.id, () => (via === "repasse" ? desfazerRepasse(l.id) : desfazerBaixaLinha("parcela", l.id)));
+      expect(r).toEqual({ ok: true });
+    }
+    const ps = await db.select().from(parcelasReceber).where(inArray(parcelasReceber.id, [x.parcelas[1].id, y.parcelas[0].id]));
+    expect(ps.map((p) => p.status)).toEqual(["a_receber", "a_receber"]);
+    // de volta, a do cartão direto é de novo o repasse
+    expect((await listar(x.fin.id)).linhas.find((l) => l.id === y.parcelas[0].id)).toMatchObject({ repasse: true, forma: "cartao_fornecedor" });
   });
 
   it("situação em aberto: vencidas, de hoje e a vencer (sem baixadas e canceladas); totais iguais", async () => {

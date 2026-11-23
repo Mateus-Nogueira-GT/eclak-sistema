@@ -7,6 +7,7 @@ import { Grade, Semaforo, SoGestao } from "@/components/kit";
 import { Badge, Botao, Campo, Card, CardHeader, Eyebrow, Select, Tabs, inputCls } from "@/components/ui";
 import { formatarCambio } from "@/domain/cambio";
 import { formatarReais, lerReais } from "@/domain/dinheiro";
+import { desfazerDaParcela } from "@/domain/financeiro";
 import { ROTULO_FORMA_FORNECEDOR, type ComissaoTipo, type FormaPagamentoFornecedorTipo, type LinhaPonte } from "@/domain/venda";
 import {
   atualizarPrevisto,
@@ -714,7 +715,7 @@ function Entradas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: 
     doCartao(p) && cartao?.fornecedor ? (
       <span key="f" className="flex flex-col">
         {p.rotuloMeio}
-        <span className="text-[12px] text-cinza">Repasse de {cartao.fornecedor}{cartao.repasseEsperado !== null ? `: esperado ${formatarReais(cartao.repasseEsperado)}` : ""}</span>
+        <span className="text-[12px] text-cinza">Repasse de {cartao.fornecedor}{p.status !== "cancelada" && cartao.repasseEsperado !== null ? `: esperado ${formatarReais(cartao.repasseEsperado)}` : ""}</span>
       </span>
     ) : (
       p.rotuloMeio
@@ -748,6 +749,14 @@ function Entradas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: 
       </span>
     ) : agir && p.status === "recebida" ? (
       <AcaoDireta key="a" rotulo="Desfazer baixa" mini variante="fantasma" executar={() => desfazerBaixaParcela(p.id)} />
+    ) : agir && p.status === "cancelada" ? (
+      <AcaoDireta
+        key="a"
+        rotulo="Desfazer cancelamento"
+        mini
+        variante="fantasma"
+        executar={() => (desfazerDaParcela(p.meio) === "repasse" ? desfazerRepasse(p.id) : desfazerBaixaParcela(p.id))}
+      />
     ) : null,
   ]);
   return (

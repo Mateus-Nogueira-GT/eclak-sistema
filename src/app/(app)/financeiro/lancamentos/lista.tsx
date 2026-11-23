@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Plus, Search } from "lucide-react";
 import { Badge, Botao, Card, Eyebrow, Select, Tabs, cx, inputCls } from "@/components/ui";
-import { rotuloForma, rotuloSituacao, type Lado, type Origem, type Situacao } from "@/domain/financeiro";
+import { desfazerDaParcela, rotuloForma, rotuloSituacao, type Lado, type Origem, type Situacao } from "@/domain/financeiro";
 import { motivoForaDoLote, type FiltroLancamentos } from "@/domain/financeiro-entrada";
 import { formatarReais } from "@/domain/dinheiro";
 import { baixarEmLote, desfazerBaixaLinha, desfazerRepasse } from "@/server/actions/financeiro";
@@ -136,11 +136,12 @@ export function ListaLancamentos(p: Props) {
   }
 
   function desfazer(l: LinhaLancamento) {
-    if (!window.confirm(`Desfazer a baixa de "${l.pessoa || l.descricao}"? A linha volta a ficar em aberto.`)) return;
+    const oQue = l.statusBase === "cancelado" ? "o cancelamento" : "a baixa";
+    if (!window.confirm(`Desfazer ${oQue} de "${l.pessoa || l.descricao}"? A linha volta a ficar em aberto.`)) return;
     setAviso(null);
     iniciar(async () => {
       try {
-        const r = l.origem === "parcela" && l.repasse ? await desfazerRepasse(l.id) : await desfazerBaixaLinha(l.origem, l.id);
+        const r = l.origem === "parcela" && desfazerDaParcela(l.forma) === "repasse" ? await desfazerRepasse(l.id) : await desfazerBaixaLinha(l.origem, l.id);
         if (r.ok) router.refresh();
         else setAviso(r.erro);
       } catch {
@@ -404,6 +405,11 @@ export function ListaLancamentos(p: Props) {
                         {baixada && l.transitaCaixa && (
                           <Botao variante="fantasma" className="!px-3 !py-1.5 !text-[13px]" disabled={pendente} onClick={() => desfazer(l)}>
                             {l.repasse ? "Desfazer repasse" : "Desfazer baixa"}
+                          </Botao>
+                        )}
+                        {l.origem === "parcela" && l.statusBase === "cancelado" && (
+                          <Botao variante="fantasma" className="!px-3 !py-1.5 !text-[13px]" disabled={pendente} onClick={() => desfazer(l)}>
+                            Desfazer cancelamento
                           </Botao>
                         )}
                       </div>

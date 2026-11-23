@@ -10,6 +10,7 @@ import {
   SITUACOES,
   centroDaFilial,
   competenciaDe,
+  desfazerDaParcela,
   datasRecorrentes,
   dividirEmParcelas,
   rotuloSituacao,
@@ -144,5 +145,12 @@ describe("motivoForaDoLote", () => {
     expect(motivoForaDoLote({ ...base, origem: "parcela", repasse: true, exigeIndividual: true })).toMatch(/escolha o fornecedor/);
     expect(motivoForaDoLote({ ...base, origem: "pagamento", transitaCaixa: false })).toMatch(/Não passa pelo caixa/);
     expect(motivoForaDoLote({ ...base, origem: "pagamento", exigeIndividual: true })).toMatch(/moeda estrangeira/);
+  });
+});
+
+describe("desfazerDaParcela (achado 3: desfazer cancelamento ou baixa pelo caminho certo)", () => {
+  it("cartão direto no fornecedor volta pelo repasse; os demais meios pela baixa da parcela", () => {
+    expect(desfazerDaParcela("cartao_fornecedor")).toBe("repasse");
+    for (const meio of ["pix", "boleto", "cartao_credito"]) expect(desfazerDaParcela(meio)).toBe("parcela");
   });
 });

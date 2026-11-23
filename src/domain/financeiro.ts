@@ -74,6 +74,15 @@ export function rotuloForma(origem: Origem, slug: string): string {
   return Object.hasOwn(tabela, slug) ? tabela[slug] : slug;
 }
 
+/**
+ * Por onde desfazer a baixa ou o cancelamento de uma parcela do cliente, pelo meio (slug `forma` da view): a de cartão
+ * direto no fornecedor volta pelo repasse (`desfazerRepasse`); as demais pela baixa da parcela. Pelo meio e não pela
+ * coluna `repasse` da view, que é falsa na parcela de cartão direto cancelada.
+ */
+export function desfazerDaParcela(meio: string): "repasse" | "parcela" {
+  return meio === "cartao_fornecedor" ? "repasse" : "parcela";
+}
+
 export const SITUACOES = ["vencida", "vence_hoje", "a_vencer", "baixada", "cancelada"] as const;
 export type Situacao = (typeof SITUACOES)[number];
 
