@@ -340,7 +340,7 @@ export type ViagemVendida = {
   contas: ContaVendida[];
   comissoes: ComissaoVendida[];
   /**
-   * Só na venda "Cartão direto no fornecedor": a parcela, o fornecedor que recebeu no cartão (nulo em venda antiga,
+   * Só na venda "Cartão direto no fornecedor" com a parcela não cancelada: a parcela, o fornecedor que recebeu no cartão (nulo em venda antiga,
    * sem ele), as opções (fornecedores com conta ativa na viagem) e o repasse esperado da view
    * `lancamentos_financeiros` (fonte única; nulo sem fornecedor).
    */
@@ -698,7 +698,9 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
     aPagar: soma(linhasAtivas.filter((p) => p.status !== "pago").map((p) => p.valorBrlPrevisto)),
   };
 
-  const parcelaCartao = ps.find((p) => p.meio === "cartao_fornecedor");
+  // Cartão direto ativo: parcela `cartao_fornecedor` não cancelada (a mesma condição do `cartao_direto` da view e de
+  // `vendaCartaoDireto`). Cancelada, a venda deixa de ser de cartão direto e as contas do fornecedor voltam à baixa.
+  const parcelaCartao = ps.find((p) => p.meio === "cartao_fornecedor" && p.status !== "cancelada");
   let cartaoFornecedor: ViagemVendida["cartaoFornecedor"] = null;
   if (parcelaCartao) {
     const opcoes = new Map<string, string>();

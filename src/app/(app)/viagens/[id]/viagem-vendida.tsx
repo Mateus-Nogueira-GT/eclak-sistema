@@ -715,7 +715,7 @@ function Entradas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: 
     doCartao(p) && cartao?.fornecedor ? (
       <span key="f" className="flex flex-col">
         {p.rotuloMeio}
-        <span className="text-[12px] text-cinza">Repasse de {cartao.fornecedor}{p.status !== "cancelada" && cartao.repasseEsperado !== null ? `: esperado ${formatarReais(cartao.repasseEsperado)}` : ""}</span>
+        <span className="text-[12px] text-cinza">Repasse de {cartao.fornecedor}{cartao.repasseEsperado !== null ? `: esperado ${formatarReais(cartao.repasseEsperado)}` : ""}</span>
       </span>
     ) : (
       p.rotuloMeio

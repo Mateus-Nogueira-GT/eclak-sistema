@@ -605,6 +605,8 @@ describe("repasse do cartão direto no fornecedor", () => {
     expect(await comSessao(x.fin.id, () => cancelarParcela(x.parcelas[0].id, "Cliente pagou à parte"))).toEqual({ ok: true });
     expect((await pagamentoNaView()).transitaCaixa).toBe(true);
     expect(await linhaDaView(x.parcelas[0].id)).toMatchObject({ repasse: false, statusBase: "cancelado", valorPrevisto: x.parcelas[0].valor });
+    // A tela da viagem segue a mesma regra: sem cartão direto ativo, a conta do hotel volta a ter "Dar baixa".
+    expect((await comSessao(x.fin.id, () => obterViagemVendida(x.viagemId)))!.cartaoFornecedor).toBeNull();
     expect(await baixa()).toEqual({ ok: true });
   });
 
