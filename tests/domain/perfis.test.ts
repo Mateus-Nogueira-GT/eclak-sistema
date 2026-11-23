@@ -16,6 +16,12 @@ describe("perfis", () => {
     expect(podeAcessar("diretor", "/admin/usuarios")).toBe(true);
     expect(podeAcessar("diretor", "/admin/parametros/x")).toBe(true);
   });
+  it("clientes: todos os perfis acessam", () => {
+    for (const p of PERFIS_VALORES) {
+      expect(podeAcessar(p, "/clientes")).toBe(true);
+      expect(podeAcessar(p, "/clientes/novo")).toBe(true);
+    }
+  });
   it("veCamadaEstrategica", () => {
     for (const p of ["diretor", "fin_operacional", "fin_estrategico"] as const)
       expect(veCamadaEstrategica(p)).toBe(true);
