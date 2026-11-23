@@ -127,7 +127,7 @@ export function Categorias({ grupos }: { grupos: GrupoCategorias[] }) {
             <Eyebrow className="!text-verde">{g.grupo}</Eyebrow>
             <ul className="mt-2 divide-y divide-linha">
               {g.categorias.map((c) => (
-                <Linha key={c.id + c.nome} lado={lado} grupo={g.grupo} c={c} avisar={setMsg} />
+                <Linha key={c.id} lado={lado} grupo={g.grupo} c={c} avisar={setMsg} />
               ))}
             </ul>
           </div>

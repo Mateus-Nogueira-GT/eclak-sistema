@@ -378,11 +378,12 @@ export async function baixarLancamento(id: string, dados: unknown) {
         juros: v.juros,
         desconto: v.desconto,
         baixaContaBancariaId: v.contaBancariaId,
+        // A observação da baixa entra em nova linha no fim da observação do lançamento; desfazer a baixa não a remove.
+        observacao: v.observacao ? (l.observacao ? `${l.observacao}\n${v.observacao}` : v.observacao) : l.observacao,
       };
       await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, id));
-      // A observação da baixa não tem coluna: fica na auditoria.
       const antes = Object.fromEntries(Object.keys(depois).map((k) => [k, l[k as keyof LancamentoLinha]]));
-      await registrarAuditoria(tx, { usuarioId: u.id, tabela: "lancamentos", registroId: id, acao: "alterar", antes, depois: { ...depois, observacao: v.observacao } });
+      await registrarAuditoria(tx, { usuarioId: u.id, tabela: "lancamentos", registroId: id, acao: "alterar", antes, depois });
       return { ok: true, id };
     });
     if (r.ok) revalidar();

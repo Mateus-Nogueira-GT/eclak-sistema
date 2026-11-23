@@ -1,11 +1,10 @@
 import "server-only";
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, isNull, sql } from "drizzle-orm";
 import type { Lado } from "@/domain/financeiro";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
 import { categoriasFinanceiras, contasBancarias, lancamentos } from "@/server/db/schema";
-import { isNull } from "drizzle-orm";
 
 export type CategoriaItem = {
   id: string;

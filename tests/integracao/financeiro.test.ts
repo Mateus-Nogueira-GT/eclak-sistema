@@ -179,6 +179,16 @@ describe("financeiro: categorias, contas e lançamentos manuais", () => {
       expect(l).toMatchObject({ status: "baixado", baixadoEm: "2026-11-01", valorPago: 95000n, baixaContaBancariaId: c.conta });
     });
 
+    it("observação da baixa é anexada à do lançamento, sobrevive ao desfazer e vai na auditoria", async () => {
+      const [id] = await criar({ observacao: "Original" });
+      expect((await comSessao(c.fin, () => baixarLancamento(id, { ...B(), valorPago: "950,00", observacao: "Pago com multa" }))).ok).toBe(true);
+      expect((await linhas([id]))[0].observacao).toBe("Original\nPago com multa");
+      await comSessao(c.fin, () => desfazerBaixaLancamento(id));
+      expect((await linhas([id]))[0].observacao).toBe("Original\nPago com multa");
+      const aud = await db.select().from(auditoria).where(and(eq(auditoria.registroId, id), eq(auditoria.acao, "alterar")));
+      expect(aud[0].depois).toMatchObject({ observacao: "Original\nPago com multa" });
+    });
+
     it("juros e desconto entram na conta: 1000 + 50 - 20 = 1030 não pede observação", async () => {
       const [id] = await criar();
       const r = await comSessao(c.fin, () => baixarLancamento(id, { ...B(), contaBancariaId: c.conta, valorPago: "1.030,00", juros: "50,00", desconto: "20,00" }));
