@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, getTableColumns, gte, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, gte, inArray, isNull, lte, ne, not, or, sql, type SQL } from "drizzle-orm";
 import type { Moeda } from "@/domain/cambio";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { LADOS, type Lado, type Origem, type Situacao } from "@/domain/financeiro";
@@ -129,14 +129,21 @@ function periodo(f: FiltroLancamentos): SQL {
 
 const escaparLike = (t: string) => t.replace(/[\\%_]/g, (c) => `\\${c}`);
 
-/** Filtros comuns à lista, à contagem e aos totais (sem lado, situação e período). */
+/**
+ * Filtros comuns à lista, à contagem e aos totais (sem lado, situação e período). As compras de uma fatura do
+ * cartão corporativo (`fatura_cartao_id`) nunca aparecem: a lista mostra a linha da fatura no lugar delas.
+ * Origem "viagem" = parcelas, pagamentos e comissões; "manual" = o resto (lançamentos à mão e faturas do cartão).
+ */
 function filtrosComuns(f: FiltroLancamentos): SQL[] {
-  const c: SQL[] = [];
+  const c: SQL[] = [isNull(lf.faturaCartaoId)];
   if (f.categoriaId) c.push(eq(lf.categoriaId, f.categoriaId));
   if (f.grupo) c.push(eq(categoriasFinanceiras.grupo, f.grupo));
   if (f.centro) c.push(eq(lf.centro, f.centro));
   if (f.contaBancariaId) c.push(eq(lf.contaBancariaId, f.contaBancariaId));
-  if (f.origem) c.push(f.origem === "manual" ? eq(lf.origem, "manual") : ne(lf.origem, "manual"));
+  if (f.origem) {
+    const daViagem = inArray(lf.origem, ["parcela", "pagamento", "comissao"]);
+    c.push(f.origem === "viagem" ? daViagem : not(daViagem));
+  }
   if (f.busca) {
     const p = `%${escaparLike(f.busca)}%`;
     // Sem acento e sem caixa em descrição e pessoa; código da viagem e número da fatura como texto.

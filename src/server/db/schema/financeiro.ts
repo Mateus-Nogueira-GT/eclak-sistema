@@ -198,8 +198,9 @@ export const faturasVersoes = pgTable(
 );
 
 /**
- * Lista única (spec §6.1): lançamentos manuais, parcelas, pagamentos a fornecedor e comissões, normalizados.
- * Definida na migração custom 0021_view_lancamentos.sql; `forma` vem em slug (o rótulo é mapeado em TS).
+ * Lista única (spec §6.1): lançamentos manuais, parcelas, pagamentos a fornecedor, comissões e faturas do cartão
+ * corporativo, normalizados. Criada na migração custom 0021_view_lancamentos.sql; a versão vigente é a
+ * 0033_view_fatura_cartao.sql. `forma` vem em slug (o rótulo é mapeado em TS).
  */
 export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
   origem: text("origem").$type<Origem>().notNull(),
@@ -232,4 +233,9 @@ export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
   valorCaixaBaixado: centavos("valor_caixa_baixado"),
   /** Data em que entra/sai do caixa (crédito com antecipação: o primeiro vencimento em aberto do cartão da venda). */
   dataCaixa: date("data_caixa").notNull(),
+  /**
+   * Fatura do cartão corporativo da compra (manual ou pagamento de viagem; fora do caixa e escondida da lista, que
+   * mostra a fatura). Nulo nas demais linhas e na própria linha da fatura (0033).
+   */
+  faturaCartaoId: uuid("fatura_cartao_id"),
 }).existing();

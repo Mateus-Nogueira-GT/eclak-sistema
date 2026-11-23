@@ -17,9 +17,9 @@ export const ROTULO_TIPO_CAIXA: Record<TipoCaixa, string> = {
 /**
  * Tipo da linha da lista única no fluxo de caixa (ruling 3): parcelas = Clientes, pagamentos de viagem =
  * Fornecedores, comissões = Comissões, manuais = Empresa (mesmo numa categoria das viagens; a categoria do sistema
- * não muda o tipo). A fatura do cartão (Task 6) entra como Cartão.
+ * não muda o tipo). A fatura do cartão entra como Cartão (as compras dela não passam pelo caixa).
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- assinatura do plano; a fatura do cartão (Task 6) pode usar
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- assinatura do plano: o tipo sai só da origem
 export function tipoCaixaDaLinha(origem: Origem, categoriaSistema: string | null): TipoCaixa {
   switch (origem) {
     case "parcela":
@@ -30,6 +30,8 @@ export function tipoCaixaDaLinha(origem: Origem, categoriaSistema: string | null
       return "comissoes";
     case "manual":
       return "empresa";
+    case "fatura_cartao":
+      return "cartao";
   }
 }
 

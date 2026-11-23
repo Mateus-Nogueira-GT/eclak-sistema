@@ -232,6 +232,13 @@
       "when": 1795422598436,
       "tag": "0032_cartoes_rls_categoria",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795424774766,
+      "tag": "0033_view_fatura_cartao",
+      "breakpoints": true
     }
   ]
 }

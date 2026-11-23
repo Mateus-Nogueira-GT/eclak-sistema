@@ -115,4 +115,8 @@ describe("tipoCaixaDaLinha", () => {
     expect(tipoCaixaDaLinha("manual", "vendas_viagem")).toBe("empresa");
     expect(tipoCaixaDaLinha("manual", "fornecedores_viagem")).toBe("empresa");
   });
+
+  it("fatura do cartão → cartão", () => {
+    expect(tipoCaixaDaLinha("fatura_cartao", "cartao_corporativo")).toBe("cartao");
+  });
 });

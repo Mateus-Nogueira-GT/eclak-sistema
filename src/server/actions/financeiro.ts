@@ -5,6 +5,7 @@ import type { ZodError } from "zod";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { dividirEmParcelas, datasRecorrentes, ORIGENS, ROTULO_FORMA_FINANCEIRO, type FormaFinanceiroSlug, type Origem } from "@/domain/financeiro";
 import {
+  MSG_BAIXA_FATURA_CARTAO,
   MSG_FORMA,
   MSG_LOTE_LADOS,
   MSG_LOTE_RECUSADO,
@@ -586,7 +587,10 @@ const NAO_ENCONTRADO: Record<Origem, Falha> = {
   parcela: PARCELA_NAO_ENCONTRADA,
   pagamento: falha("Pagamento não encontrado"),
   comissao: falha("Comissão não encontrada"),
+  fatura_cartao: falha("Fatura do cartão não encontrada"),
 };
+// Até a baixa da fatura do cartão (Task 7): a linha da fatura não tem baixa nem desfazer pela lista.
+const BAIXA_FATURA_CARTAO = falha(MSG_BAIXA_FATURA_CARTAO);
 
 /** Resultado do lançamento manual como a lista responde (sem ids), revalidando o financeiro. */
 async function noManual(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok | Falha>): Promise<{ ok: true } | Falha> {
@@ -627,6 +631,8 @@ export async function baixarLinha(origem: Origem, id: string, dados: unknown) {
         if (!p.success) return falhaDeValidacao(p.error);
         return naViagem("Erro ao registrar a comissão", (tx) => registrarComissaoNa(tx, u.id, id, p.data));
       }
+      case "fatura_cartao":
+        return BAIXA_FATURA_CARTAO;
     }
   });
 }
@@ -645,6 +651,8 @@ export async function desfazerBaixaLinha(origem: Origem, id: string) {
         return naViagem("Erro ao desfazer a baixa do pagamento", (tx) => desfazerBaixaPagamentoNa(tx, u.id, id));
       case "comissao":
         return naViagem("Erro ao desfazer a comissão", (tx) => desfazerComissaoNa(tx, u.id, id));
+      case "fatura_cartao":
+        return BAIXA_FATURA_CARTAO;
     }
   });
 }
@@ -714,6 +722,9 @@ async function baixarPeloPrevisto(tx: Transacao, usuarioId: string, l: LinhaLote
     }
     case "comissao":
       return registrarComissaoNa(tx, usuarioId, l.id, { recebidaEm: data, valorRecebido: l.valorPrevisto, contaBancariaId });
+    case "fatura_cartao":
+      // Não chega aqui (`motivoForaDoLote` a recusa antes).
+      return BAIXA_FATURA_CARTAO;
   }
 }
 

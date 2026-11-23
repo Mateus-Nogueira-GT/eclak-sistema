@@ -10,6 +10,8 @@ export const MSG_VALOR_ZERO = "Informe um valor maior que zero";
 export const MSG_FORMA = "Forma de pagamento inválida";
 export const MSG_DATA_FUTURA = "A data não pode ser futura";
 export const MSG_LINHA_REPETIDA = "Linha repetida no lote";
+/** Até a baixa da fatura do cartão existir (Task 7), a linha da fatura não tem baixa pela lista. */
+export const MSG_BAIXA_FATURA_CARTAO = "Dê baixa na fatura do cartão pela tela de cartões";
 export const MSG_LOTE_RECUSADO = "Tire do lote as linhas indicadas: elas pedem baixa individual";
 export const MSG_LOTE_LADOS = "Escolha linhas de um lado só (a pagar ou a receber)";
 const MSG_DATA = "Informe a data";
@@ -132,6 +134,7 @@ export type LinhaDoLote = {
 export function motivoForaDoLote(l: LinhaDoLote): string | null {
   if (l.statusBase === "baixado") return "Já baixada";
   if (l.statusBase === "cancelado") return "Cancelada";
+  if (l.origem === "fatura_cartao") return MSG_BAIXA_FATURA_CARTAO;
   if (l.repasse) return l.exigeIndividual ? "Repasse sem fornecedor do cartão: escolha o fornecedor na viagem" : "Repasse do cartão direto no fornecedor: dê baixa individual";
   if (!l.transitaCaixa) return "Não passa pelo caixa: pago pelo cliente no cartão do fornecedor";
   if (l.exigeIndividual) return "Pagamento em moeda estrangeira: dê baixa individual com o câmbio efetivo";

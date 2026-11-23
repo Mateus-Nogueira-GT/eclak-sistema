@@ -289,7 +289,7 @@ export function ListaLancamentos(p: Props) {
           <Select value={f.origem ?? ""} onChange={(o) => ir({ origem: o || undefined })}>
             <option value="">Viagens e lançados à mão</option>
             <option value="viagem">Só de viagens</option>
-            <option value="manual">Só lançados à mão</option>
+            <option value="manual">Só lançados à mão e faturas do cartão</option>
           </Select>
           {(f.situacao || f.categoriaId || f.grupo || f.centro || f.contaBancariaId || f.origem || f.busca) && (
             <Link href={urlDe(f, { situacao: undefined, categoriaId: undefined, grupo: undefined, centro: undefined, contaBancariaId: undefined, origem: undefined, busca: undefined })} className="py-2 text-[13px] font-semibold text-verde hover:underline" onClick={() => { setBusca(""); limparSelecao(); }}>
@@ -404,6 +404,8 @@ export function ListaLancamentos(p: Props) {
                     <td className="whitespace-nowrap px-3 py-3 text-[13px]">
                       {l.viagemId ? (
                         <Link href={`/viagens/${l.viagemId}`} className="font-semibold text-verde hover:underline">Viagem {l.viagemCodigo}</Link>
+                      ) : l.origem === "fatura_cartao" ? (
+                        <Link href="/financeiro/cartoes" className="font-semibold text-verde hover:underline">Compras do cartão</Link>
                       ) : (
                         <span className="text-cinza">Lançado à mão</span>
                       )}
@@ -415,7 +417,7 @@ export function ListaLancamentos(p: Props) {
                             Editar
                           </button>
                         )}
-                        {l.statusBase === "em_aberto" && l.transitaCaixa && !semFornecedor && (
+                        {l.statusBase === "em_aberto" && l.transitaCaixa && !semFornecedor && l.origem !== "fatura_cartao" && (
                           <Botao variante="secundario" className="!px-3 !py-1.5 !text-[13px]" onClick={() => setBaixando(l)}>
                             {l.repasse ? "Registrar repasse" : "Dar baixa"}
                           </Botao>
@@ -423,7 +425,7 @@ export function ListaLancamentos(p: Props) {
                         {semFornecedor && l.statusBase === "em_aberto" && (
                           <Link href={`/viagens/${l.viagemId}`} className="text-[13px] font-semibold text-verde hover:underline">Escolher na viagem</Link>
                         )}
-                        {baixada && l.transitaCaixa && (
+                        {baixada && l.transitaCaixa && l.origem !== "fatura_cartao" && (
                           <Botao variante="fantasma" className="!px-3 !py-1.5 !text-[13px]" disabled={pendente} onClick={() => desfazer(l)}>
                             {l.repasse ? "Desfazer repasse" : "Desfazer baixa"}
                           </Botao>
@@ -488,7 +490,13 @@ export function ListaLancamentos(p: Props) {
   );
 }
 
-const ROTULO_ORIGEM: Record<Origem, string> = { manual: "Lançado à mão", parcela: "Parcela do cliente", pagamento: "Pagamento a fornecedor", comissao: "Comissão" };
+const ROTULO_ORIGEM: Record<Origem, string> = {
+  manual: "Lançado à mão",
+  parcela: "Parcela do cliente",
+  pagamento: "Pagamento a fornecedor",
+  comissao: "Comissão",
+  fatura_cartao: "Fatura do cartão",
+};
 
 /** Anexos de qualquer linha da lista (abre pelo clipe da linha). */
 function DialogoAnexos({ linha, dono, anexos, onFechar }: { linha: LinhaLancamento | null; dono: { origem: Origem; id: string }; anexos: AnexoItem[]; onFechar: () => void }) {

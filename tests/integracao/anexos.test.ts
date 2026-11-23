@@ -5,7 +5,7 @@ vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSup
 import { TAMANHO_MAXIMO_ANEXO } from "@/domain/anexos";
 import { ErroAcesso } from "@/server/auth";
 import { db, sql } from "@/server/db/client";
-import { anexos, auditoria, categoriasFinanceiras, lancamentos } from "@/server/db/schema";
+import { anexos, auditoria, cartoesCorporativos, categoriasFinanceiras, contasBancarias, faturasCartao, lancamentos } from "@/server/db/schema";
 import { enviarAnexo, linkDoAnexo, removerAnexo } from "@/server/actions/anexos";
 import { listarAnexos } from "@/server/queries/anexos";
 import { listarLancamentos } from "@/server/queries/financeiro";
@@ -139,14 +139,25 @@ describe("anexos: envio, link assinado e remoção", () => {
     expect(a.tamanho).toBe(TAMANHO_MAXIMO_ANEXO);
   });
 
-  it("dono inexistente, id inválido ou tipo de dono ainda não suportado: Lançamento não encontrado", async () => {
+  it("dono inexistente, id inválido ou tipo de dono desconhecido: Lançamento não encontrado (fatura do cartão: a mensagem dela)", async () => {
     const NAO = { ok: false, erro: "Lançamento não encontrado" };
     expect(await enviar("manual", "00000000-0000-4000-8000-000000000000")).toEqual(NAO);
     expect(await enviar("manual", "nao-e-uuid")).toEqual(NAO);
     expect(await enviar("parcela", c.manual)).toEqual(NAO);
-    expect(await enviar("fatura_cartao", c.manual)).toEqual(NAO);
+    expect(await enviar("fatura_cartao", c.manual)).toEqual({ ok: false, erro: "Fatura do cartão não encontrada" });
     expect(await enviar("qualquer", c.manual)).toEqual(NAO);
     expect(await db.select().from(anexos)).toEqual([]);
+  });
+
+  it("anexo na fatura do cartão (linha da lista)", async () => {
+    const [cb] = await db.insert(contasBancarias).values({ nome: "Itaú", saldoInicialEm: "2026-01-01" }).returning();
+    const [k] = await db.insert(cartoesCorporativos).values({ nome: "Visa", final: "1234", diaFechamento: 15, diaVencimento: 25, contaBancariaId: cb.id, centro: "MT" }).returning();
+    const [f] = await db.insert(faturasCartao).values({ cartaoId: k.id, fechamento: "2027-01-15", vencimento: "2027-01-25" }).returning();
+    const r = await enviar("fatura_cartao", f.id);
+    expect(r.ok).toBe(true);
+    const [a] = await db.select().from(anexos);
+    subidos.push(a.caminho);
+    expect(a).toMatchObject({ donoTipo: "fatura_cartao", donoId: f.id });
   });
 
   it("linkDoAnexo devolve URL assinada que baixa o mesmo conteúdo", async () => {
