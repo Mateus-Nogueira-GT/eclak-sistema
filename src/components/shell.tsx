@@ -11,7 +11,14 @@ import { cx } from "./ui";
 type Item = { href: string; label: string };
 const areas: { titulo: string; itens: Item[] }[] = [
   { titulo: "Comercial", itens: [{ href: "/clientes", label: "Clientes" }] },
-  { titulo: "Operação", itens: [{ href: "/fornecedores", label: "Fornecedores" }] },
+  {
+    titulo: "Operação",
+    itens: [
+      { href: "/viagens", label: "Viagens" },
+      { href: "/fornecedores", label: "Fornecedores" },
+    ],
+  },
+  { titulo: "Gestão", itens: [{ href: "/aprovacoes", label: "Aprovações" }] },
   {
     titulo: "Administração",
     itens: [
@@ -44,7 +51,7 @@ export function Shell({
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
-      <header className="sticky top-0 z-30">
+      <header className="sticky top-0 z-30 print:hidden">
         <div className="border-b border-linha bg-white">
           <div className="mx-auto flex h-[64px] max-w-[1440px] items-center gap-4 px-4 md:gap-8 md:px-8">
             <Link href={ROTAS_POR_PERFIL[perfil][0]} className="shrink-0" aria-label="ECLAK Viagens, início">
@@ -89,7 +96,7 @@ export function Shell({
           </nav>
         </div>
       </header>
-      <main className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-4 pb-20 pt-6 md:px-8 md:pt-9">{children}</main>
+      <main className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-4 pb-20 pt-6 md:px-8 md:pt-9 print:max-w-none print:p-0">{children}</main>
     </div>
   );
 }

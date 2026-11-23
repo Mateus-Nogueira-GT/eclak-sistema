@@ -3,10 +3,12 @@
 import { useState, useTransition } from "react";
 import { Botao, Card, CardHeader, PageHeader, Select } from "@/components/ui";
 import { Grade, SoGestao } from "@/components/kit";
+import { cambioAplicado, formatarCambio, lerCambio } from "@/domain/cambio";
 import { lerPercentual, lerReais } from "@/domain/dinheiro";
 import {
   CAMPOS,
   METODOS_RATEIO,
+  MOEDAS_ESTRANGEIRAS,
   ROTULO_METODO,
   formatarValor,
   valorNoCaminho,
@@ -20,7 +22,7 @@ const campoCls =
 
 function textosDe(valores: Regras): Record<string, string> {
   return Object.fromEntries(
-    CAMPOS.map((c) => [c.caminho, c.tipo === "metodo" ? String(valorNoCaminho(valores, c.caminho)) : formatarValor(c.tipo, valorNoCaminho(valores, c.caminho))]),
+    CAMPOS.map((c) => [c.caminho, c.tipo === "metodo" || c.tipo === "data" ? String(valorNoCaminho(valores, c.caminho)) : formatarValor(c.tipo, valorNoCaminho(valores, c.caminho))]),
   );
 }
 
@@ -34,6 +36,15 @@ function lerCampo(c: CampoRegra, texto: string): string | number {
     case "inteiro":
       if (!/^\d+$/.test(texto.trim())) throw new Error("Valor inválido");
       return Number(texto.trim());
+    case "cambio":
+      return lerCambio(texto);
+    case "data": {
+      const t = texto.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(t) || new Date(`${t}T00:00:00Z`).toISOString().slice(0, 10) !== t) {
+        throw new Error("Data inválida");
+      }
+      return t;
+    }
     default:
       return texto;
   }
@@ -49,8 +60,8 @@ function montar(textos: Record<string, string>): { valores: Regras | null; erros
       let alvo = obj;
       for (const p of partes.slice(0, -1)) alvo = (alvo[p] ??= {}) as Record<string, unknown>;
       alvo[partes.at(-1)!] = v;
-    } catch {
-      erros[c.caminho] = "Valor inválido";
+    } catch (e) {
+      erros[c.caminho] = e instanceof Error && /inválid/.test(e.message) ? e.message : "Valor inválido";
     }
   }
   return { valores: Object.keys(erros).length ? null : (obj as Regras), erros };
@@ -106,6 +117,7 @@ export function Formulario({ valores, desde }: { valores: Regras; desde: string 
         ) : (
           <input
             id={id}
+            type={c.tipo === "data" ? "date" : "text"}
             aria-label={c.rotulo}
             aria-invalid={erro ? true : undefined}
             className={`${campoCls} ${erro ? "border-ouro bg-ouro/15" : "border-linha"} ${extra}`}
@@ -117,6 +129,16 @@ export function Formulario({ valores, desde }: { valores: Regras; desde: string 
         {erro && <span className="text-[12px] text-texto">{erro}</span>}
       </div>
     );
+  }
+
+  /** Câmbio com acréscimo, ao vivo; vazio enquanto algum dos dois campos estiver inválido. */
+  function comAcrescimo(m: string): string {
+    try {
+      const acr = lerPercentual(textos["acrescimoCambioPct"] ?? "");
+      return formatarCambio(cambioAplicado(lerCambio(textos[`cambio.${m}.comercial`] ?? ""), acr));
+    } catch {
+      return "";
+    }
   }
 
   const por = (g: string) => CAMPOS.filter((c) => c.grupo === g);
@@ -173,13 +195,25 @@ export function Formulario({ valores, desde }: { valores: Regras; desde: string 
             ])}
           />
         </Card>
-        <Card>
-          <CardHeader eyebrow="Regra: câmbio comercial mais o acréscimo" title="Câmbio" right={entrada(cambio, "!w-[90px]")} />
-          <p className="px-6 pb-5 pt-3 text-[13px] text-cinza">
-            Valores em moeda estrangeira aparecem sempre com a conversão em reais, o câmbio usado e a data do câmbio.
-          </p>
-        </Card>
       </div>
+
+      <Card className="mb-5">
+        <CardHeader eyebrow="Regra: câmbio comercial mais o acréscimo" title="Câmbio" right={entrada(cambio, "!w-[90px]")} />
+        <Grade
+          className="mt-3"
+          right={[1, 2]}
+          head={["Moeda", "Comercial", "Com acréscimo", "Data do câmbio"]}
+          rows={MOEDAS_ESTRANGEIRAS.map((m) => [
+            <b key="m" className="font-semibold">{m}</b>,
+            entrada(CAMPOS.find((x) => x.caminho === `cambio.${m}.comercial`)!, "!w-[110px]"),
+            <b key="a" className="font-semibold">{comAcrescimo(m)}</b>,
+            entrada(CAMPOS.find((x) => x.caminho === `cambio.${m}.data`)!, "!w-[150px]"),
+          ])}
+        />
+        <p className="px-6 pb-5 pt-3 text-[13px] text-cinza">
+          Valores em moeda estrangeira aparecem sempre com a conversão em reais, o câmbio usado e a data do câmbio.
+        </p>
+      </Card>
     </>
   );
 }

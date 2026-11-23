@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatarCambio, lerCambio } from "./cambio";
 import { formatarPercentual, formatarReais } from "./dinheiro";
 
 // Formato canônico no JSON:
@@ -27,6 +28,26 @@ export const ROTULO_METODO: Record<(typeof METODOS_RATEIO)[number], string> = {
   por_viagem: "Valor fixo por viagem",
 };
 
+const comercial = z.string({ error: "Câmbio inválido" }).refine((t) => {
+  try {
+    return lerCambio(t) === t;
+  } catch {
+    return false;
+  }
+}, "Câmbio inválido");
+
+const dataCambio = z
+  .string({ error: "Data inválida" })
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida")
+  .refine((t) => {
+    const d = new Date(`${t}T00:00:00Z`);
+    return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === t;
+  }, "Data inválida");
+
+const cotacao = z.object({ comercial, data: dataCambio });
+
+export const MOEDAS_ESTRANGEIRAS = ["USD", "EUR", "GBP", "CHF"] as const;
+
 export const RegrasSchema = z.object({
   impostoSobreMargemPct: pct,
   margemAlvoPct: pct,
@@ -54,6 +75,7 @@ export const RegrasSchema = z.object({
     .max(10, "Informe de 1 a 10"),
   cotacoesParaSugestao: contagem,
   acrescimoCambioPct: pct,
+  cambio: z.object({ USD: cotacao, EUR: cotacao, GBP: cotacao, CHF: cotacao }),
   taxas: z.object({
     pix: pct,
     cartaoDiretoFornecedor: pct,
@@ -86,6 +108,12 @@ export const REGRAS_INICIAIS: Regras = {
   parcelamentoMaximo: 10,
   cotacoesParaSugestao: 3,
   acrescimoCambioPct: "4.500",
+  cambio: {
+    USD: { comercial: "5.4210", data: "2026-11-06" },
+    EUR: { comercial: "5.8930", data: "2026-11-06" },
+    GBP: { comercial: "6.9120", data: "2026-11-06" },
+    CHF: { comercial: "6.1040", data: "2026-11-06" },
+  },
   taxas: {
     pix: "0.000",
     cartaoDiretoFornecedor: "0.000",
@@ -98,8 +126,8 @@ export const REGRAS_INICIAIS: Regras = {
   },
 };
 
-export type TipoCampo = "reais" | "pct" | "inteiro" | "metodo";
-export type GrupoCampo = "regras" | "taxas" | "cambio";
+export type TipoCampo = "reais" | "pct" | "inteiro" | "metodo" | "cambio" | "data";
+export type GrupoCampo = "regras" | "taxas" | "cambio" | "moedas";
 
 export type CampoRegra = {
   caminho: string;
@@ -152,7 +180,17 @@ export const CAMPOS: CampoRegra[] = [
   c("taxas.antecipacao1Parcela", "Antecipação: 1 parcela", "pct", "taxas", "", "Somada à taxa de cartão."),
   c("taxas.antecipacao10Parcelas", "Antecipação: 10 parcelas", "pct", "taxas", "", "Intermediárias por interpolação."),
   c("acrescimoCambioPct", "Acréscimo sobre o câmbio comercial", "pct", "cambio", "", "Regra: câmbio comercial mais este acréscimo."),
+  ...MOEDAS_ESTRANGEIRAS.flatMap((m) => [
+    c(`cambio.${m}.comercial`, `Câmbio ${m}`, "cambio", "moedas", "", "Câmbio comercial, 4 casas."),
+    c(`cambio.${m}.data`, `Câmbio ${m} (data)`, "data", "moedas", "", "Data da cotação."),
+  ]),
 ];
+
+/** Lê valores gravados em qualquer versão: o que não existia (câmbio) recebe os valores iniciais. */
+export function normalizarRegras(valores: unknown): Regras {
+  const base = (valores && typeof valores === "object" ? valores : {}) as Record<string, unknown>;
+  return RegrasSchema.parse(base.cambio === undefined ? { ...base, cambio: REGRAS_INICIAIS.cambio } : base);
+}
 
 export function valorNoCaminho(valores: Regras, caminho: string): unknown {
   let atual: unknown = valores;
@@ -170,6 +208,10 @@ export function formatarValor(tipo: TipoCampo, valor: unknown): string {
       return formatarReais(BigInt(String(valor)));
     case "pct":
       return formatarPercentual(String(valor));
+    case "cambio":
+      return formatarCambio(String(valor));
+    case "data":
+      return String(valor).split("-").reverse().join("/");
     case "metodo":
       return ROTULO_METODO[valor as keyof typeof ROTULO_METODO] ?? String(valor);
     default:

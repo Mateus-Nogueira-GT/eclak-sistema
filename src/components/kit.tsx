@@ -84,8 +84,22 @@ export function Linha({ rotulo, children }: { rotulo: string; children: ReactNod
   );
 }
 
-export function Semaforo({ margem }: { margem: number }) {
-  const [cor, texto] = margem >= 25 ? ["bg-agua", "Na meta"] : margem >= 19 ? ["bg-ouro", "No alvo"] : ["bg-alerta", "Abaixo do alvo"];
+/** "19.0", "-3.25" → milésimos inteiros (sem ponto flutuante). */
+function milesimos(p: string): bigint {
+  const neg = p.trim().startsWith("-");
+  const [i, d = ""] = p.trim().replace("-", "").split(".");
+  const v = BigInt(i || "0") * 1000n + BigInt(d.padEnd(3, "0").slice(0, 3));
+  return neg ? -v : v;
+}
+
+/**
+ * Margem frente à alvo e à referência dos Parâmetros (`margemAlvoPct`, `margemReferenciaPct`). Sem vermelho:
+ * abaixo do alvo é ouro. Percentuais em texto ("19.0", "19.000").
+ */
+export function Semaforo({ margemPct, alvoPct, referenciaPct }: { margemPct: string; alvoPct: string; referenciaPct: string }) {
+  const m = milesimos(margemPct);
+  const [cor, texto] =
+    m >= milesimos(alvoPct) ? ["bg-agua", "No alvo"] : m >= milesimos(referenciaPct) ? ["bg-ouro", "Abaixo do alvo"] : ["bg-ouro", "Abaixo da referência"];
   return (
     <span className="inline-flex items-center gap-2 whitespace-nowrap text-[13px] font-semibold text-texto">
       <span className={cx("h-2.5 w-2.5 rounded-full", cor)} /> {texto}

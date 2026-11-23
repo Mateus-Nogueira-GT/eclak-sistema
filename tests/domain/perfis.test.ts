@@ -22,6 +22,22 @@ describe("perfis", () => {
       expect(podeAcessar(p, "/clientes/novo")).toBe(true);
     }
   });
+  it("viagens: todos os perfis acessam", () => {
+    for (const p of PERFIS_VALORES) {
+      expect(podeAcessar(p, "/viagens")).toBe(true);
+      expect(podeAcessar(p, "/viagens/novo")).toBe(true);
+      expect(podeAcessar(p, "/viagens/abc/proposta")).toBe(true);
+      expect(podeAcessar(p, "/viagensX")).toBe(false);
+    }
+  });
+  it("aprovações: só o diretor acessa", () => {
+    expect(podeAcessar("diretor", "/aprovacoes")).toBe(true);
+    expect(podeAcessar("diretor", "/aprovacoes/x")).toBe(true);
+    expect(podeAcessar("diretor", "/aprovacoesX")).toBe(false);
+    for (const p of PERFIS_VALORES.filter((x) => x !== "diretor")) {
+      expect(podeAcessar(p, "/aprovacoes")).toBe(false);
+    }
+  });
   it("veCamadaEstrategica", () => {
     for (const p of ["diretor", "fin_operacional", "fin_estrategico"] as const)
       expect(veCamadaEstrategica(p)).toBe(true);
