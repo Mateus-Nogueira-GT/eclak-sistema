@@ -189,10 +189,9 @@ Materiais pendentes da 5a: PDFs reais TAREFAS e RT (conferir colunas e layout da
 
 ### 8.0 Histórico: escopo da 4b (entregue no PR #6)
 
-A 4b está pronta na branch `claude/fatia-4b-caixa`; abrir o PR (`--base main`) só com o "sim" do Mateus. Depois, a **fatia 5 — Operação** (desenho geral, seção 6): tarefas, roteiros (RT com DICA ECLAK e "Por que escolhemos"), dailies (texto de encerramento ainda pendente do cliente), reembolsos, estoque por filial (tipo `Produto`), caixa de experiência e avisos por setor (notificações). Materiais ainda pendentes do cliente: modelo `FATURA_1405_…pdf`, plano de categorias do Conta Azul, `CUSTOS FIXOS.xlsx`, `PLANILHA NOTAS FISCAIS.xlsx`.
-
-### 8.0 Histórico: escopo da 4b (entregue)
 Escopo no desenho (`docs/superpowers/specs/2026-11-22-fatia-4-financeiro-design.md`, §6.5) e notas na seção "Para a 4b" do plano da 4a: fluxo de caixa com projeção de 12 meses (realizado + previsto da view `lancamentos_financeiros`, só `transita_caixa`), meta de reserva de 6 meses de custo fixo, anexos e notas fiscais (Supabase Storage, primeiro uso), faturas de cartão corporativo (custo variável, IOF). Referências no protótipo: `src/app/{fluxo-de-caixa,notas-fiscais,relatorios}/page.tsx`, `src/components/{reserva-projecao,cash-chart,operacionais}.tsx`, `src/lib/calc.ts`.
+
+Materiais ainda pendentes do cliente (4b): modelo `FATURA_1405_…pdf`, plano de categorias do Conta Azul, `CUSTOS FIXOS.xlsx`, `PLANILHA NOTAS FISCAIS.xlsx`.
 
 ### 8.1 Referência: Conta Azul (pedido da Valeska)
 O financeiro segue o Conta Azul (lista única, categorias grupo › categoria, competência, centro de custo MT/RS, formas de pagamento, baixa, conciliação, fluxo de caixa, DRE). A 4a já cobre lista, baixas, categorias, parcelamento e recorrência.
