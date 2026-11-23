@@ -1,5 +1,5 @@
 /**
- * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores, os clientes fictícios do protótipo, três orçamentos (aguardando, aprovado e devolvido) e duas viagens vendidas (Ribeiro, em viagem; e uma conciliada).
+ * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores, os clientes fictícios do protótipo, três orçamentos (aguardando, aprovado e devolvido) e duas viagens vendidas (Ribeiro, em viagem; e uma conciliada), duas contas bancárias, lançamentos manuais do protótipo e a fatura da Ribeiro.
  * Recusa rodar se DATABASE_URL ou NEXT_PUBLIC_SUPABASE_URL não forem locais. Idempotente: o que já existe é pulado.
  */
 import { config } from "dotenv";
@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import { garantirBancoLocal } from "./local-guard";
 import { semearOrcamentos } from "./seed-orcamentos";
+import { semearFinanceiro } from "./seed-financeiro";
 import { semearVendas } from "./seed-vendas";
 
 config({ path: ".env.local", quiet: true });
@@ -255,7 +256,8 @@ async function main() {
     }
     const orcamentosNovos = await semearOrcamentos(sql);
     const vendasNovas = await semearVendas(sql);
-    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s) e ${vendasNovas} viagem(ns) vendida(s) criados.`);
+    const fin = await semearFinanceiro(sql);
+    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s), ${vendasNovas} viagem(ns) vendida(s), ${fin.lancamentos} lançamento(s) e ${fin.faturas} fatura(s) criados.`);
     console.log(`Logins: ${USUARIOS.map((u) => u.email).join(", ")} (senha ${SENHA})`);
   } finally {
     await sql.end();

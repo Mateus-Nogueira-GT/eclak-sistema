@@ -48,7 +48,16 @@ Toda tabela de `public` tem RLS ligado e nenhuma política para `anon`/`authenti
 
 ## Seed local
 
-`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
+`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Também semeia o financeiro (contas Banco do Brasil e Bradesco PJ, lançamentos manuais do protótipo com datas relativas a hoje, alguns já baixados, e a fatura da Família Ribeiro). Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
+
+## Financeiro
+
+Área só do Diretor e dos perfis financeiros (Financeiro › Lançamentos, Faturas, Contas bancárias e Categorias).
+
+- **Lista única de lançamentos** (a pagar e a receber): os lançamentos manuais (únicos, parcelados ou recorrentes) e as linhas das viagens (parcelas, pagamentos a fornecedores e comissões) aparecem juntos. A baixa individual ou em lote é a mesma da tela da viagem: o que se baixa de um lado aparece no outro.
+- **Conta bancária obrigatória** em toda baixa nova.
+- **Cartão direto no fornecedor** (cliente paga no cartão e o fornecedor repassa): a lista mostra uma linha de repasse; a baixa informa o valor repassado, e a diferença para o esperado vira taxa da forma.
+- **Faturas** numeradas a partir de 1405, sem buracos (rollback não consome número). Reemitir mantém o número e guarda um novo retrato. Enquanto não houver nenhuma fatura, o próximo número pode ser ajustado em Admin › Parâmetros.
 
 ## Deploy (produção)
 
