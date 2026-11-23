@@ -1,7 +1,9 @@
 import { Card, CardHeader } from "@/components/ui";
 import { Grade } from "@/components/kit";
+import { proximoNumeroFatura } from "@/server/queries/faturas";
 import { historicoRegras, regrasVigentes } from "@/server/queries/regras";
 import { Formulario } from "./formulario";
+import { NumeracaoFaturas } from "./numeracao-faturas";
 
 const quando = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Cuiaba",
@@ -19,7 +21,7 @@ function dataHora(d: Date): string {
 }
 
 export default async function Pagina() {
-  const [vigentes, historico] = await Promise.all([regrasVigentes(), historicoRegras()]);
+  const [vigentes, historico, numeracao] = await Promise.all([regrasVigentes(), historicoRegras(), proximoNumeroFatura()]);
   const desde =
     vigentes.vigenteDesde.getTime() === 0
       ? "valores iniciais"
@@ -28,6 +30,7 @@ export default async function Pagina() {
   return (
     <div className="mx-auto max-w-[1180px]">
       <Formulario valores={vigentes.valores} desde={desde} />
+      <NumeracaoFaturas proximo={numeracao.proximo} haFaturas={numeracao.haFaturas} />
       <Card>
         <CardHeader eyebrow="Quem mudou, quando e o valor anterior" title="Histórico de alterações" />
         {historico.length === 0 ? (
