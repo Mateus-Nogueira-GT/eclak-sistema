@@ -8,9 +8,11 @@ import { obterCliente } from "@/server/queries/clientes";
 import { listarContasBancarias } from "@/server/queries/financeiro";
 import { listarFornecedores } from "@/server/queries/fornecedores";
 import { regrasVigentes } from "@/server/queries/regras";
+import { cabecalhoDaViagem } from "@/server/queries/operacao";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { obterPrecificacao } from "@/server/queries/viagens";
 import { Painel, type Extras } from "./painel";
+import { Trilha } from "./trilha";
 import { ViagemVendidaView } from "./viagem-vendida";
 
 /** Passaporte dos passageiros × volta (só orçamento aprovado ou viagem vendida, internacional). */
@@ -48,6 +50,7 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
 
   if (ficha.status === "vendida") {
     const vendida = await obterViagemVendida(id);
+    const cabecalho = vendida ? await cabecalhoDaViagem(id) : null;
     if (vendida) {
       const estrategico = veCamadaEstrategica(usuario.perfil);
       const regras = estrategico ? (await regrasVigentes()).valores : null;
@@ -56,6 +59,7 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
       return (
         <div className="mx-auto max-w-[1240px]">
           <BlocoEmbarque avisos={avisos} />
+          {cabecalho && <Trilha viagem={cabecalho} ativa="viagem" />}
           <ViagemVendidaView
             v={vendida}
             ficha={ficha}

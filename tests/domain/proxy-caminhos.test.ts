@@ -32,3 +32,11 @@ describe("área Financeiro", () => {
     for (const r of rotas) expect(podeAcessar(perfil, r)).toBe(true);
   });
 });
+
+describe("área Operação (fatia 5)", () => {
+  const rotas = ["/tarefas", "/roteiros", "/dailies", "/viagens/x/roteiro/imprimir"];
+  it.each(rotas)("proxy guarda %s", (p) => expect(deveProteger(p)).toBe(true));
+  it.each(["consultor", "operacional"] as const)("%s passa", (perfil) => {
+    for (const r of rotas) expect(podeAcessar(perfil, r)).toBe(true);
+  });
+});

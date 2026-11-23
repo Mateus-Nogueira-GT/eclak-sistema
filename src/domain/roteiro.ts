@@ -9,6 +9,9 @@ import { somarDias } from "./venda";
 export const IDIOMAS = ["italiano", "espanhol", "frances", "ingles", "alemao", "portugues"] as const;
 export type Idioma = (typeof IDIOMAS)[number];
 
+export const STATUS_ROTEIRO = ["rascunho", "aguardando_cliente", "aprovado"] as const;
+export type StatusRoteiro = (typeof STATUS_ROTEIRO)[number];
+
 export const ROTULO_IDIOMA: Record<Idioma, string> = {
   italiano: "Italiano",
   espanhol: "Espanhol",

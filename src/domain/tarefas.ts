@@ -12,6 +12,10 @@ export const CATEGORIAS_TAREFA = [
 ] as const;
 export type CategoriaTarefa = (typeof CATEGORIAS_TAREFA)[number];
 
+export const TIPOS_PRAZO = ["data", "dias_antes"] as const;
+export const ORIGENS_TAREFA = ["manual", "venda", "roteiro"] as const;
+export type OrigemTarefa = (typeof ORIGENS_TAREFA)[number];
+
 export const ROTULO_CATEGORIA: Record<CategoriaTarefa, string> = {
   ingressos: "Emitir ingressos e bilhetes com horário",
   transfers_passeios: "Transfers e passeios",
