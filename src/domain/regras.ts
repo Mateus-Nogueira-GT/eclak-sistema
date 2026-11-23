@@ -48,6 +48,9 @@ const cotacao = z.object({ comercial, data: dataCambio });
 
 export const MOEDAS_ESTRANGEIRAS = ["USD", "EUR", "GBP", "CHF"] as const;
 
+export const ENCERRAMENTO_INICIAL =
+  "Qualquer dúvida, nosso customer care está à disposição no WhatsApp. Aproveitem o dia!\nEquipe ECLAK Viagens";
+
 export const RegrasSchema = z.object({
   impostoSobreMargemPct: pct,
   margemAlvoPct: pct,
@@ -76,6 +79,12 @@ export const RegrasSchema = z.object({
   cotacoesParaSugestao: contagem,
   acrescimoCambioPct: pct,
   cambio: z.object({ USD: cotacao, EUR: cotacao, GBP: cotacao, CHF: cotacao }),
+  encerramentoDaily: z
+    .string({ error: "Informe o texto de encerramento" })
+    .trim()
+    .min(1, "Informe o texto de encerramento")
+    .max(1000, "Texto muito longo")
+    .default(ENCERRAMENTO_INICIAL),
   taxas: z.object({
     pix: pct,
     cartaoDiretoFornecedor: pct,
@@ -88,7 +97,7 @@ export const RegrasSchema = z.object({
   }),
 });
 
-export type Regras = z.infer<typeof RegrasSchema>;
+export type Regras = z.output<typeof RegrasSchema>;
 
 export const REGRAS_INICIAIS: Regras = {
   impostoSobreMargemPct: "7.000",
@@ -114,6 +123,7 @@ export const REGRAS_INICIAIS: Regras = {
     GBP: { comercial: "6.9120", data: "2026-11-06" },
     CHF: { comercial: "6.1040", data: "2026-11-06" },
   },
+  encerramentoDaily: ENCERRAMENTO_INICIAL,
   taxas: {
     pix: "0.000",
     cartaoDiretoFornecedor: "0.000",
@@ -126,8 +136,8 @@ export const REGRAS_INICIAIS: Regras = {
   },
 };
 
-export type TipoCampo = "reais" | "pct" | "inteiro" | "metodo" | "cambio" | "data";
-export type GrupoCampo = "regras" | "taxas" | "cambio" | "moedas";
+export type TipoCampo = "reais" | "pct" | "inteiro" | "metodo" | "cambio" | "data" | "texto";
+export type GrupoCampo = "regras" | "taxas" | "cambio" | "moedas" | "operacao";
 
 export type CampoRegra = {
   caminho: string;
@@ -180,6 +190,7 @@ export const CAMPOS: CampoRegra[] = [
   c("taxas.antecipacao1Parcela", "Antecipação: 1 parcela", "pct", "taxas", "", "Somada à taxa de cartão."),
   c("taxas.antecipacao10Parcelas", "Antecipação: 10 parcelas", "pct", "taxas", "", "Intermediárias por interpolação."),
   c("acrescimoCambioPct", "Acréscimo sobre o câmbio comercial", "pct", "cambio", "", "Regra: câmbio comercial mais este acréscimo."),
+  c("encerramentoDaily", "Encerramento do daily", "texto", "operacao", "Dailies", "Última parte de toda mensagem diária ao cliente."),
   ...MOEDAS_ESTRANGEIRAS.flatMap((m) => [
     c(`cambio.${m}.comercial`, `Câmbio ${m}`, "cambio", "moedas", "", "Câmbio comercial, 4 casas."),
     c(`cambio.${m}.data`, `Câmbio ${m} (data)`, "data", "moedas", "", "Data da cotação."),
@@ -212,6 +223,8 @@ export function formatarValor(tipo: TipoCampo, valor: unknown): string {
       return formatarCambio(String(valor));
     case "data":
       return String(valor).split("-").reverse().join("/");
+    case "texto":
+      return String(valor);
     case "metodo":
       return ROTULO_METODO[valor as keyof typeof ROTULO_METODO] ?? String(valor);
     default:

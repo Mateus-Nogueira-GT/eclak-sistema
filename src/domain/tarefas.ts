@@ -31,7 +31,7 @@ export function prazoEfetivo(prazo: Prazo | null, inicio: string): string | null
   return prazo.tipo === "data" ? prazo.data : somarDias(inicio, -prazo.dias);
 }
 
-const dataBr = (iso: string) => iso.split("-").reverse().join("/");
+export const dataBr = (iso: string) => iso.split("-").reverse().join("/");
 
 export function rotuloPrazo(prazo: Prazo | null, inicio: string): string {
   const efetivo = prazoEfetivo(prazo, inicio);

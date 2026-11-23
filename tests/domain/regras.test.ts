@@ -90,3 +90,29 @@ describe("câmbio nas regras", () => {
     ]);
   });
 });
+
+describe("encerramentoDaily", () => {
+  const inicial =
+    "Qualquer dúvida, nosso customer care está à disposição no WhatsApp. Aproveitem o dia!\nEquipe ECLAK Viagens";
+
+  it("tem o texto inicial do spec", () => {
+    expect(REGRAS_INICIAIS.encerramentoDaily).toBe(inicial);
+  });
+
+  it("versão sem o campo recebe o texto inicial", () => {
+    const antiga: Record<string, unknown> = { ...REGRAS_INICIAIS };
+    delete antiga.encerramentoDaily;
+    expect(normalizarRegras(antiga)).toEqual(REGRAS_INICIAIS);
+  });
+
+  it("recusa texto em branco ou longo demais", () => {
+    expect(RegrasSchema.safeParse({ ...REGRAS_INICIAIS, encerramentoDaily: "  " }).success).toBe(false);
+    expect(RegrasSchema.safeParse({ ...REGRAS_INICIAIS, encerramentoDaily: "a".repeat(1001) }).success).toBe(false);
+  });
+
+  it("aparece no histórico quando alterado", () => {
+    expect(diferencasRegras(REGRAS_INICIAIS, { ...REGRAS_INICIAIS, encerramentoDaily: "Novo texto" })).toEqual([
+      { campo: "Encerramento do daily", antes: inicial, depois: "Novo texto" },
+    ]);
+  });
+});
