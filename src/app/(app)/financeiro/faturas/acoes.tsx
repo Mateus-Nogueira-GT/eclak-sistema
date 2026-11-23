@@ -14,12 +14,12 @@ function Erro({ erro }: { erro: string | null }) {
   );
 }
 
-export function BotaoEmitir({ vendaId, proximo }: { vendaId: string; proximo: number }) {
+export function BotaoEmitir({ vendaId }: { vendaId: string }) {
   const acao = useAcao();
   return (
     <span className="inline-flex flex-col items-end">
       <Botao className="!px-3 !py-1.5 !text-[13px]" disabled={acao.pendente} onClick={() => acao.executar(() => emitirFatura(vendaId))}>
-        <FileText size={14} /> Emitir fatura {proximo}
+        <FileText size={14} /> Emitir fatura
       </Botao>
       <Erro erro={acao.erro} />
     </span>

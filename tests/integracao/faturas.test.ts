@@ -48,6 +48,8 @@ describe("emitirFatura", () => {
       total: expect.any(String),
       forma: "Boleto em 2x",
       parcelas: x.parcelas.map((p) => ({ numero: p.numero, total: 2, vencimento: p.vencimento, valor: p.valor.toString() })),
+      canceladas: "0",
+      parcelasCanceladas: [],
     });
     const [venda] = await db.select().from(vendas).where(eq(vendas.id, vx));
     expect(v1.dados.total).toBe(venda.total.toString());
@@ -137,6 +139,15 @@ describe("reemitirFatura", () => {
     const v1 = await comSessao(x.fin.id, () => obterFatura(f.id, 1));
     expect(v1).toMatchObject({ numero: 1405, versao: 1 });
     expect(v1!.dados.parcelas.map((p) => p.numero)).toEqual([1, 2]);
+    expect(v1!.dados.canceladas).toBe("0");
+    expect(v1!.totais).toMatchObject({ canceladas: 0n, aPagar: x.parcelas[0].valor + x.parcelas[1].valor });
+    // versão 2 reconcilia: Σ parcelas + canceladas = valor da venda; total a pagar = Σ parcelas listadas
+    const [vendaRow] = await db.select().from(vendas).where(eq(vendas.id, v));
+    const soma = atual!.dados.parcelas.reduce((s, p) => s + BigInt(p.valor), 0n);
+    expect(atual!.dados.parcelasCanceladas).toEqual([{ numero: 2, total: 2 }]);
+    expect(soma + BigInt(atual!.dados.canceladas!)).toBe(vendaRow.total);
+    expect(atual!.totais).toEqual({ venda: vendaRow.total, canceladas: x.parcelas[1].valor, numerosCancelados: "2/2", aPagar: soma });
+    expect((await comSessao(x.fin.id, () => listarFaturas()))[0].total).toBe(soma);
     expect(await comSessao(x.fin.id, () => obterFatura(f.id, 3))).toBeNull();
     // situação atual das parcelas (detalhe)
     expect(atual!.parcelas.map((p) => p.status)).toEqual(["a_receber", "cancelada"]);

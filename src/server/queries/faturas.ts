@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { rotuloForma } from "@/domain/aprovacoes";
-import { parcelasMudaram } from "@/domain/faturas";
+import { parcelasMudaram, totaisDaFatura, type TotaisFatura } from "@/domain/faturas";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import type { FormaPagamento } from "@/domain/precificacao";
 import type { StatusParcela } from "@/domain/venda";
@@ -73,6 +73,7 @@ export type FaturaLista = {
   codigoViagem: string;
   destino: string;
   forma: string;
+  /** Total a pagar da última versão (Σ das parcelas do retrato). */
   total: bigint;
   /** Primeira emissão (versão 1). */
   emitidaEm: Date;
@@ -119,7 +120,7 @@ export async function listarFaturas(): Promise<FaturaLista[]> {
     codigoViagem: l.dados.codigoViagem,
     destino: l.dados.destino,
     forma: l.dados.forma,
-    total: BigInt(l.dados.total),
+    total: totaisDaFatura(l.dados).aPagar,
     emitidaEm: l.emitidaEm,
     versao: l.versao,
     versaoEmitidaEm: l.versaoEmitidaEm,
@@ -149,6 +150,8 @@ export type FaturaDetalhe = {
   emitidaEm: Date;
   emitidaPor: string;
   dados: DadosFatura;
+  /** Valor da venda, canceladas e total a pagar da versão mostrada. */
+  totais: TotaisFatura;
   /** Todas as versões, em ordem. */
   versoes: number[];
   /** A última versão difere das parcelas atuais? */
@@ -205,6 +208,7 @@ export async function obterFatura(id: string, versao?: number): Promise<FaturaDe
     emitidaEm: escolhida.emitidaEm,
     emitidaPor: escolhida.emitidaPor,
     dados: escolhida.dados,
+    totais: totaisDaFatura(escolhida.dados),
     versoes: versoes.map((v) => v.versao),
     desatualizada: parcelasMudaram(ultima.dados.parcelas, naoCanceladas),
     parcelas,

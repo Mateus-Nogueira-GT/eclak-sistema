@@ -16,6 +16,7 @@ export default async function Pagina({ params, searchParams }: { params: Promise
   const f = await obterFatura(id, versao === undefined ? undefined : Number(versao));
   if (!f) notFound();
   const d = f.dados;
+  const t = f.totais;
   const ultima = f.versao === f.versoes.at(-1);
 
   return (
@@ -77,9 +78,21 @@ export default async function Pagina({ params, searchParams }: { params: Promise
             <dt>Forma de pagamento</dt>
             <dd className="font-semibold">{d.forma}</dd>
           </div>
+          <div className="flex justify-between gap-4">
+            <dt>Valor da venda</dt>
+            <dd className="num font-semibold">{formatarReais(t.venda)}</dd>
+          </div>
+          {t.canceladas > 0n && (
+            <div className="flex justify-between gap-4">
+              <dt>
+                Parcelas canceladas <span className="num">({t.numerosCancelados})</span>
+              </dt>
+              <dd className="num font-semibold">− {formatarReais(t.canceladas)}</dd>
+            </div>
+          )}
           <div className="flex justify-between gap-4 border-t border-linha pt-2 text-[16px]">
-            <dt className="font-bold">Valor total</dt>
-            <dd className="num border-b-2 border-terracota font-bold text-verde">{formatarReais(BigInt(d.total))}</dd>
+            <dt className="font-bold">Total a pagar</dt>
+            <dd className="num border-b-2 border-terracota font-bold text-verde">{formatarReais(t.aPagar)}</dd>
           </div>
         </dl>
       </section>

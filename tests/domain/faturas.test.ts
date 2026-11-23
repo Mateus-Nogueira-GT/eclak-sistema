@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { numeroFaturaSchema, parcelasMudaram, type ParcelaRetrato } from "@/domain/faturas";
+import { numeroFaturaSchema, parcelasMudaram, totaisDaFatura, type ParcelaRetrato } from "@/domain/faturas";
 
 const p = (numero: number, vencimento: string, valor: string, total = 2): ParcelaRetrato => ({ numero, total, vencimento, valor });
 
@@ -27,5 +27,22 @@ describe("numeroFaturaSchema", () => {
     expect(numeroFaturaSchema.safeParse(1).success).toBe(true);
     expect(numeroFaturaSchema.safeParse(999999).success).toBe(true);
     for (const x of [0, 1000000, 1.5, -3, "2000", NaN]) expect(numeroFaturaSchema.safeParse(x).success).toBe(false);
+  });
+});
+
+describe("totaisDaFatura", () => {
+  const base = { total: "9000000", parcelas: [p(1, "2026-10-03", "2500000", 6), p(3, "2026-12-28", "1300000", 6)] };
+
+  it("valor da venda, canceladas (com os números) e total a pagar = soma das parcelas listadas", () => {
+    expect(totaisDaFatura({ ...base, canceladas: "1300000", parcelasCanceladas: [{ numero: 2, total: 6 }] })).toEqual({
+      venda: 9_000_000n,
+      canceladas: 1_300_000n,
+      numerosCancelados: "2/6",
+      aPagar: 3_800_000n,
+    });
+  });
+
+  it("versão antiga sem `canceladas`: zero", () => {
+    expect(totaisDaFatura(base)).toEqual({ venda: 9_000_000n, canceladas: 0n, numerosCancelados: "", aPagar: 3_800_000n });
   });
 });

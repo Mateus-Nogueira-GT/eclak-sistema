@@ -166,6 +166,9 @@ export type DadosFatura = {
   total: string;
   forma: string;
   parcelas: { numero: number; total: number; vencimento: string; valor: string }[];
+  /** Parcelas canceladas (fora de `parcelas`): soma em centavos e os números (n/N). Ausente nas versões antigas = nenhuma. */
+  canceladas?: string;
+  parcelasCanceladas?: { numero: number; total: number }[];
 };
 
 export const faturasVersoes = pgTable(

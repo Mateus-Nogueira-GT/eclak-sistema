@@ -52,6 +52,11 @@ async function retratoDaVenda(tx: Transacao, vendaId: string): Promise<DadosFatu
     .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
     .where(eq(vendas.id, vendaId));
   const parcelas = (await parcelasAtuais(tx, [vendaId])).get(vendaId)!;
+  const canceladas = await tx
+    .select({ numero: parcelasReceber.numero, total: parcelasReceber.totalParcelas, valor: parcelasReceber.valor })
+    .from(parcelasReceber)
+    .where(and(eq(parcelasReceber.vendaId, vendaId), eq(parcelasReceber.status, "cancelada")))
+    .orderBy(asc(parcelasReceber.numero));
   return {
     nome: v.nome,
     documento: v.documento,
@@ -62,6 +67,8 @@ async function retratoDaVenda(tx: Transacao, vendaId: string): Promise<DadosFatu
     total: v.total.toString(),
     forma: rotuloForma(v.forma as FormaPagamento),
     parcelas,
+    canceladas: canceladas.reduce((t, p) => t + p.valor, 0n).toString(),
+    parcelasCanceladas: canceladas.map((p) => ({ numero: p.numero, total: p.total })),
   };
 }
 

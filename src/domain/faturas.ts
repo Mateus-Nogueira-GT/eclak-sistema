@@ -24,3 +24,29 @@ export function parcelasMudaram(retrato: readonly ParcelaRetrato[], atuais: read
 
 /** Próximo número de fatura (Admin › Parâmetros). */
 export const numeroFaturaSchema = z.number({ error: MSG_NUMERO_FATURA }).int(MSG_NUMERO_FATURA).min(1, MSG_NUMERO_FATURA).max(999_999, MSG_NUMERO_FATURA);
+
+export type TotaisFatura = {
+  /** Valor da venda (contratado). */
+  venda: bigint;
+  /** Soma das parcelas canceladas (0 nas versões antigas, sem o campo). */
+  canceladas: bigint;
+  /** "2/6, 4/6": as canceladas, para explicar a diferença. */
+  numerosCancelados: string;
+  /** Total a pagar = soma das parcelas listadas no retrato. */
+  aPagar: bigint;
+};
+
+/** Reconciliação do retrato: valor da venda − canceladas = total a pagar (Σ das parcelas listadas). */
+export function totaisDaFatura(d: {
+  total: string;
+  parcelas: readonly Pick<ParcelaRetrato, "valor">[];
+  canceladas?: string;
+  parcelasCanceladas?: readonly { numero: number; total: number }[];
+}): TotaisFatura {
+  return {
+    venda: BigInt(d.total),
+    canceladas: BigInt(d.canceladas ?? "0"),
+    numerosCancelados: (d.parcelasCanceladas ?? []).map((p) => `${p.numero}/${p.total}`).join(", "),
+    aPagar: d.parcelas.reduce((s, p) => s + BigInt(p.valor), 0n),
+  };
+}

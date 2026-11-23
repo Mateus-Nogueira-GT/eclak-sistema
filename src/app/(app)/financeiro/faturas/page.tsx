@@ -32,7 +32,12 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
     <div className="mx-auto max-w-[1280px]">
       <PageHeader
         title="Faturas"
-        subtitle={`Cada venda fechada chega aqui para o financeiro emitir a fatura. A numeração segue em sequência, sem buracos; a próxima fatura será a ${contador.proximo}.`}
+        subtitle="Cada venda fechada chega aqui para o financeiro emitir a fatura. A numeração segue em sequência, sem buracos."
+        right={
+          <p className="text-[14px] text-cinza">
+            Próxima fatura: <b className="num text-[18px] text-verde">{contador.proximo}</b>
+          </p>
+        }
       />
 
       <Card className="mb-5 pb-2">
@@ -54,7 +59,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
               `${v.forma}, 1º vencimento ${dataBr(v.primeiroVencimento)}`,
               formatarReais(v.total),
               <span key="e" className="flex justify-end">
-                <BotaoEmitir vendaId={v.vendaId} proximo={contador.proximo} />
+                <BotaoEmitir vendaId={v.vendaId} />
               </span>,
             ])}
           />
@@ -128,8 +133,22 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
                 )}
                 <div className="mt-5 grid grid-cols-1 gap-5 border-t border-linha pt-5 sm:grid-cols-3">
                   <div>
-                    <Eyebrow>Total da fatura</Eyebrow>
-                    <p className="num mt-1 text-[24px] font-bold text-verde">{formatarReais(BigInt(f.dados.total))}</p>
+                    <Eyebrow>Total a pagar</Eyebrow>
+                    <p className="num mt-1 text-[24px] font-bold text-verde">{formatarReais(f.totais.aPagar)}</p>
+                    <dl className="mt-1 space-y-0.5 text-[13px] text-cinza">
+                      <div className="flex justify-between gap-3">
+                        <dt>Valor da venda</dt>
+                        <dd className="num">{formatarReais(f.totais.venda)}</dd>
+                      </div>
+                      {f.totais.canceladas > 0n && (
+                        <div className="flex justify-between gap-3">
+                          <dt>
+                            Parcelas canceladas <span className="num">({f.totais.numerosCancelados})</span>
+                          </dt>
+                          <dd className="num">− {formatarReais(f.totais.canceladas)}</dd>
+                        </div>
+                      )}
+                    </dl>
                   </div>
                   <div>
                     <Eyebrow>Recebido</Eyebrow>
