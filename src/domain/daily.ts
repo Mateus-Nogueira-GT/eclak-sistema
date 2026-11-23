@@ -85,8 +85,9 @@ const GERUNDISMO = /\b(vamos|vai|vou|estaremos|estarei|estar)\s+(estar\s+)?\w+nd
 const TROCA_NO_TOPO =
   /Check-out:[^\n]*\n\s*Check-in:[^\n]*\n\s*https?:\/\/\S*(maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl)/i;
 const CONTATOS = /\(\d{2}\)\s?\d|\+\d{2}\s?\d|guia:|motorista:|apoio local/i;
-const ITEM_COM_HORA = /^\*\d{1,2}h(\d{2})?\*:/;
-const PARECE_HORA = /^\*?\d{1,2}h(\d{2})?\b/;
+const ITEM_COM_HORA = /^\*\d{1,2}h\d{0,2}\*:/;
+const PARECE_HORA = /^\*?\d{1,2}h\d{0,2}\*?/;
+const COMECA_ASTERISCO_NUMERO = /^\*\d/;
 
 export function conferirDaily(
   texto: string,
@@ -100,7 +101,7 @@ export function conferirDaily(
   const trocaOk = TROCA_NO_TOPO.test(topo);
 
   const linhas = t.split("\n").map((l) => l.trim());
-  const candidatas = linhas.filter((l) => PARECE_HORA.test(l));
+  const candidatas = linhas.filter((l) => PARECE_HORA.test(l) || COMECA_ASTERISCO_NUMERO.test(l));
   const horarioOk = candidatas.length > 0 && candidatas.every((l) => ITEM_COM_HORA.test(l));
 
   return [
@@ -118,7 +119,7 @@ export function conferirDaily(
       ? {
           nome: "Troca de hotel: check-out e check-in no topo, com o mapa",
           ok: trocaOk,
-          dica: 'Abra com "Check-out:" e "Check-in:" e, logo abaixo, o link do mapa do hotel novo.',
+          dica: 'Abra com "Check-out: [hotel]" e "Check-in: [hotel]", com o link do Google Maps do hotel novo logo abaixo.',
         }
       : { nome: "Sem troca de hotel neste dia", ok: true, dica: "Nada a conferir: não há troca de hotel." },
     {
@@ -129,7 +130,7 @@ export function conferirDaily(
     {
       nome: "Sem contatos de fornecedores",
       ok: !CONTATOS.test(texto),
-      dica: "Tire telefones e nomes de guia ou motorista; o contato fica na versão interna.",
+      dica: "Contatos de guia, apoio local e operadora ficam só na versão interna.",
     },
     {
       nome: "Encerramento padrão da ECLAK",

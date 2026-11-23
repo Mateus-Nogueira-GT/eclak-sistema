@@ -86,6 +86,7 @@ describe("indicadores que falham", () => {
   it("3 troca", () => {
     const invertido = "Buongiorno!\n\nCheck-in: A\nhttps://maps.google.com/?q=A\nCheck-out: B\n\n*10h*: x.";
     expect(conferir(invertido, true)[2].ok).toBe(false);
+    expect(conferir(invertido, true)[2].dica).toBe('Abra com "Check-out: [hotel]" e "Check-in: [hotel]", com o link do Google Maps do hotel novo logo abaixo.');
     expect(conferir(invertido, true)[2].nome).toBe("Troca de hotel: check-out e check-in no topo, com o mapa");
     const curto = "Buongiorno!\n\nCheck-out: B\nCheck-in: A\nhttps://maps.app.goo.gl/abc\n\n*10h*: x.";
     expect(conferir(curto, true)[2].ok).toBe(true);
@@ -97,10 +98,13 @@ describe("indicadores que falham", () => {
   it("4 horário", () => {
     expect(conferir("Buongiorno!\n\n13h26 partida")[3].ok).toBe(false);
     expect(conferir("Buongiorno!\n\nSem programação")[3].ok).toBe(false);
+    expect(conferir("Buongiorno!\n\n*10: x")[3].ok).toBe(false);
+    expect(conferir("Buongiorno!\n\n13h26 partida")[3].dica).toBe("Use o formato *06h20*: partida do trem...");
     expect(conferir("Buongiorno!\n\n*13h26*: partida.\n\n14h30 outra")[3].ok).toBe(false);
   });
   it("5 contatos", () => {
     expect(conferir("Buongiorno!\n\nMotorista: João")[4].ok).toBe(false);
+    expect(conferir("Buongiorno!\n\nMotorista: João")[4].dica).toBe("Contatos de guia, apoio local e operadora ficam só na versão interna.");
     expect(conferir("Buongiorno!\n\n(39) 3333-0000")[4].ok).toBe(false);
   });
   it("6 encerramento", () => {
