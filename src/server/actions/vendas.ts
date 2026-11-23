@@ -18,6 +18,7 @@ import {
   MSG_AGUARDANDO_DIRETOR,
   MSG_FORMA_DIFERENTE,
   MSG_FORMA_IGUAL,
+  MSG_FORNECEDOR_CARTAO,
   MSG_JA_VENDIDA,
   MSG_MUDOU_DEPOIS_DA_APROVACAO,
   MSG_NAO_APROVADO,
@@ -64,6 +65,8 @@ export type FechamentoEntrada = {
   comprovante?: string | null;
   /** Observação para o financeiro. */
   observacao?: string | null;
+  /** Cartão direto no fornecedor: o fornecedor (com conta na viagem) que recebeu no cartão; ignorado nas outras formas. */
+  fornecedorCartaoId?: string | null;
 };
 
 export type NovaFormaEntrada = { forma: FormaPagamento; nota?: string | null };
@@ -79,6 +82,7 @@ const FORMA_DIFERENTE: Falha = { ok: false, erro: MSG_FORMA_DIFERENTE };
 const FORMA_IGUAL: Falha = { ok: false, erro: MSG_FORMA_IGUAL };
 const PARCELAS: Falha = { ok: false, erro: MSG_PARCELAS, campos: { parcelas: MSG_PARCELAS } };
 const NAO_CALCULA: Falha = { ok: false, erro: MSG_NAO_CALCULA };
+const FORNECEDOR_CARTAO: Falha = { ok: false, erro: MSG_FORNECEDOR_CARTAO, campos: { fornecedorCartaoId: MSG_FORNECEDOR_CARTAO } };
 
 type ViagemLinha = typeof viagens.$inferSelect;
 type VersaoLinha = typeof versoesPrecificacao.$inferSelect;
@@ -202,6 +206,10 @@ export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): P
                 .from(fornecedores)
                 .where(inArray(fornecedores.id, idsFornecedores));
         const contas = contasDoSnapshot(snapshot, Object.fromEntries(modalidades.map((m) => [m.id, m.modalidade])), v.fim);
+        // Cartão direto no fornecedor: quem recebeu no cartão tem de ter conta na viagem (as que nascem aqui).
+        const cartaoFornecedor = aprovadaForma.tipo === "cartao_fornecedor";
+        const fornecedorCartaoId = cartaoFornecedor ? (e.fornecedorCartaoId ?? null) : null;
+        if (cartaoFornecedor && !contas.some((c) => c.fornecedorId !== null && c.fornecedorId === fornecedorCartaoId)) return FORNECEDOR_CARTAO;
         const vencimento = vencimentoPadraoFornecedor(v.inicio, e.aceiteEm);
         const agora = new Date();
         const audit = (tabela: string, linha: { id: string } & Record<string, unknown>) =>
@@ -222,6 +230,7 @@ export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): P
             faturaDocumento: e.faturaDocumento,
             comprovante: e.comprovante,
             observacao: e.observacao,
+            fornecedorCartaoId,
             criadoPor: usuario.id,
             criadoEm: agora,
           })

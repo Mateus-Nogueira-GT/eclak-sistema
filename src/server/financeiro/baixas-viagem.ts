@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { converter } from "@/domain/cambio";
 import {
   MSG_CAMBIO_EFETIVO,
@@ -8,20 +8,37 @@ import {
   MSG_COMISSAO_REGISTRADA,
   MSG_CONCILIADA,
   MSG_CONTA_BANCARIA,
+  MSG_DESFACA_REPASSE,
   MSG_DIFERENCA_RECEBIDA,
+  MSG_FORNECEDOR_CARTAO,
+  MSG_NAO_CARTAO_FORNECEDOR,
   MSG_NAO_VENDIDA,
+  MSG_PAGO_PELO_REPASSE,
   MSG_PAGAMENTO_EM_ABERTO,
   MSG_PAGAMENTO_PAGO,
   MSG_PARCELA_CANCELADA,
   MSG_PARCELA_EM_ABERTO,
   MSG_PARCELA_RECEBIDA,
+  MSG_REPASSE_ESTRANGEIRA,
+  MSG_REPASSE_MAIOR,
+  MSG_USE_REPASSE,
   type BaixaPagamentoValidada,
   type BaixaParcelaValidada,
   type ComissaoRecebidaValidada,
 } from "@/domain/venda-entrada";
+import type { RepasseValidado } from "@/domain/financeiro-entrada";
 import { registrarAuditoria } from "@/server/auditoria";
 import type { Transacao } from "@/server/db/client";
-import { comissoes, contasBancarias, contasPagar, pagamentosFornecedor, parcelasReceber, viagens } from "@/server/db/schema";
+import {
+  comissoes,
+  contasBancarias,
+  contasPagar,
+  lancamentosFinanceiros,
+  pagamentosFornecedor,
+  parcelasReceber,
+  vendas,
+  viagens,
+} from "@/server/db/schema";
 import { travarViagem } from "@/server/trava-viagem";
 
 // Fora dos arquivos "use server" de propósito: nada aqui pode virar endpoint. Núcleo das baixas da viagem
@@ -54,6 +71,9 @@ export const PARCELA_NAO_ENCONTRADA = falha("Parcela não encontrada");
 export const PAGAMENTO_NAO_ENCONTRADO = falha("Pagamento não encontrado");
 export const COMISSAO_NAO_ENCONTRADA = falha("Comissão não encontrada");
 const NAO_VENDIDA = falha(MSG_NAO_VENDIDA);
+const USE_REPASSE = falha(MSG_USE_REPASSE);
+const PAGO_PELO_REPASSE = falha(MSG_PAGO_PELO_REPASSE);
+const NAO_CARTAO_FORNECEDOR = falha(MSG_NAO_CARTAO_FORNECEDOR);
 const CONCILIADA = falha(MSG_CONCILIADA);
 
 export type ViagemLinha = typeof viagens.$inferSelect;
@@ -204,6 +224,7 @@ const recusaParcelaFechada = (p: ParcelaLinha): Falha | null =>
  */
 export function baixarParcelaNa(tx: Transacao, usuarioId: string, parcelaId: string, dados: BaixaParcelaValidada): Promise<Feito | Falha> {
   return naParcela(tx, usuarioId, parcelaId, async (t, p) => {
+    if (p.meio === "cartao_fornecedor") return USE_REPASSE;
     const recusa = recusaParcelaFechada(p);
     if (recusa) return recusa;
     if (dados.valorRecebido !== p.valor && !dados.observacao) return falha(MSG_DIFERENCA_RECEBIDA, "observacao");
@@ -220,12 +241,16 @@ export function baixarParcelaNa(tx: Transacao, usuarioId: string, parcelaId: str
   });
 }
 
-/** Desfaz a baixa ou o cancelamento da parcela: volta a `a_receber`. Limpa só a baixa; a observação fica. */
+/** Parcela de volta a `a_receber`: limpa só a baixa (a observação fica). */
+const PARCELA_EM_ABERTO_DE_NOVO = { status: "a_receber", recebidaEm: null, valorRecebido: null, taxaEfetiva: null, contaBancariaId: null } as const;
+
+/**
+ * Desfaz a baixa ou o cancelamento da parcela: volta a `a_receber`. Limpa só a baixa; a observação fica. A de
+ * cartão direto no fornecedor volta por `desfazerRepasseNa`.
+ */
 export function desfazerBaixaParcelaNa(tx: Transacao, usuarioId: string, parcelaId: string): Promise<Feito | Falha> {
   return naParcela(tx, usuarioId, parcelaId, async (_t, p) =>
-    p.status === "a_receber"
-      ? falha(MSG_PARCELA_EM_ABERTO)
-      : { status: "a_receber", recebidaEm: null, valorRecebido: null, taxaEfetiva: null, contaBancariaId: null },
+    p.meio === "cartao_fornecedor" ? USE_REPASSE : p.status === "a_receber" ? falha(MSG_PARCELA_EM_ABERTO) : { ...PARCELA_EM_ABERTO_DE_NOVO },
   );
 }
 
@@ -237,6 +262,15 @@ export function cancelarParcelaNa(tx: Transacao, usuarioId: string, parcelaId: s
 // ---------------------------------------------------------------------------
 // Pagamentos ao fornecedor
 // ---------------------------------------------------------------------------
+
+/** A conta fica `paga` com todas as linhas pagas, senão `a_pagar` (a cancelada não muda). */
+async function acertarStatusConta(tx: Transacao, usuarioId: string, conta: ContaLinha, statusDasLinhas: PagamentoLinha["status"][]): Promise<void> {
+  const status = statusDasLinhas.every((s) => s === "pago") ? "paga" : "a_pagar";
+  if (conta.status !== status && conta.status !== "cancelada") {
+    await tx.update(contasPagar).set({ status }).where(eq(contasPagar.id, conta.id));
+    await auditarAlteracao(tx, usuarioId, "contas_pagar", conta, { status });
+  }
+}
 
 /** Roda `mudar` sobre o pagamento travado (com a conta travada) e acerta o status da conta. */
 function noPagamento(
@@ -260,12 +294,7 @@ function noPagamento(
       if (ehFalha(depois)) return depois;
       await t.update(pagamentosFornecedor).set(depois).where(eq(pagamentosFornecedor.id, p.id));
       await auditarAlteracao(t, usuarioId, "pagamentos_fornecedor", p, depois);
-      const todasPagas = linhas.every((l) => (l.id === p.id ? depois.status : l.status) === "pago");
-      const status = todasPagas ? "paga" : "a_pagar";
-      if (conta.status !== status && conta.status !== "cancelada") {
-        await t.update(contasPagar).set({ status }).where(eq(contasPagar.id, conta.id));
-        await auditarAlteracao(t, usuarioId, "contas_pagar", conta, { status });
-      }
+      await acertarStatusConta(t, usuarioId, conta, linhas.map((l) => (l.id === p.id ? (depois.status ?? l.status) : l.status)));
       return OK;
     },
   );
@@ -279,6 +308,7 @@ function noPagamento(
 export function baixarPagamentoNa(tx: Transacao, usuarioId: string, pagamentoId: string, dados: BaixaPagamentoValidada): Promise<Feito | Falha> {
   const { pagoEm, valorOriginalPago, cambioEfetivo, contaBancariaId } = dados;
   return noPagamento(tx, usuarioId, pagamentoId, async (t, p, conta) => {
+    if (p.repasseParcelaId) return PAGO_PELO_REPASSE;
     if (p.status === "pago") return falha(MSG_PAGAMENTO_PAGO);
     const cambio = conta.moeda === "BRL" ? null : cambioEfetivo;
     if (conta.moeda !== "BRL" && !cambio) return falha(MSG_CAMBIO_EFETIVO, "cambioEfetivo");
@@ -292,9 +322,184 @@ export function baixarPagamentoNa(tx: Transacao, usuarioId: string, pagamentoId:
 /** Desfaz a baixa do pagamento; a conta volta a `a_pagar`. */
 export function desfazerBaixaPagamentoNa(tx: Transacao, usuarioId: string, pagamentoId: string): Promise<Feito | Falha> {
   return noPagamento(tx, usuarioId, pagamentoId, async (_t, p) =>
-    p.status !== "pago"
-      ? falha(MSG_PAGAMENTO_EM_ABERTO)
-      : { status: "a_pagar", pagoEm: null, valorOriginalPago: null, cambioEfetivo: null, valorBrlPago: null, contaBancariaId: null },
+    p.repasseParcelaId ? PAGO_PELO_REPASSE : p.status !== "pago" ? falha(MSG_PAGAMENTO_EM_ABERTO) : { ...PAGAMENTO_EM_ABERTO_DE_NOVO },
+  );
+}
+
+/** Pagamento de volta a `a_pagar`: limpa a baixa. */
+const PAGAMENTO_EM_ABERTO_DE_NOVO = {
+  status: "a_pagar",
+  pagoEm: null,
+  valorOriginalPago: null,
+  cambioEfetivo: null,
+  valorBrlPago: null,
+  contaBancariaId: null,
+} as const;
+
+// ---------------------------------------------------------------------------
+// Cartão direto no fornecedor (regra a): o cliente paga o pacote inteiro na maquininha de um fornecedor, que fica
+// com o seu custo e repassa a diferença à ECLAK. A parcela (única) não tem baixa direta: o repasse baixa a parcela
+// pelo valor (o cliente pagou tudo), com taxa efetiva = repasse esperado − valor repassado, e quita os pagamentos
+// em aberto desse fornecedor na viagem pelo previsto, sem conta bancária (o dinheiro não passou pelo caixa) e
+// ligados à parcela (`repasse_parcela_id`). O repasse esperado é o da view `lancamentos_financeiros` (fonte única).
+// ---------------------------------------------------------------------------
+
+const VIAGEM_NAO_ENCONTRADA = falha("Viagem não encontrada");
+
+/** Parcela de cartão direto travada, com o fornecedor do cartão da venda (nulo em venda antiga). */
+async function parcelaDoCartao(tx: Transacao, parcelaId: string, viagemId: string): Promise<{ p: ParcelaLinha; fornecedorId: string | null } | Falha> {
+  const p = await parcelaTravada(tx, parcelaId, viagemId);
+  if (!p) return PARCELA_NAO_ENCONTRADA;
+  if (p.meio !== "cartao_fornecedor") return NAO_CARTAO_FORNECEDOR;
+  const [v] = await tx.select({ fornecedorId: vendas.fornecedorCartaoId }).from(vendas).where(eq(vendas.id, p.vendaId));
+  return { p, fornecedorId: v?.fornecedorId ?? null };
+}
+
+/** Contas ativas do fornecedor na viagem, `for update` (o mesmo filtro do custo do repasse na view). */
+function contasDoFornecedor(tx: Transacao, viagemId: string, fornecedorId: string): Promise<ContaLinha[]> {
+  return tx
+    .select()
+    .from(contasPagar)
+    .where(
+      and(
+        eq(contasPagar.viagemId, viagemId),
+        eq(contasPagar.fornecedorId, fornecedorId),
+        isNull(contasPagar.excluidoEm),
+        ne(contasPagar.status, "cancelada"),
+      ),
+    )
+    .orderBy(asc(contasPagar.id))
+    .for("update");
+}
+
+/**
+ * Repasse do fornecedor do cartão: data, valor repassado (≥ 0) e conta bancária ativa (onde o repasse entrou).
+ * Recusa sem fornecedor escolhido, com pagamento em aberto em moeda estrangeira desse fornecedor (dá-se baixa nele
+ * na viagem, com o câmbio) e com repasse maior que o esperado.
+ */
+export function baixarRepasseNa(tx: Transacao, usuarioId: string, parcelaId: string, dados: RepasseValidado): Promise<Feito | Falha> {
+  return naViagemVendidaNa(
+    tx,
+    (t) => viagemDaParcela(t, parcelaId),
+    PARCELA_NAO_ENCONTRADA,
+    async (t, v) => {
+      const c = await parcelaDoCartao(t, parcelaId, v.id);
+      if (ehFalha(c)) return c;
+      const { p, fornecedorId } = c;
+      const fechada = recusaParcelaFechada(p);
+      if (fechada) return fechada;
+      if (!fornecedorId) return falha(MSG_FORNECEDOR_CARTAO, "fornecedorCartaoId");
+      const contas: { conta: ContaLinha; linhas: PagamentoLinha[] }[] = [];
+      for (const conta of await contasDoFornecedor(t, v.id, fornecedorId)) contas.push({ conta, linhas: await linhasDaConta(t, conta.id) });
+      if (contas.some(({ conta, linhas }) => conta.moeda !== "BRL" && linhas.some((l) => l.status !== "pago"))) return falha(MSG_REPASSE_ESTRANGEIRA);
+      // Depois das travas: o esperado da view já vê as linhas como estão (fonte única; nunca recalculado aqui).
+      const [linha] = await t
+        .select({ esperado: lancamentosFinanceiros.valorPrevisto })
+        .from(lancamentosFinanceiros)
+        .where(and(eq(lancamentosFinanceiros.origem, "parcela"), eq(lancamentosFinanceiros.id, p.id)));
+      if (!linha) return PARCELA_NAO_ENCONTRADA;
+      if (dados.valorRepassado > linha.esperado) return falha(MSG_REPASSE_MAIOR, "valorRepassado");
+      const semConta = await recusaContaBancaria(t, dados.contaBancariaId);
+      if (semConta) return semConta;
+
+      const parcela = {
+        status: "recebida" as const,
+        recebidaEm: dados.data,
+        valorRecebido: p.valor,
+        taxaEfetiva: linha.esperado - dados.valorRepassado,
+        contaBancariaId: dados.contaBancariaId,
+      };
+      await t.update(parcelasReceber).set(parcela).where(eq(parcelasReceber.id, p.id));
+      await auditarAlteracao(t, usuarioId, "parcelas_receber", p, parcela);
+      for (const { conta, linhas } of contas) {
+        const abertas = linhas.filter((x) => x.status !== "pago");
+        if (abertas.length === 0) continue;
+        for (const l of abertas) {
+          const pago = {
+            status: "pago" as const,
+            pagoEm: dados.data,
+            valorOriginalPago: l.valorOriginal,
+            cambioEfetivo: null,
+            valorBrlPago: l.valorBrlPrevisto,
+            contaBancariaId: null,
+            repasseParcelaId: p.id,
+          };
+          await t.update(pagamentosFornecedor).set(pago).where(eq(pagamentosFornecedor.id, l.id));
+          await auditarAlteracao(t, usuarioId, "pagamentos_fornecedor", l, pago);
+        }
+        await acertarStatusConta(t, usuarioId, conta, linhas.map(() => "pago"));
+      }
+      return OK;
+    },
+  );
+}
+
+/**
+ * Desfaz o repasse (ou o cancelamento) da parcela de cartão direto: a parcela volta a `a_receber` e todos os
+ * pagamentos quitados por ela voltam a `a_pagar`, sem o vínculo; as contas voltam a `a_pagar`.
+ */
+export function desfazerRepasseNa(tx: Transacao, usuarioId: string, parcelaId: string): Promise<Feito | Falha> {
+  return naViagemVendidaNa(
+    tx,
+    (t) => viagemDaParcela(t, parcelaId),
+    PARCELA_NAO_ENCONTRADA,
+    async (t, v) => {
+      const c = await parcelaDoCartao(t, parcelaId, v.id);
+      if (ehFalha(c)) return c;
+      const { p } = c;
+      if (p.status === "a_receber") return falha(MSG_PARCELA_EM_ABERTO);
+      const donos = await t
+        .selectDistinct({ contaId: pagamentosFornecedor.contaId })
+        .from(pagamentosFornecedor)
+        .where(eq(pagamentosFornecedor.repasseParcelaId, p.id));
+      const contaIds = donos.map((d) => d.contaId).sort();
+      const contas =
+        contaIds.length === 0
+          ? []
+          : await t.select().from(contasPagar).where(and(inArray(contasPagar.id, contaIds), eq(contasPagar.viagemId, v.id))).orderBy(asc(contasPagar.id)).for("update");
+      for (const conta of contas) {
+        const linhas = await linhasDaConta(t, conta.id);
+        const depois = { ...PAGAMENTO_EM_ABERTO_DE_NOVO, repasseParcelaId: null };
+        for (const l of linhas.filter((x) => x.repasseParcelaId === p.id)) {
+          await t.update(pagamentosFornecedor).set(depois).where(eq(pagamentosFornecedor.id, l.id));
+          await auditarAlteracao(t, usuarioId, "pagamentos_fornecedor", l, depois);
+        }
+        await acertarStatusConta(t, usuarioId, conta, linhas.map((l) => (l.repasseParcelaId === p.id ? "a_pagar" : l.status)));
+      }
+      const parcela = { ...PARCELA_EM_ABERTO_DE_NOVO };
+      await t.update(parcelasReceber).set(parcela).where(eq(parcelasReceber.id, p.id));
+      await auditarAlteracao(t, usuarioId, "parcelas_receber", p, parcela);
+      return OK;
+    },
+  );
+}
+
+/**
+ * Fornecedor que recebeu no cartão (venda antiga, sem ele, ou troca antes do repasse): precisa ter conta ativa na
+ * viagem. Recusa venda que não é de cartão direto e parcela já recebida pelo repasse.
+ */
+export function definirFornecedorCartaoNa(tx: Transacao, usuarioId: string, viagemId: string, fornecedorId: string): Promise<Feito | Falha> {
+  return naViagemVendidaNa(
+    tx,
+    async () => viagemId,
+    VIAGEM_NAO_ENCONTRADA,
+    async (t, v) => {
+      const [venda] = await t.select().from(vendas).where(eq(vendas.viagemId, v.id)).for("update");
+      if (!venda) return VIAGEM_NAO_ENCONTRADA;
+      const parcelas = await t
+        .select({ status: parcelasReceber.status })
+        .from(parcelasReceber)
+        .where(and(eq(parcelasReceber.vendaId, venda.id), eq(parcelasReceber.meio, "cartao_fornecedor")))
+        .for("update");
+      if (parcelas.length === 0) return NAO_CARTAO_FORNECEDOR;
+      if (parcelas.some((p) => p.status === "recebida")) return falha(MSG_DESFACA_REPASSE);
+      if ((await contasDoFornecedor(t, v.id, fornecedorId)).length === 0) return falha(MSG_FORNECEDOR_CARTAO, "fornecedorCartaoId");
+      if (venda.fornecedorCartaoId === fornecedorId) return OK;
+      const depois = { fornecedorCartaoId: fornecedorId };
+      await t.update(vendas).set(depois).where(eq(vendas.id, venda.id));
+      await auditarAlteracao(t, usuarioId, "vendas", venda, depois);
+      return OK;
+    },
   );
 }
 

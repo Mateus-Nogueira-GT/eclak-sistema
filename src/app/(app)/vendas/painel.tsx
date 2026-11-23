@@ -94,6 +94,7 @@ function RespostaCliente({ p, hoje }: { p: PropostaLista; hoje: string }) {
   const [observacao, setObservacao] = useState("");
   const [notaForma, setNotaForma] = useState("");
   const [pedido, setPedido] = useState("");
+  const [fornecedorCartao, setFornecedorCartao] = useState(p.fornecedores.length === 1 ? p.fornecedores[0].id : "");
   const [localErro, setLocalErro] = useState<string | null>(null);
 
   const umaParcela = tipo === "pix" || tipo === "cartao_fornecedor";
@@ -130,6 +131,7 @@ function RespostaCliente({ p, hoje }: { p: PropostaLista; hoje: string }) {
         faturaDocumento,
         comprovante,
         observacao,
+        ...(tipo === "cartao_fornecedor" ? { fornecedorCartaoId: fornecedorCartao } : {}),
       }),
     );
   }
@@ -234,6 +236,18 @@ function RespostaCliente({ p, hoje }: { p: PropostaLista; hoje: string }) {
                 <input type="date" className={cx(inputCls, marca("primeiroVencimento"))} value={primeiro} onChange={(e) => setPrimeiro(e.target.value)} />
                 {msgCampo("primeiroVencimento")}
               </Campo>
+              {tipo === "cartao_fornecedor" && (
+                <Campo label="Fornecedor que recebeu no cartão" className="sm:col-span-2">
+                  <Select value={fornecedorCartao} onChange={setFornecedorCartao} className={cx("w-full", marca("fornecedorCartaoId"))}>
+                    <option value="">{p.fornecedores.length === 0 ? "Nenhum fornecedor na viagem" : "Escolha o fornecedor"}</option>
+                    {p.fornecedores.map((f) => (
+                      <option key={f.id} value={f.id}>{f.nome}</option>
+                    ))}
+                  </Select>
+                  {msgCampo("fornecedorCartaoId")}
+                  <span className="mt-1 block text-[12px] text-cinza">Ele fica com o custo dele e repassa a diferença à ECLAK.</span>
+                </Campo>
+              )}
               {tipo === "credito" && (
                 <label className="flex items-center gap-2 text-[14px] text-texto sm:col-span-2 lg:col-span-4">
                   <input type="checkbox" checked={antecipado} onChange={(e) => setAntecipado(e.target.checked)} />

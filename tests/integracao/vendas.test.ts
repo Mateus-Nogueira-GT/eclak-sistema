@@ -337,6 +337,34 @@ describe("fecharVenda", () => {
     expect(await comSessao(d.id, () => fecharVenda(viagemId, fechamento))).toEqual(JA_VENDIDA);
   });
 
+  it("cartão direto no fornecedor: exige o fornecedor com conta na viagem; grava fornecedor_cartao_id", async () => {
+    const CARTAO: FormaPagamento = { tipo: "cartao_fornecedor", parcelas: 1 };
+    const { u, viagemId, palazzo } = await aprovada(CARTAO);
+    const f = (x: Partial<FechamentoEntrada>) => comSessao(u.id, () => fecharVenda(viagemId, { ...fechamento, forma: CARTAO, parcelas: 1, ...x }));
+    const ESCOLHA = { ok: false, erro: "Escolha o fornecedor que recebeu no cartão", campos: { fornecedorCartaoId: "Escolha o fornecedor que recebeu no cartão" } };
+    expect(await f({})).toEqual(ESCOLHA);
+    expect(await f({ fornecedorCartaoId: "" })).toEqual(ESCOLHA);
+    expect(await f({ fornecedorCartaoId: null })).toEqual(ESCOLHA);
+    expect(await f({ fornecedorCartaoId: "x" })).toEqual(ESCOLHA);
+    // fornecedor sem conta na viagem (não é de nenhum item)
+    const outro = await fornecedor(u.id, "Outro Hotel", "net", ["Hotelaria"]);
+    expect(await f({ fornecedorCartaoId: outro })).toEqual(ESCOLHA);
+    await nadaGravado(viagemId);
+
+    expect(await f({ fornecedorCartaoId: palazzo })).toMatchObject({ ok: true });
+    const [venda] = await db.select().from(vendas).where(eq(vendas.viagemId, viagemId));
+    expect(venda.fornecedorCartaoId).toBe(palazzo);
+    const [a] = await db.select().from(auditoria).where(and(eq(auditoria.tabela, "vendas"), eq(auditoria.registroId, venda.id)));
+    expect((a.depois as Record<string, unknown>).fornecedorCartaoId).toBe(palazzo);
+  });
+
+  it("outras formas: fornecedor do cartão ignorado (fica nulo)", async () => {
+    const { u, viagemId, palazzo } = await aprovada();
+    expect(await comSessao(u.id, () => fecharVenda(viagemId, { ...fechamento, fornecedorCartaoId: palazzo }))).toMatchObject({ ok: true });
+    const [venda] = await db.select().from(vendas).where(eq(vendas.viagemId, viagemId));
+    expect(venda.fornecedorCartaoId).toBeNull();
+  });
+
   it("não aprovado: recusado", async () => {
     const { u, viagemId } = await aprovada();
     expect(await comSessao(u.id, () => pedirNovaForma(viagemId, { forma: { tipo: "pix", parcelas: 1 } }))).toMatchObject({ ok: true });
@@ -553,6 +581,13 @@ describe("listarPropostas", () => {
       notaCliente: null,
     });
     expect(pa.aprovadoEm).toBeInstanceOf(Date);
+    // fornecedores com conta na viagem (itens não-Taxa com fornecedor), para o select do cartão direto
+    expect(pa.fornecedores).toEqual(
+      [
+        { id: a.palazzo, nome: "Palazzo Hotels" },
+        { id: a.roma, nome: "Roma Tours" },
+      ].sort((x, y) => x.nome.localeCompare(y.nome)),
+    );
     expect(l.find((x) => x.id === b.viagemId)).toMatchObject({ estado: "vendida", forma: "Pix" });
     expect(l.find((x) => x.id === b.viagemId)!.vendidaEm).toBeInstanceOf(Date);
     expect(l.find((x) => x.id === c.viagemId)).toMatchObject({ estado: "ajustes", notaCliente: "Trocar hotel" });

@@ -24,6 +24,7 @@ import {
   desfazerConciliacao,
   registrarComissao,
 } from "@/server/actions/financeiro-viagem";
+import { baixarRepasse, definirFornecedorCartao, desfazerRepasse } from "@/server/actions/financeiro";
 import type { ComissaoVendida, ContaVendida, PagamentoVendido, ParcelaVendida, ViagemVendida } from "@/server/queries/vendas";
 import type { FichaPrecificacao } from "@/server/queries/viagens";
 import { dataBr, dataCurta, formatarMoeda, pct1, reaisParaCampo } from "../formatos";
@@ -38,6 +39,7 @@ export type ContaBancariaOpcao = { id: string; nome: string };
 type Painel =
   | { tipo: "baixaParcela"; parcela: ParcelaVendida }
   | { tipo: "cancelarParcela"; parcela: ParcelaVendida }
+  | { tipo: "repasse"; parcela: ParcelaVendida }
   | { tipo: "baixaPagamento"; conta: ContaVendida; pag: PagamentoVendido }
   | { tipo: "forma"; conta: ContaVendida }
   | { tipo: "comissaoTipo"; conta: ContaVendida }
@@ -49,6 +51,7 @@ type Painel =
 const ABA_DO_PAINEL: Record<Painel["tipo"], Aba> = {
   baixaParcela: "entradas",
   cancelarParcela: "entradas",
+  repasse: "entradas",
   baixaPagamento: "saidas",
   forma: "saidas",
   comissaoTipo: "saidas",
@@ -207,6 +210,81 @@ function FormBaixaParcela({ parcela, hoje, contas, onFechar }: { parcela: Parcel
         />
       </Campo>
     </Formulario>
+  );
+}
+
+type CartaoFornecedor = NonNullable<ViagemVendida["cartaoFornecedor"]>;
+
+/**
+ * Repasse do fornecedor que recebeu no cartão: data, valor repassado (o esperado, da lista do financeiro, vem
+ * preenchido) e conta bancária onde entrou. O que o fornecedor reteve a mais vira taxa da forma.
+ */
+function FormRepasse({ parcela, cartao, hoje, contas, onFechar }: { parcela: ParcelaVendida; cartao: CartaoFornecedor; hoje: string; contas: ContaBancariaOpcao[]; onFechar: () => void }) {
+  const acao = useAcao();
+  const [data, setData] = useState(hoje);
+  const [conta, setConta] = useState(contaPadrao(contas));
+  const esperado = cartao.repasseEsperado ?? 0n;
+  const [valor, setValor] = useState(reaisParaCampo(esperado < 0n ? 0n : esperado));
+  let retido: bigint | null = null;
+  try {
+    retido = esperado - lerReais(valor);
+  } catch {
+    // valor ilegível: o servidor responde com o erro do campo
+  }
+  return (
+    <Formulario
+      titulo={`Registrar repasse de ${cartao.fornecedor ?? "fornecedor"}`}
+      acao={acao}
+      rotuloEnviar="Confirmar repasse"
+      onFechar={onFechar}
+      onEnviar={() => acao.executar(() => baixarRepasse(parcela.id, { data, valorRepassado: valor, contaBancariaId: conta }), onFechar)}
+    >
+      <Campo label="Data do repasse">
+        <input type="date" max={hoje} className={`${inputCls} ${marca(acao, "data")}`} value={data} onChange={(e) => setData(e.target.value)} />
+      </Campo>
+      <Campo label="Valor repassado">
+        <input className={`${inputCls} num ${marca(acao, "valorRepassado")}`} inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} />
+      </Campo>
+      <CampoContaBancaria contas={contas} valor={conta} onChange={setConta} acao={acao} />
+      <p className="text-[13px] text-cinza sm:col-span-2 lg:col-span-4">
+        O cliente pagou {formatarReais(parcela.valor)} no cartão de {cartao.fornecedor}. Repasse esperado:{" "}
+        <span className="num font-semibold text-texto">{formatarReais(esperado)}</span> (a parcela menos as contas do fornecedor na viagem, que ficam
+        quitadas pelo previsto).
+        {retido !== null && retido > 0n && <> O fornecedor reteve <span className="num font-semibold text-texto">{formatarReais(retido)}</span> a mais: entra como taxa da forma.</>}
+      </p>
+    </Formulario>
+  );
+}
+
+/** Venda em cartão direto sem o fornecedor que recebeu (vendas antigas): aviso e escolha. */
+function EscolhaFornecedorCartao({ viagemId, cartao, agir }: { viagemId: string; cartao: CartaoFornecedor; agir: boolean }) {
+  const acao = useAcao();
+  const [fornecedor, setFornecedor] = useState("");
+  return (
+    <div role="status" className="mb-4 rounded-[5px] border border-ouro bg-ouro/15 px-4 py-3 text-[14px] text-texto">
+      <p className="font-semibold">Escolha o fornecedor que recebeu no cartão</p>
+      <p className="mt-0.5 text-[13px]">Sem ele, o repasse não pode ser registrado.</p>
+      {agir && (
+        <form
+          className="mt-3 flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            acao.executar(() => definirFornecedorCartao(viagemId, fornecedor));
+          }}
+        >
+          <Campo label="Fornecedor do cartão">
+            <Select value={fornecedor} onChange={setFornecedor} className={`min-w-[240px] ${marca(acao, "fornecedorCartaoId")}`}>
+              <option value="">Escolha o fornecedor</option>
+              {cartao.opcoes.map((f) => (
+                <option key={f.id} value={f.id}>{f.nome}</option>
+              ))}
+            </Select>
+          </Campo>
+          <Botao type="submit" disabled={acao.pendente}>Salvar fornecedor</Botao>
+        </form>
+      )}
+      <Erro acao={acao} />
+    </div>
   );
 }
 
@@ -604,6 +682,9 @@ export function ViagemVendidaView({
         <div key={chave}>
           {painelDaAba.tipo === "baixaParcela" && <FormBaixaParcela parcela={painelDaAba.parcela} hoje={hoje} contas={contasBancarias} onFechar={fechar} />}
           {painelDaAba.tipo === "cancelarParcela" && <FormCancelarParcela parcela={painelDaAba.parcela} onFechar={fechar} />}
+          {painelDaAba.tipo === "repasse" && v.cartaoFornecedor && (
+            <FormRepasse parcela={painelDaAba.parcela} cartao={v.cartaoFornecedor} hoje={hoje} contas={contasBancarias} onFechar={fechar} />
+          )}
           {painelDaAba.tipo === "baixaPagamento" && <FormBaixaPagamento conta={painelDaAba.conta} pag={painelDaAba.pag} hoje={hoje} contas={contasBancarias} onFechar={fechar} />}
           {painelDaAba.tipo === "forma" && <FormForma conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "comissaoTipo" && <FormComissaoTipo conta={painelDaAba.conta} onFechar={fechar} />}
@@ -632,9 +713,18 @@ export function ViagemVendidaView({
 // ---------------------------------------------------------------------------
 
 function Entradas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p: Painel) => void }) {
+  const cartao = v.cartaoFornecedor;
+  const doCartao = (p: ParcelaVendida) => cartao !== null && p.id === cartao.parcelaId;
   const rows = v.parcelas.map((p) => [
     <span key="n" className="font-semibold">{p.numero}/{p.totalParcelas}</span>,
-    p.rotuloMeio,
+    doCartao(p) && cartao?.fornecedor ? (
+      <span key="f" className="flex flex-col">
+        {p.rotuloMeio}
+        <span className="text-[12px] text-cinza">Repasse de {cartao.fornecedor}{cartao.repasseEsperado !== null ? `: esperado ${formatarReais(cartao.repasseEsperado)}` : ""}</span>
+      </span>
+    ) : (
+      p.rotuloMeio
+    ),
     dataBr(p.vencimento),
     formatarReais(p.valor),
     p.status === "recebida" ? (
@@ -650,7 +740,14 @@ function Entradas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: 
     ) : (
       <Badge key="s" tom="cinza">A receber</Badge>
     ),
-    agir && p.status === "a_receber" ? (
+    agir && doCartao(p) && p.status === "a_receber" ? (
+      <span key="a" className="inline-flex gap-1.5">
+        {cartao?.fornecedorId && <BotaoMini onClick={() => abrir({ tipo: "repasse", parcela: p })}>Registrar repasse</BotaoMini>}
+        <BotaoMini variante="fantasma" onClick={() => abrir({ tipo: "cancelarParcela", parcela: p })}>Cancelar parcela</BotaoMini>
+      </span>
+    ) : agir && doCartao(p) && p.status === "recebida" ? (
+      <AcaoDireta key="a" rotulo="Desfazer repasse" mini variante="fantasma" executar={() => desfazerRepasse(p.id)} />
+    ) : agir && p.status === "a_receber" ? (
       <span key="a" className="inline-flex gap-1.5">
         <BotaoMini onClick={() => abrir({ tipo: "baixaParcela", parcela: p })}>Dar baixa</BotaoMini>
         <BotaoMini variante="fantasma" onClick={() => abrir({ tipo: "cancelarParcela", parcela: p })}>Cancelar parcela</BotaoMini>
@@ -660,14 +757,17 @@ function Entradas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: 
     ) : null,
   ]);
   return (
-    <Card>
-      <Grade
-        head={["Parcela", "Forma", "Vencimento", "Valor", "Status", ""]}
-        rows={rows}
-        right={[3]}
-        foot={["Total", "", "", formatarReais(v.parcelas.reduce((t, p) => (p.status === "cancelada" ? t : t + p.valor), 0n)), `${formatarReais(v.resumo.recebido)} recebido`, ""]}
-      />
-    </Card>
+    <>
+      {cartao && !cartao.fornecedorId && <EscolhaFornecedorCartao viagemId={v.id} cartao={cartao} agir={agir} />}
+      <Card>
+        <Grade
+          head={["Parcela", "Forma", "Vencimento", "Valor", "Status", ""]}
+          rows={rows}
+          right={[3]}
+          foot={["Total", "", "", formatarReais(v.parcelas.reduce((t, p) => (p.status === "cancelada" ? t : t + p.valor), 0n)), `${formatarReais(v.resumo.recebido)} recebido`, ""]}
+        />
+      </Card>
+    </>
   );
 }
 
@@ -765,7 +865,11 @@ function ContaLinhas({ c, agir, semPagamento, abrir }: { c: ContaVendida; agir: 
                     Pago em {dataBr(p.pagoEm)}: {p.valorBrlPago !== null ? formatarReais(p.valorBrlPago) : ""}
                     {c.moeda !== "BRL" && p.valorOriginalPago !== null && p.cambioEfetivo ? ` (${formatarMoeda(p.valorOriginalPago, c.moeda)} a ${formatarCambio(p.cambioEfetivo)})` : ""}
                   </Badge>
-                  {agir && <AcaoDireta rotulo="Desfazer baixa" mini variante="fantasma" executar={() => desfazerBaixaPagamento(p.id)} />}
+                  {p.peloRepasse ? (
+                    <span className="text-[12px]">Quitado pelo repasse do cartão (desfaça o repasse em Entradas)</span>
+                  ) : (
+                    agir && <AcaoDireta rotulo="Desfazer baixa" mini variante="fantasma" executar={() => desfazerBaixaPagamento(p.id)} />
+                  )}
                 </>
               ) : (
                 agir && <BotaoMini onClick={() => abrir({ tipo: "baixaPagamento", conta: c, pag: p })}>Dar baixa</BotaoMini>

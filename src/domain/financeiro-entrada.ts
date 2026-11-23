@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { hojeEmCuiaba } from "./clientes";
 import { CENTROS, FORMAS_FINANCEIRO, FREQUENCIAS, LADOS, ORIGENS, SITUACOES } from "./financeiro";
-import { data, obrigatorio, reais, texto } from "./venda-entrada";
+import { contaBancariaId, data, obrigatorio, reais, texto } from "./venda-entrada";
 
 // Entradas das actions do financeiro (Zod). Datas "AAAA-MM-DD", competência "AAAA-MM".
 
@@ -111,9 +111,11 @@ export function repasseSchema(hoje: string = hojeEmCuiaba()) {
   return z.strictObject({
     data: dataAteHoje(hoje),
     valorRepassado: reais(false),
-    contaBancariaId: uuid,
+    contaBancariaId,
   });
 }
+
+export type RepasseValidado = z.output<ReturnType<typeof repasseSchema>>;
 
 export const categoriaSchema = z.strictObject({
   lado,

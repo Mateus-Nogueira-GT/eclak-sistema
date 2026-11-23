@@ -4,14 +4,22 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { ZodError } from "zod";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { dividirEmParcelas, datasRecorrentes, ROTULO_FORMA_FINANCEIRO, type FormaFinanceiroSlug } from "@/domain/financeiro";
-import { MSG_FORMA, baixaLancamentoSchema, categoriaSchema, contaBancariaSchema, lancamentoSchema } from "@/domain/financeiro-entrada";
+import { MSG_FORMA, baixaLancamentoSchema, categoriaSchema, contaBancariaSchema, lancamentoSchema, repasseSchema } from "@/domain/financeiro-entrada";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
-import { MSG_MOTIVO, obrigatorio } from "@/domain/venda-entrada";
+import { MSG_FORNECEDOR_CARTAO, MSG_MOTIVO, obrigatorio } from "@/domain/venda-entrada";
 import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { revalidatePath } from "next/cache";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
 import { categoriasFinanceiras, clientes, contasBancarias, fornecedores, lancamentos } from "@/server/db/schema";
+import {
+  baixarRepasseNa,
+  definirFornecedorCartaoNa,
+  Desfazer as DesfazerNaViagem,
+  desfazerRepasseNa,
+  ehFalha,
+  type Feito,
+} from "@/server/financeiro/baixas-viagem";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -427,5 +435,61 @@ export async function cancelarLancamento(id: string, motivo: unknown, alcance: A
     });
     if (r.ok) revalidar();
     return r;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cartão direto no fornecedor (regra a): repasse e fornecedor do cartão (núcleo em `@/server/financeiro/baixas-viagem`)
+// ---------------------------------------------------------------------------
+
+const PARCELA_NAO_ENCONTRADA = falha("Parcela não encontrada");
+const VIAGEM_NAO_ENCONTRADA = falha("Viagem não encontrada");
+
+/** Núcleo da viagem numa transação nova; no sucesso revalida as telas da viagem e do financeiro. */
+async function naViagem(mensagemErro: string, fn: (tx: Transacao) => Promise<Feito | Falha>): Promise<{ ok: true } | Falha> {
+  let r: Feito | Falha;
+  try {
+    r = await db.transaction(fn);
+  } catch (x) {
+    if (x instanceof DesfazerNaViagem || x instanceof Desfazer) return x.falha;
+    throw erroDeBanco(mensagemErro, x);
+  }
+  if (ehFalha(r)) return r;
+  revalidatePath("/viagens");
+  revalidatePath(`/viagens/${r.viagemId}`);
+  revalidatePath("/vendas");
+  revalidar();
+  return { ok: true };
+}
+
+export type RepasseEntrada = { data: string; valorRepassado: string; contaBancariaId: string };
+
+/**
+ * Repasse do fornecedor que recebeu no cartão: baixa a parcela pelo valor (taxa efetiva = repasse esperado − valor
+ * repassado) e quita os pagamentos em aberto desse fornecedor na viagem pelo previsto, sem conta bancária.
+ */
+export async function baixarRepasse(parcelaId: string, dados: RepasseEntrada) {
+  return comPerfil(FINANCEIRO, async (u): Promise<{ ok: true } | Falha> => {
+    if (!ehUuid(parcelaId)) return PARCELA_NAO_ENCONTRADA;
+    const p = repasseSchema().safeParse(dados);
+    if (!p.success) return falhaDeValidacao(p.error);
+    return naViagem("Erro ao registrar o repasse", (tx) => baixarRepasseNa(tx, u.id, parcelaId, p.data));
+  });
+}
+
+/** Desfaz o repasse: a parcela e os pagamentos quitados por ele voltam a ficar em aberto. */
+export async function desfazerRepasse(parcelaId: string) {
+  return comPerfil(FINANCEIRO, async (u): Promise<{ ok: true } | Falha> => {
+    if (!ehUuid(parcelaId)) return PARCELA_NAO_ENCONTRADA;
+    return naViagem("Erro ao desfazer o repasse", (tx) => desfazerRepasseNa(tx, u.id, parcelaId));
+  });
+}
+
+/** Fornecedor que recebeu no cartão (vendas antigas, sem ele): com conta ativa na viagem; antes do repasse. */
+export async function definirFornecedorCartao(viagemId: string, fornecedorId: string) {
+  return comPerfil(FINANCEIRO, async (u): Promise<{ ok: true } | Falha> => {
+    if (!ehUuid(viagemId)) return VIAGEM_NAO_ENCONTRADA;
+    if (!ehUuid(fornecedorId)) return falha(MSG_FORNECEDOR_CARTAO, "fornecedorCartaoId");
+    return naViagem("Erro ao escolher o fornecedor do cartão", (tx) => definirFornecedorCartaoNa(tx, u.id, viagemId, fornecedorId));
   });
 }
