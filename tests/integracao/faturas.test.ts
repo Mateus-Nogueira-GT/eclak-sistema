@@ -2,15 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
+import { hojeEmCuiaba } from "@/domain/clientes";
 import { ErroAcesso } from "@/server/auth";
 import { db } from "@/server/db/client";
 import { auditoria, faturas, faturasContador, faturasVersoes, lancamentosFinanceiros, vendas } from "@/server/db/schema";
 import { definirProximoNumeroFatura, emitirFatura, reemitirFatura } from "@/server/actions/faturas";
-import { cancelarParcela } from "@/server/actions/financeiro-viagem";
+import { baixarParcela, cancelarParcela, desfazerBaixaParcela } from "@/server/actions/financeiro-viagem";
 import { emitirFaturaNa } from "@/server/financeiro/faturas";
 import { listarFaturas, obterFatura, proximoNumeroFatura, vendasParaFaturar } from "@/server/queries/faturas";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
-import { vendida, type Fixture } from "../helpers/venda";
+import { contaBancaria, vendida, type Fixture } from "../helpers/venda";
 
 const SEM_PERMISSAO = { ok: false, erro: "Sem permissão" };
 
@@ -140,6 +141,16 @@ describe("reemitirFatura", () => {
     // situação atual das parcelas (detalhe)
     expect(atual!.parcelas.map((p) => p.status)).toEqual(["a_receber", "cancelada"]);
     expect(await db.select().from(auditoria).where(and(eq(auditoria.tabela, "faturas_versoes")))).toHaveLength(2);
+
+    // recebido = Σ das parcelas recebidas
+    const cb = await contaBancaria(x.fin.id);
+    const p1 = x.parcelas[0];
+    const valor = `${p1.valor / 100n},${(p1.valor % 100n).toString().padStart(2, "0")}`;
+    expect(await comSessao(x.fin.id, () => baixarParcela(p1.id, { recebidaEm: hojeEmCuiaba(), valorRecebido: valor, contaBancariaId: cb }))).toEqual({ ok: true });
+    expect((await comSessao(x.fin.id, () => listarFaturas()))[0]).toMatchObject({ recebido: p1.valor, desatualizada: false });
+    // desfazer o cancelamento traz a parcela de volta: a versão 2 fica desatualizada
+    expect(await comSessao(x.fin.id, () => desfazerBaixaParcela(x.parcelas[1].id))).toEqual({ ok: true });
+    expect((await comSessao(x.fin.id, () => listarFaturas()))[0]).toMatchObject({ desatualizada: true });
   }, 60_000);
 
   it("parcela cancelada antes da emissão fica fora do retrato", async () => {
