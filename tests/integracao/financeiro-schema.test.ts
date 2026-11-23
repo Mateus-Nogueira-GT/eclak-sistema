@@ -25,13 +25,14 @@ describe("esquema do financeiro: dados iniciais", () => {
     await limparBanco();
   });
 
-  it("depois de limparBanco: as 27 categorias do protótipo, as quatro do sistema marcadas", async () => {
+  it("depois de limparBanco: as 27 categorias do protótipo, as cinco do sistema marcadas", async () => {
     const cats = await categoriasNoBanco();
     expect(cats).toHaveLength(27);
     expect(cats.filter((c) => c.lado === "pagar")).toHaveLength(22);
     expect(cats.filter((c) => c.lado === "receber")).toHaveLength(5);
     expect(cats.every((c) => c.ativa)).toBe(true);
     expect(cats.filter((c) => c.sistema).map((c) => [c.lado, c.grupo, c.nome, c.sistema])).toEqual([
+      ["pagar", "Administrativo", "Cartão corporativo", "cartao_corporativo"],
       ["pagar", "Viagens", "Fornecedores de viagem", "fornecedores_viagem"],
       ["receber", "Vendas", "Comissões de hotel", "comissoes_hotel"],
       ["receber", "Vendas", "Comissões de operadora", "comissoes_operadora"],
@@ -48,7 +49,7 @@ describe("esquema do financeiro: dados iniciais", () => {
     await expect(sql`update faturas_contador set proximo = 0`).rejects.toThrow(/faturas_contador_proximo/);
   });
 
-  it("os INSERTs da migração 0020 produzem exatamente os dados do módulo usado por limparBanco", async () => {
+  it("os INSERTs da migração 0020 (com o UPDATE da categoria do cartão, 0032) produzem exatamente os dados do módulo usado por limparBanco", async () => {
     // Executa as instruções INSERT do arquivo da migração (não o módulo) num banco sem os dados iniciais e compara
     // com o módulo: se alguém mudar um dos dois, este teste quebra.
     const migracao = readFileSync("drizzle/0020_financeiro.sql", "utf8");
@@ -59,6 +60,12 @@ describe("esquema do financeiro: dados iniciais", () => {
     expect(inserts.length).toBeGreaterThanOrEqual(2);
     await sql`truncate categorias_financeiras, faturas_contador cascade`;
     for (const s of inserts) await sql.unsafe(s);
+    const updates = readFileSync("drizzle/0032_cartoes_rls_categoria.sql", "utf8")
+      .split("--> statement-breakpoint")
+      .map((s) => s.replace(/^\s*--.*$/gm, "").trim())
+      .filter((s) => /^UPDATE "categorias_financeiras"/i.test(s));
+    expect(updates).toHaveLength(1);
+    for (const s of updates) await sql.unsafe(s);
     expect(await categoriasNoBanco()).toEqual(ordenar(CATEGORIAS_INICIAIS.map((c) => ({ ...c, ativa: true }))));
     expect(await sql`select id, proximo from faturas_contador`).toEqual([{ id: 1, proximo: PROXIMA_FATURA_INICIAL }]);
   });
@@ -331,11 +338,14 @@ describe("view lancamentos_financeiros", () => {
       forma: "boleto",
       exigeIndividual: false,
       repasse: false,
+      valorCaixaPrevisto: x.parcelas[0].valor - x.parcelas[0].taxaPrevista,
+      valorCaixaBaixado: null,
+      dataCaixa: x.parcelas[0].vencimento,
     });
-    // Mesmo número de colunas que a view do banco (24): nenhuma coluna esquecida na declaração.
+    // Mesmo número de colunas que a view do banco (24 + 3 de caixa + fatura do cartão, da 4b): nenhuma coluna esquecida.
     const [cru] = await sql`select * from lancamentos_financeiros limit 1`;
     expect(Object.keys(p)).toHaveLength(Object.keys(cru).length);
-    expect(Object.keys(cru)).toHaveLength(24);
+    expect(Object.keys(cru)).toHaveLength(28);
   });
 
     it("manual: os campos do lançamento", async () => {

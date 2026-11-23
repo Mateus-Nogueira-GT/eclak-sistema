@@ -46,7 +46,7 @@ export const STATUS_LANCAMENTO = ["em_aberto", "baixado", "cancelado"] as const;
 export type StatusLancamento = (typeof STATUS_LANCAMENTO)[number];
 
 /** Categorias fixas usadas pelas linhas de viagem (`categorias_financeiras.sistema`). */
-export const CATEGORIAS_SISTEMA = ["vendas_viagem", "fornecedores_viagem", "comissoes_hotel", "comissoes_operadora"] as const;
+export const CATEGORIAS_SISTEMA = ["vendas_viagem", "fornecedores_viagem", "comissoes_hotel", "comissoes_operadora", "cartao_corporativo"] as const;
 export type CategoriaSistema = (typeof CATEGORIAS_SISTEMA)[number];
 
 export const LADOS = ["pagar", "receber"] as const;
@@ -61,16 +61,25 @@ export function centroDaFilial(filial: Filial): Centro {
 }
 
 /** De onde vem a linha da view `lancamentos_financeiros`. */
-export const ORIGENS = ["manual", "parcela", "pagamento", "comissao"] as const;
+export const ORIGENS = ["manual", "parcela", "pagamento", "comissao", "fatura_cartao"] as const;
 export type Origem = (typeof ORIGENS)[number];
 
 /**
  * Rótulo da `forma` da view (slug) conforme a origem: manual = formas do financeiro; parcela = meio de
- * recebimento; pagamento = forma ao fornecedor; comissão = transferência. Slug desconhecido volta como veio.
+ * recebimento; pagamento = forma ao fornecedor; comissão = transferência; fatura do cartão = cartão de crédito.
+ * Slug desconhecido volta como veio.
  */
 export function rotuloForma(origem: Origem, slug: string): string {
   const tabela: Record<string, string> =
-    origem === "manual" ? ROTULO_FORMA_FINANCEIRO : origem === "parcela" ? ROTULO_MEIO : origem === "pagamento" ? ROTULO_FORMA_FORNECEDOR : { transferencia: "Transferência" };
+    origem === "manual"
+      ? ROTULO_FORMA_FINANCEIRO
+      : origem === "parcela"
+        ? ROTULO_MEIO
+        : origem === "pagamento"
+          ? ROTULO_FORMA_FORNECEDOR
+          : origem === "fatura_cartao"
+            ? { cartao_credito: "Cartão de crédito" }
+            : { transferencia: "Transferência" };
   return Object.hasOwn(tabela, slug) ? tabela[slug] : slug;
 }
 

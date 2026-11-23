@@ -125,6 +125,13 @@ describe("entradas do financeiro da viagem", () => {
     });
     expect(msg(formaFornecedorSchema.safeParse({ tipo: "parcelado", parcelas: [] }))).toBe("Informe as parcelas");
     expect(msg(formaFornecedorSchema.safeParse({ tipo: "cartao_corporativo" }))).toBe("Informe a data");
+    expect(msg(formaFornecedorSchema.safeParse({ tipo: "cartao_corporativo", vencimento: "2027-01-10" }))).toBe("Escolha o cartão corporativo");
+    expect(msg(formaFornecedorSchema.safeParse({ tipo: "cartao_corporativo", vencimento: "2027-01-10", cartaoId: "x" }))).toBe("Escolha o cartão corporativo");
+    expect(formaFornecedorSchema.parse({ tipo: "cartao_corporativo", vencimento: "2027-01-10", cartaoId: "6f1b1d1e-1b1a-4c1d-8e1f-1a1b1c1d1e1f" })).toEqual({
+      tipo: "cartao_corporativo",
+      vencimento: "2027-01-10",
+      cartaoId: "6f1b1d1e-1b1a-4c1d-8e1f-1a1b1c1d1e1f",
+    });
     expect(msg(formaFornecedorSchema.safeParse({ tipo: "boleto" }))).toBe("Forma inválida");
   });
 

@@ -22,11 +22,11 @@ function bissexto(a: number): boolean {
   return (a % 4 === 0 && a % 100 !== 0) || a % 400 === 0;
 }
 
-function diasNoMes(a: number, m: number): number {
+export function diasNoMes(a: number, m: number): number {
   return m === 2 ? (bissexto(a) ? 29 : 28) : [4, 6, 9, 11].includes(m) ? 30 : 31;
 }
 
-function lerData(iso: string): [number, number, number] {
+export function lerData(iso: string): [number, number, number] {
   const r = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!r) throw new Error(MSG_DATA);
   const [a, m, d] = [Number(r[1]), Number(r[2]), Number(r[3])];

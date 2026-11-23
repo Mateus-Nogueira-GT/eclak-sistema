@@ -27,18 +27,21 @@ import { desativarContaBancaria } from "@/server/actions/financeiro";
 import { margensVendidas, obterViagemVendida } from "@/server/queries/vendas";
 import { listarOrcamentos } from "@/server/queries/viagens";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
-import { contaBancaria, vendida as vendidaSemConta, type Fixture } from "../helpers/venda";
+import { cartaoCorporativo, contaBancaria, vendida as vendidaSemConta, type Fixture } from "../helpers/venda";
 
 const SEM_PERMISSAO = { ok: false, erro: "Sem permissão" };
 const CONCILIADA = { ok: false, erro: "Viagem conciliada: desfaça a conciliação para alterar" };
 
 /** Conta bancária ativa do teste em curso (o banco é limpo a cada teste; criada junto com a viagem vendida). */
 let cb = "";
+/** Cartão corporativo ativo do teste em curso (debitado em `cb`). */
+let kc = "";
 
 /** Viagem vendida e uma conta bancária ativa (`cb`) para as baixas. */
 async function vendida(o?: Parameters<typeof vendidaSemConta>[0]): Promise<Fixture> {
   const x = await vendidaSemConta(o);
   cb = await contaBancaria(x.fin.id);
+  kc = await cartaoCorporativo(x.fin.id, cb);
   return x;
 }
 
@@ -54,7 +57,7 @@ const BAIXA_PAGAMENTO = { pagoEm: "2026-11-21", valorOriginalPago: "500,00" };
 /** Todas as actions do financeiro da viagem, com entradas válidas. */
 function todasAsActions(x: Fixture) {
   return {
-    definirFormaFornecedor: () => definirFormaFornecedor(x.passeio.id, { tipo: "cartao_corporativo", vencimento: "2027-07-01" }),
+    definirFormaFornecedor: () => definirFormaFornecedor(x.passeio.id, { tipo: "cartao_corporativo", vencimento: "2027-07-01", cartaoId: kc }),
     definirComissaoTipo: () => definirComissaoTipo(x.hotel.id, { tipo: "descontada" }),
     atualizarPrevisto: () => atualizarPrevisto(x.passeio.id, "600,00", "Fornecedor reajustou"),
     contestar: () => contestar(x.passeio.id, "Cobrança indevida"),
@@ -503,7 +506,7 @@ describe("contas a pagar", () => {
     expect((await db.select().from(contasPagar).where(eq(contasPagar.id, x.passeio.id)))[0].status).toBe("paga");
 
     // cartão corporativo e à vista (mantém o vencimento) em outra conta
-    expect(await comSessao(x.fin.id, () => definirFormaFornecedor(x.hotel.id, { tipo: "cartao_corporativo", vencimento: "2027-07-20" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => definirFormaFornecedor(x.hotel.id, { tipo: "cartao_corporativo", vencimento: "2027-07-20", cartaoId: kc }))).toEqual({ ok: true });
     let [h] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.hotel.id));
     expect(h).toMatchObject({ vencimento: "2027-07-20", valorOriginal: 310600n, valorBrlPrevisto: 310600n });
     expect(await comSessao(x.fin.id, () => definirFormaFornecedor(x.hotel.id, { tipo: "a_vista" }))).toEqual({ ok: true });

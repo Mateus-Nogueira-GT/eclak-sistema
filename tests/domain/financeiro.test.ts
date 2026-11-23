@@ -33,7 +33,7 @@ describe("listas do financeiro", () => {
     ]);
     expect(LADOS).toEqual(["pagar", "receber"]);
     expect(CENTROS).toEqual(["MT", "RS"]);
-    expect(ORIGENS).toEqual(["manual", "parcela", "pagamento", "comissao"]);
+    expect(ORIGENS).toEqual(["manual", "parcela", "pagamento", "comissao", "fatura_cartao"]);
     expect(SITUACOES).toEqual(["vencida", "vence_hoje", "a_vencer", "baixada", "cancelada"]);
   });
 });
@@ -130,6 +130,9 @@ describe("rotuloForma (slug da view → texto, por origem)", () => {
   it("comissão é transferência", () => {
     expect(rotuloForma("comissao", "transferencia")).toBe("Transferência");
   });
+  it("fatura do cartão é cartão de crédito", () => {
+    expect(rotuloForma("fatura_cartao", "cartao_credito")).toBe("Cartão de crédito");
+  });
   it("slug desconhecido volta como veio", () => {
     expect(rotuloForma("pagamento", "boleto")).toBe("boleto");
   });
@@ -145,6 +148,18 @@ describe("motivoForaDoLote", () => {
     expect(motivoForaDoLote({ ...base, origem: "parcela", repasse: true, exigeIndividual: true })).toMatch(/escolha o fornecedor/);
     expect(motivoForaDoLote({ ...base, origem: "pagamento", transitaCaixa: false })).toMatch(/Não passa pelo caixa/);
     expect(motivoForaDoLote({ ...base, origem: "pagamento", exigeIndividual: true })).toMatch(/moeda estrangeira/);
+  });
+  it("fatura do cartão: entra no lote; com compra em moeda estrangeira, baixa individual", () => {
+    expect(motivoForaDoLote({ ...base, origem: "fatura_cartao" })).toBeNull();
+    expect(motivoForaDoLote({ ...base, origem: "fatura_cartao", exigeIndividual: true })).toBe(
+      "Fatura do cartão com compra em moeda estrangeira: dê baixa individual com o valor em reais cobrado",
+    );
+  });
+  it("compra no cartão corporativo: só pela fatura do cartão", () => {
+    expect(motivoForaDoLote({ ...base, transitaCaixa: false, faturaCartaoId: "f" })).toBe("Compra no cartão corporativo: dê baixa na fatura do cartão");
+    expect(motivoForaDoLote({ ...base, origem: "pagamento", transitaCaixa: false, exigeIndividual: true, faturaCartaoId: "f" })).toBe(
+      "Compra no cartão corporativo: dê baixa na fatura do cartão",
+    );
   });
 });
 

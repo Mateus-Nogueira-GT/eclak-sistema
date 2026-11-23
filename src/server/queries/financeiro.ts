@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, gte, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, gte, inArray, isNull, lte, ne, not, or, sql, type SQL } from "drizzle-orm";
 import type { Moeda } from "@/domain/cambio";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { LADOS, type Lado, type Origem, type Situacao } from "@/domain/financeiro";
@@ -7,6 +7,8 @@ import { filtroLancamentosSchema, type FiltroLancamentos } from "@/domain/financ
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
+import { contarAnexosDe } from "@/server/queries/anexos";
+import { saldoAtualSql } from "@/server/queries/caixa";
 import { db } from "@/server/db/client";
 import { categoriasFinanceiras, contasBancarias, contasPagar, lancamentos, lancamentosFinanceiros as lf, pagamentosFornecedor } from "@/server/db/schema";
 
@@ -45,14 +47,14 @@ export async function listarCategorias(lado?: Lado): Promise<GrupoCategorias[]> 
   return grupos;
 }
 
-export type ContaBancariaItem = typeof contasBancarias.$inferSelect;
+export type ContaBancariaItem = typeof contasBancarias.$inferSelect & { saldoAtual: bigint };
 
-/** Contas bancárias não excluídas, por nome; `ativas: true` só as ativas. */
+/** Contas bancárias não excluídas, por nome, com o saldo atual; `ativas: true` só as ativas. */
 export async function listarContasBancarias(filtro: { ativas?: boolean } = {}): Promise<ContaBancariaItem[]> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
   const sem = isNull(contasBancarias.excluidoEm);
   return db
-    .select()
+    .select({ ...getTableColumns(contasBancarias), saldoAtual: saldoAtualSql })
     .from(contasBancarias)
     .where(filtro.ativas ? sql`${sem} and ${contasBancarias.ativa}` : sem)
     .orderBy(asc(contasBancarias.nome));
@@ -94,11 +96,15 @@ export type LinhaLancamento = {
   forma: string;
   exigeIndividual: boolean;
   repasse: boolean;
+  /** Compra numa fatura do cartão corporativo (só aparece cancelada: a ativa sai pela linha da fatura). */
+  faturaCartaoId: string | null;
   situacao: Situacao;
   categoria: { grupo: string; nome: string };
   contaBancaria: string | null;
   moeda: Moeda | null;
   valorOriginal: bigint | null;
+  /** Anexos não removidos da linha. */
+  anexos: number;
 };
 
 export type ListaLancamentos = { linhas: LinhaLancamento[]; totalLinhas: number; totais: TotaisLancamentos };
@@ -125,14 +131,22 @@ function periodo(f: FiltroLancamentos): SQL {
 
 const escaparLike = (t: string) => t.replace(/[\\%_]/g, (c) => `\\${c}`);
 
-/** Filtros comuns à lista, à contagem e aos totais (sem lado, situação e período). */
+/**
+ * Filtros comuns à lista, à contagem e aos totais (sem lado, situação e período). As compras de uma fatura do
+ * cartão corporativo (`fatura_cartao_id`) não aparecem: a lista mostra a linha da fatura no lugar delas. A cancelada
+ * (pagamento de conta cancelada, que não conta na fatura) continua visível no filtro Canceladas.
+ * Origem "viagem" = parcelas, pagamentos e comissões; "manual" = o resto (lançamentos à mão e faturas do cartão).
+ */
 function filtrosComuns(f: FiltroLancamentos): SQL[] {
-  const c: SQL[] = [];
+  const c: SQL[] = [or(isNull(lf.faturaCartaoId), eq(lf.statusBase, "cancelado"))!];
   if (f.categoriaId) c.push(eq(lf.categoriaId, f.categoriaId));
   if (f.grupo) c.push(eq(categoriasFinanceiras.grupo, f.grupo));
   if (f.centro) c.push(eq(lf.centro, f.centro));
   if (f.contaBancariaId) c.push(eq(lf.contaBancariaId, f.contaBancariaId));
-  if (f.origem) c.push(f.origem === "manual" ? eq(lf.origem, "manual") : ne(lf.origem, "manual"));
+  if (f.origem) {
+    const daViagem = inArray(lf.origem, ["parcela", "pagamento", "comissao"]);
+    c.push(f.origem === "viagem" ? daViagem : not(daViagem));
+  }
   if (f.busca) {
     const p = `%${escaparLike(f.busca)}%`;
     // Sem acento e sem caixa em descrição e pessoa; código da viagem e número da fatura como texto.
@@ -194,6 +208,7 @@ export async function listarLancamentos(filtro: FiltroLancamentos): Promise<List
         forma: lf.forma,
         exigeIndividual: lf.exigeIndividual,
         repasse: lf.repasse,
+        faturaCartaoId: lf.faturaCartaoId,
         situacao,
         grupo: categoriasFinanceiras.grupo,
         categoriaNome: categoriasFinanceiras.nome,
@@ -234,8 +249,14 @@ export async function listarLancamentos(filtro: FiltroLancamentos): Promise<List
   for (const t of totais) {
     porLado[t.lado] = { vencidos: BigInt(t.vencidos), venceHoje: BigInt(t.venceHoje), aVencer: BigInt(t.aVencer), baixados: BigInt(t.baixados) };
   }
+  // Anexos da página: uma consulta agrupada para as linhas mostradas.
+  const anexosPorLinha = await contarAnexosDe(linhas.map((l) => ({ donoTipo: l.origem, donoId: l.id })));
   return {
-    linhas: linhas.map(({ grupo, categoriaNome, ...l }) => ({ ...l, categoria: { grupo, nome: categoriaNome } })),
+    linhas: linhas.map(({ grupo, categoriaNome, ...l }) => ({
+      ...l,
+      categoria: { grupo, nome: categoriaNome },
+      anexos: anexosPorLinha.get(`${l.origem}:${l.id}`) ?? 0,
+    })),
     totalLinhas: contagem?.n ?? 0,
     totais: porLado,
   };

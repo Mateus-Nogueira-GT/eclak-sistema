@@ -4,7 +4,7 @@ Atualizado em 23/11/2026. Leia este arquivo inteiro antes de mexer no código. E
 
 ## 1. Em uma frase
 
-O sistema real da ECLAK Viagens (agência de turismo de alto padrão de Rondonópolis-MT, diretor Augusto Kraemer) está sendo construído **por fatias**. As fatias **1, 2, 3a, 3b e 4a estão prontas, revisadas e mergeadas em `main`** (PRs #1 a #5, em 23/11/2026, com o "sim" do Mateus). **A 4b (Financeiro: fluxo de caixa, reserva, anexos e notas fiscais, cartão corporativo) está pronta no PR #6** (branch `claude/fatia-4b-caixa`), ainda não mergeado. **A fatia 5a (Operação: tarefas, roteiro e dailies) está pronta na branch `claude/fatia-5a-operacao`**, que parte de `main` **sem a 4b**; o PR da 5a será aberto com base `main` depois do merge da 4b, com rebase (ver §2). **A próxima é a 5b (Reembolsos, Estoque, Caixa de experiência, Avisos), que depende do retorno do grupo e da Valeska (§8)**. Nada foi publicado (sem Railway, sem Supabase de produção).
+O sistema real da ECLAK Viagens (agência de turismo de alto padrão de Rondonópolis-MT, diretor Augusto Kraemer) está sendo construído **por fatias**. As fatias **1, 2, 3a, 3b, 4a e 4b estão prontas, revisadas e mergeadas em `main`** (PRs #1 a #6, em 23/11/2026, com o "sim" do Mateus; a 4b — fluxo de caixa, reserva, anexos, notas fiscais e cartão corporativo — entrou pelo PR #6). **A fatia 5a (Operação: tarefas, roteiro e dailies) está pronta na branch `claude/fatia-5a-operacao`**, já integrada com `main` (merge de `main` com a 4b, migrações da 5a regeneradas depois das da 4b); o PR da 5a ainda será aberto, com base `main`, só com o "sim" do Mateus. **A próxima é a 5b (Reembolsos, Estoque, Caixa de experiência, Avisos), que depende do retorno do grupo e da Valeska (§8)**. Nada foi publicado (sem Railway, sem Supabase de produção).
 
 ## 2. Onde está cada coisa
 
@@ -17,7 +17,7 @@ O sistema real da ECLAK Viagens (agência de turismo de alto padrão de Rondonó
 O protótipo está publicado em https://prototipo-financeiro-six.vercel.app (publicado em 17/11/2026, 31 telas). **Não republicar sem o "sim" explícito do Mateus** (é preciso vincular o projeto Vercel "prototipo-financeiro").
 
 ### Branches e PRs
-Os PRs #1 a #5 foram mergeados em `main` em ordem (merge commit, branches mantidas). **Toda fatia nova parte de `main`** numa branch `claude/fatia-…` e abre PR com base `main`. Atenção: a branch padrão do GitHub ainda é `claude/fatia-1-base`; ao abrir PR, passe `--base main`.
+Os PRs #1 a #6 foram mergeados em `main` em ordem (merge commit, branches mantidas). **Toda fatia nova parte de `main`** numa branch `claude/fatia-…` e abre PR com base `main`. Atenção: a branch padrão do GitHub ainda é `claude/fatia-1-base`; ao abrir PR, passe `--base main`.
 
 | Fatia | Branch | PR |
 |---|---|---|
@@ -26,16 +26,10 @@ Os PRs #1 a #5 foram mergeados em `main` em ordem (merge commit, branches mantid
 | 3a Cotação → proposta aprovada | `claude/fatia-3a-precificacao` | [#3](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/3) |
 | 3b Venda → margem real | `claude/fatia-3b-venda` | [#4](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/4) |
 | 4a Lançamentos e faturas | `claude/fatia-4-financeiro` | [#5](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/5) |
-| 4b Caixa, reserva, anexos e cartão corporativo | `claude/fatia-4b-caixa` | [#6](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/6) (aberto, não mergeado) |
-| 5a Operação (tarefas, roteiro, dailies) | `claude/fatia-5a-operacao` | a abrir (base `main`, depois do merge da 4b) |
+| 4b Caixa, reserva, anexos e cartão corporativo | `claude/fatia-4b-caixa` | [#6](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/6) |
+| 5a Operação (tarefas, roteiro, dailies) | `claude/fatia-5a-operacao` | a abrir (base `main`, só com o "sim" do Mateus) |
 
-**Rebase da 5a depois do merge da 4b (receita).** A 5a foi construída sobre `main` sem a 4b, e as duas fatias criaram migrações com os mesmos números. **Não renomeie as migrações: regenere.** O `drizzle-kit migrate` registra no banco só o `created_at` da última migração aplicada e **pula as entradas do journal mais antigas que ela**, então uma 0026 renumerada para depois da 4b mas com data antiga nunca roda num banco que já tem a 4b.
-1. Na branch da 5a, antes do rebase, guarde o SQL custom: `cp drizzle/0027_operacao_rls.sql /tmp/operacao_rls.sql`.
-2. Num commit da 5a, apague `drizzle/0026_operacao.sql`, `drizzle/0027_operacao_rls.sql`, `drizzle/meta/0026_snapshot.json`, `drizzle/meta/0027_snapshot.json` e as entradas `0026_operacao` e `0027_operacao_rls` de `drizzle/meta/_journal.json`.
-3. `git rebase main` (com a 4b) e resolva os conflitos esperados: `src/components/shell.tsx` (menu), `src/app/(app)/viagens/[id]/page.tsx` (trilha da viagem), `tests/integracao/rls.test.ts` (tabelas novas das duas fatias), `scripts/seed-local.ts` (chamadas dos seeds), `README.md` e este `HANDOFF.md`.
-4. `npm run db:generate` (gera a migração das tabelas e enums da 5a com o próximo número depois da 4b) e `npx drizzle-kit generate --custom --name operacao_rls`; cole nela o SQL guardado no passo 1 (RLS, índices parciais e CHECKs), sem mudar nada.
-5. Banco local do zero, porque o journal mudou: `npx supabase db reset && npm run db:migrate`.
-6. Gate completo (uma execução por vez: a integração trunca o banco) e `npm run seed:local` duas vezes (idempotência).
+**Integração da 5a com a 4b (feita em 23/11/2026).** A 5a foi construída sobre `main` sem a 4b, e as duas fatias criaram migrações com os mesmos números. Em vez de renomear, as migrações da 5a foram apagadas num commit, `main` (com a 4b) foi mergeada na branch da 5a e as migrações foram **regeneradas** depois das da 4b (0035_operacao e 0036_operacao_rls), com o SQL custom de RLS, índices parciais e CHECKs colado sem mudança. Motivo: o `drizzle-kit migrate` registra no banco só o `created_at` da última migração aplicada e **pula as entradas do journal mais antigas que ela**, então uma migração renumerada mas com data antiga nunca rodaria num banco que já tem a 4b. Quem tinha banco local da 5a antiga precisa de `npx supabase db reset && npm run db:migrate`.
 
 ### Documentos
 - Desenho geral (spec): `docs/superpowers/specs/2026-11-18-backend-sistema-real-design.md`
@@ -46,6 +40,7 @@ Os PRs #1 a #5 foram mergeados em `main` em ordem (merge commit, branches mantid
   - `docs/superpowers/plans/2026-11-22-fatia-3b-venda.md` (tem a seção **"Para a fatia 4"**)
   - `docs/superpowers/plans/2026-11-22-fatia-4a-lancamentos-faturas.md` (tem a seção **"Para a 4b"**)
 - Desenho da fatia 4 (4a e 4b): `docs/superpowers/specs/2026-11-22-fatia-4-financeiro-design.md`
+- Plano da 4b: `docs/superpowers/plans/2026-11-23-fatia-4b-caixa.md` (tem os 12 rulings).
 - `README.md`: como rodar, banco local, seed, convite/senha, RLS e **passo a passo do deploy** (ainda não executado).
 - Protótipo, para regras e visual: `eclak-mockup/PRODUCT.md`, `eclak-mockup/DESIGN.md`, `eclak-mockup/src/app/**`, `eclak-mockup/src/lib/**`.
 
@@ -79,7 +74,7 @@ src/server/auditoria.ts     registrarAuditoria (sempre na mesma transação)
 src/server/financeiro/      núcleo das baixas (baixas-viagem.ts) e faturas (server-only, sem "use server")
 src/server/operacao/        criarTarefasAutomaticas (server-only, usada pela venda, pelo botão e pela aprovação do roteiro)
 src/app/(app)/       telas logadas; src/app/login, /auth/confirmar, /definir-senha
-drizzle/             migrações 0000–0027 na 5a (geradas + custom para RLS, índices, enums; renumerar depois da 4b)
+drizzle/             migrações 0000–0036 (geradas + custom para RLS, índices, enums; 0026–0034 da 4b, 0035_operacao e 0036_operacao_rls da 5a)
 scripts/             seed-local, seed-orcamentos, seed-vendas, seed-financeiro, seed-operacao, criar-diretor, local-guard, postbuild
 tests/domain, tests/integracao (integração roda contra Supabase local e TRUNCA o banco)
 ```
@@ -109,6 +104,8 @@ tests/domain, tests/integracao (integração roda contra Supabase local e TRUNCA
 **Fatia 3b — Da venda à margem real.** Fechamento da venda (só com orçamento aprovado; forma diferente volta ao Diretor; ajustes do cliente voltam à precificação); parcelas a receber exatas; contas a pagar a partir da cotação escolhida; comissão por reserva (descontada ou a receber); baixas (só Diretor e financeiro) com câmbio efetivo; atualizar previsto com motivo (complemento se a conta já estava paga); contestação; conciliação; **margem real com a mesma fórmula da aprovação** e ponte planejada → real com soma exata; status Vendida / Em viagem / Recebendo / Conciliada; aviso de passaporte pela data de volta (6 meses).
 
 **Fatia 4a — Lançamentos e faturas.** Menu Financeiro (só Diretor e financeiros): **lista única** a pagar e a receber no modelo Conta Azul (abas, filtros período/situação/categoria/centro, totais vencidos/vencem hoje/a vencer/pagos, baixa individual e em lote), juntando lançamentos manuais (único, parcelado, recorrente com "só esta"/"esta e as próximas") e as linhas das viagens pela view `lancamentos_financeiros` (sem duplicar dado); **a mesma baixa** na lista e na viagem (núcleo `src/server/financeiro/baixas-viagem.ts`), com **conta bancária obrigatória**; desfazer baixa e desfazer cancelamento; categorias em dois níveis editáveis (27 iniciais); contas bancárias; **cartão direto no fornecedor** (regra a: linha de repasse; esperado − repassado = taxa; valor repassado gravado na parcela); **faturas a partir de 1405** sem buracos (contador travado), retrato por emissão, aviso de desatualizada, reemissão com o mesmo número, impressão; próximo número ajustável em Parâmetros enquanto não houver fatura. Parâmetros vigentes lidos pelo relógio do banco.
+
+**Fatia 4b — Caixa, anexos, notas e cartões.** *Fluxo de caixa* (`/financeiro/caixa`): saldo atual por conta (saldo inicial + baixas desde a data, só o que transita pelo caixa), projeção de 8 semanas e 12 meses a partir das linhas em aberto (valor líquido de taxa de cartão/boleto; crédito antecipado no 1º vencimento; vencidas marcadas na semana/mês atual), filtros centro/viagem/tipo, reserva = 6 × custo fixo mensal (Parâmetros) com "atingida em"; coluna Saldo atual em Contas bancárias; migrações de view 0026, 0033 e 0034. *Anexos* no Supabase Storage (bucket privado `anexos`, migração 0028; PDF/PNG/JPEG até 10 MB conferidos pelos bytes; URL assinada de 60 s; `bodySizeLimit` e `proxyClientMaxBodySize` "11mb") em qualquer linha da lista, faturas do cartão e notas fiscais. *Notas fiscais* (`/financeiro/notas-fiscais`): CPF/CNPJ validado, número único entre não canceladas, cancelar com motivo, PDF anexo, filtros período/destinatário. *Cartões corporativos* (`/financeiro/cartoes`): cadastro (final, fechamento e vencimento 1–28, conta de débito, centro); compras = lançamento a pagar em Cartão de crédito + cartão e pagamentos de viagem na forma Cartão corporativo + cartão; cada compra cai na fatura do ciclo; a fatura é UMA linha na lista e no caixa; baixa da fatura quita todas as compras (uma saída no banco; compra estrangeira com valor em reais informado → câmbio efetivo); desfazer; compra vinculada não tem baixa direta; `definirFormaFornecedor` recusa com fatura paga. Seed local: cartão "Visa Corporativo" (final 4821) com 3 compras e 1 nota fiscal sem anexo.
 
 **Fatia 5a — Operação.** Menu Operação com **Tarefas** (`/tarefas`: minhas e todas; filtros por responsável, situação e viagem), **Roteiros** (`/roteiros`: vendidas não terminadas, com a situação do roteiro) e **Dailies** (`/dailies`: de hoje a +3 dias), abertos aos cinco perfis e sem nenhum valor de custo, margem ou comissão. Na viagem vendida, trilha **Viagem · Roteiro · Tarefas · Dailies**. **Tarefas:** 6 categorias do protótipo, prazo (sem prazo, data ou N dias antes do embarque), responsável, marca Customer care, conclusão, exclusão lógica, impressão `TAREFAS_<TITULAR>_<DESTINO>_<ini>-<fim>`; **5 automáticas ao fechar a venda** (venda + 1/2/7 dias, limitadas ao início) e **3 ao aprovar o roteiro** (60/60/90 dias antes), idempotentes por `(viagem, chave)`; botão "Criar as tarefas da venda" para viagens vendidas antes da 5a. **Roteiro (RT):** documento `jsonb` com dias das datas da viagem, DICA ECLAK, "Por que escolhemos", gastronomia, hotéis e voos pré-preenchidos, aviso de aniversário, fluxo rascunho > aguardando o cliente > aprovado, edição com controle de edição simultânea e impressão `RT_…`. **Dailies:** texto gerado sob demanda pelo modelo ECLAK (D-2 gerar, D-1 enviar), 6 indicadores de padrão, estados A gerar > Gerado, a revisar > Pronto para enviar > Enviado (dia que já passou sem texto fica "Não gerado", em cinza), plantão e nota interna, conversão de fuso (Itália × MT e Brasília). Encerramento do daily como parâmetro versionado em Admin › Parâmetros, card "Operação". Seed: tarefas da venda nas viagens vendidas e, na Família Ribeiro, tarefas manuais, roteiro aprovado e dois dailies. Fora da 5a (vai para a 5b e a 6): Reembolsos, Estoque, Caixa de experiência, Avisos, vouchers em PDF, Trello, Drive, "Reescrever com IA", agendador de dailies.
 
@@ -142,6 +139,20 @@ Fatia 4 (Mateus, 22/11/2026): fatura começa em **1405**; sem importação dos l
 
 Fatia 4a (Claude, conferir): rótulos das formas de pagamento só no TypeScript (a view emite códigos); o repasse a menos entra como taxa na margem real (a margem não muda além disso); o bloqueio "pago no cartão do fornecedor" vale só para contas em reais (pagamento em euro desse fornecedor segue baixado na viagem); o card "Vencidos" soma só o período filtrado (padrão: mês atual).
 
+Fatia 4b (Claude, conferir) — "Decisões do Claude (conferir)":
+1. **Valor no caixa (decisão 12 do desenho):** parcela de cartão de crédito ou boleto entra pelo líquido (previsto − taxa prevista; recebido − taxa efetiva). Repasse já é líquido. Pix, comissões, lançamentos manuais e pagamentos: valor cheio. Crédito com antecipação (`vendas.forma->>'antecipado' = 'true'`): `data_caixa` = primeiro vencimento em aberto do cartão dessa venda.
+2. **Saldo da conta** = saldo inicial + Σ entradas − Σ saídas com `baixado_em >= saldo_inicial_em`, só linhas `transita_caixa`. Baixas antigas sem conta bancária (anteriores à 4a) não entram em conta nenhuma.
+3. **Fluxo:** base = saldo atual somado de todas as contas ativas; filtros (centro, viagem, tipo) filtram só os movimentos, não o saldo inicial. Tipos: Clientes (parcelas), Fornecedores (pagamentos de viagem), Comissões, Empresa (manuais fora de cartão), Cartão (faturas do cartão).
+4. **Reserva:** meta = 6 × `custoFixoMensal` vigente (Parâmetros); "atingida em" = primeiro mês da projeção cujo saldo de fim de mês ≥ meta; senão "não atingida em 12 meses".
+5. **Anexos** valem para qualquer linha da lista (manual, parcela, pagamento, comissão, fatura do cartão) e para notas fiscais: tabela `anexos` com `dono_tipo` + `dono_id` (sem FK; existência conferida na action).
+6. **Upload** por Server Action com `serverActions.bodySizeLimit: "11mb"` (o padrão é 1 MB). Download por URL assinada de 60 s gerada no servidor.
+7. **Notas fiscais:** número, data de emissão, competência, valor, destinatário (texto, opcionalmente fornecedor ou cliente), CPF/CNPJ (validado), viagem opcional, observação, PDF anexo. Cancelar com motivo (não apaga). Colunas da PLANILHA NOTAS FISCAIS entram quando ela chegar.
+8. **Cartão corporativo:** cadastro (nome, final de 4 dígitos, dia de fechamento 1–28, dia de vencimento 1–28, conta bancária de débito, centro de custo, ativo). Ciclo: compra com dia ≤ fechamento cai na fatura do mês; depois do fechamento, na do mês seguinte; vencimento = dia de vencimento do mês seguinte ao fechamento se o dia de vencimento ≤ dia de fechamento, senão do mesmo mês do fechamento.
+9. **Compras:** lançamento manual a pagar com forma `cartao_credito` + cartão; pagamento a fornecedor de conta com forma `cartao_corporativo` + cartão (o cartão escolhido no `definirFormaFornecedor`; a data informada é a da compra). A fatura (`faturas_cartao`, uma por cartão e fechamento) nasce na primeira compra; compra em fatura já paga é recusada.
+10. **Moeda estrangeira no cartão:** a compra estrangeira entra na fatura pelo previsto em reais; na baixa da fatura, o financeiro informa o valor em reais cobrado de cada compra estrangeira (com IOF); esse valor vira `valor_brl_pago` e o câmbio efetivo = valor em reais ÷ valor original (4 casas). Fatura com compra estrangeira exige baixa individual.
+11. **Baixa da fatura do cartão:** uma saída no banco (conta de débito do cartão ou outra ativa) pelo total; compras de viagem ficam `pago` com `conta_bancaria_id` nulo e `fatura_cartao_id`; manuais ficam `baixado` com a conta da baixa da fatura, mas fora do caixa (a view as marca `transita_caixa = false`). Desfazer a baixa da fatura volta tudo.
+12. `definirFormaFornecedor` recusa trocar a forma quando algum pagamento da conta está numa fatura do cartão paga ("Desfaça a baixa da fatura do cartão antes"); se a fatura está em aberto, as compras são desvinculadas e a fatura recalcula (fatura sem compras some da lista).
+
 Fatia 5a (Claude, **conferir com o Mateus**; D1–D32 completas no spec `docs/superpowers/specs/2026-11-23-fatia-5-operacao-design.md` §7, com o custo de trocar):
 - Estrutura: base em `main` sem a 4b (D1); conteúdo do roteiro em `jsonb` validado, uma linha por viagem (D2); tarefas, roteiro e dailies só para viagem vendida (D3); concorrência otimista por `atualizado_em` (padrão Clientes), sem `travarViagem` fora da venda (D9).
 - Tarefas: prazo só "data" ou "N dias antes" (D4); 8 automáticas com as categorias e prazos do spec (D5); automática excluída não volta (D6); viagens antigas ganham as tarefas pelo botão, já vencidas (D7, D29); "Customer care" é uma marca, não um usuário (D8); prazo da venda limitado ao início (D30).
@@ -158,7 +169,7 @@ Fatia 5a (Claude, **conferir com o Mateus**; D1–D32 completas no spec `docs/su
 
 ## 8. Próximo passo
 
-**Imediato:** mergear o PR #6 (4b), rebasear a `claude/fatia-5a-operacao` sobre `main` (ver §2), abrir o PR da 5a com `--base main` e revisar. Depois, a **5b**, que **depende do retorno do grupo e da Valeska** sobre Reembolsos, Estoque, Caixa de experiência e Avisos por setor, e do **texto oficial de encerramento do daily** (entra por Admin › Parâmetros, sem código). Escopo e perguntas no spec `docs/superpowers/specs/2026-11-23-fatia-5-operacao-design.md` §6 e no fim do plano da 5a ("Para a 5b e a fatia 6"):
+**Imediato:** abrir o PR da `claude/fatia-5a-operacao` com `--base main` (só com o "sim" do Mateus) e revisar; a 4b já está em `main` (PR #6) e a 5a já foi integrada com ela (ver §2). Depois, a **5b**, que **depende do retorno do grupo e da Valeska** sobre Reembolsos, Estoque, Caixa de experiência e Avisos por setor, e do **texto oficial de encerramento do daily** (entra por Admin › Parâmetros, sem código). Escopo e perguntas no spec `docs/superpowers/specs/2026-11-23-fatia-5-operacao-design.md` §6 e no fim do plano da 5a ("Para a 5b e a fatia 6"):
 - Reembolsos e Estoque com lançamentos na lista única da 4a (categorias "Reembolso a cliente", "Reembolso de fornecedor", "Caixa de experiência", "Papelaria").
 - Caixa de experiência como custo da viagem na margem real (mexe em `margemReal`: exige decisão explícita).
 - Avisos por setor, com os eventos candidatos da 5a (tarefa vencida, daily "A gerar", aniversário na viagem).
@@ -176,8 +187,11 @@ Perguntas abertas da 5b (spec §6):
 
 Materiais pendentes da 5a: PDFs reais TAREFAS e RT (conferir colunas e layout da impressão), fontes da marca (Evaida, CA Saygon Text) para o PDF do RT, lista de destinos frequentes com idioma e fuso. **Fatia 6:** Trello (as automáticas já têm `chave` estável), Drive (pastas `ECL-NNNN_TITULAR_DESTINO_ini-fim`), vouchers em PDF no daily (Storage da 4b), "Reescrever com IA", plano logístico e mapas, agendador que chame `gerarDaily` em D-2.
 
-### 8.0 Fatia 4b (Financeiro), já pronta no PR #6
+### 8.0 Histórico: escopo da 4b (entregue no PR #6)
 
+A 4b está pronta na branch `claude/fatia-4b-caixa`; abrir o PR (`--base main`) só com o "sim" do Mateus. Depois, a **fatia 5 — Operação** (desenho geral, seção 6): tarefas, roteiros (RT com DICA ECLAK e "Por que escolhemos"), dailies (texto de encerramento ainda pendente do cliente), reembolsos, estoque por filial (tipo `Produto`), caixa de experiência e avisos por setor (notificações). Materiais ainda pendentes do cliente: modelo `FATURA_1405_…pdf`, plano de categorias do Conta Azul, `CUSTOS FIXOS.xlsx`, `PLANILHA NOTAS FISCAIS.xlsx`.
+
+### 8.0 Histórico: escopo da 4b (entregue)
 Escopo no desenho (`docs/superpowers/specs/2026-11-22-fatia-4-financeiro-design.md`, §6.5) e notas na seção "Para a 4b" do plano da 4a: fluxo de caixa com projeção de 12 meses (realizado + previsto da view `lancamentos_financeiros`, só `transita_caixa`), meta de reserva de 6 meses de custo fixo, anexos e notas fiscais (Supabase Storage, primeiro uso), faturas de cartão corporativo (custo variável, IOF). Referências no protótipo: `src/app/{fluxo-de-caixa,notas-fiscais,relatorios}/page.tsx`, `src/components/{reserva-projecao,cash-chart,operacionais}.tsx`, `src/lib/calc.ts`.
 
 ### 8.1 Referência: Conta Azul (pedido da Valeska)
@@ -190,12 +204,20 @@ Materiais ainda não recebidos (Drive da Valeska): `CUSTOS FIXOS.xlsx` (base da 
 - Card "Vencidos": só o período filtrado ou todos os vencidos.
 - Numeração 1405 e telas do financeiro só para Diretor e financeiros.
 
+### 8.2b Para confirmar com a Valeska ou o Augusto (4b)
+- Os rulings 1 a 12 acima (em especial: valor líquido de taxa no caixa, reserva = 6 × custo fixo de Parâmetros, ciclo do cartão, baixa única da fatura).
+- Filtros por categoria, centro e origem mudam quando uma compra vai para o cartão (ela passa a aparecer só dentro da fatura); o total geral não muda.
+- A busca por código da viagem não acha pagamento já pago no cartão (ele some da lista, fica na fatura).
+- IOF nas compras estrangeiras: informado na baixa da fatura, dentro do valor em reais de cada compra.
+- Custo fixo da reserva vem de Parâmetros (até chegar o `CUSTOS FIXOS.xlsx`).
+- Deploy: confirmar no primeiro deploy que a migração 0028 criou o bucket `anexos` em produção e que a 0032 marcou a categoria de sistema "Cartão corporativo".
+
 ### 8.3 Pendências menores da 4a (não bloqueiam)
 Teste de auditoria sem `orderBy`; sem teste de concorrência no "esta e as próximas"; repasse esperado negativo sem mensagem própria; fornecedor do cartão não editável na tela depois de definido; "Código" da lista é o id curto; datas no formato do navegador; rótulo da forma não cita a entrada; seed não zera o contador de faturas; idempotência do seed pela descrição.
 
 ### 8.4 Pendências menores da 5a (não bloqueiam)
 - Seed da operação: tarefas manuais idempotentes por viagem + item (se alguém renomear o item no app, o seed recria); o seed ajusta o nascimento do Lucas Ribeiro para cair dentro da viagem (aniversário de exemplo); a tarefa de Customer care nasce sem responsável (regra `tarefas_um_responsavel`).
-- Verificação no navegador com os cinco perfis feita na onda final da revisão (23/11/2026); vale repetir depois do rebase sobre a 4b.
+- Verificação no navegador com os cinco perfis feita na onda final da revisão (23/11/2026); depois da integração com a 4b, smoke como Financeiro estratégico em /financeiro/caixa, /financeiro/cartoes, viagem vendida (trilha, entradas), roteiro, /tarefas e /dailies, sem erros.
 - `npm run test:integracao` tem trava: o global setup (`tests/integracao/trava-global.ts`) pega um advisory lock do Postgres e uma segunda execução simultânea falha logo com mensagem clara. Um `npx vitest run tests/integracao/…` avulso não passa pela trava.
 - Achados menores da revisão deixados para depois:
   - `marcarEnviado` (e as outras mudanças de estado do daily) não confere a versão (`atualizado_em`); trava a linha e confere o estado, mas não detecta edição de texto feita por outra pessoa no meio tempo.
@@ -229,7 +251,7 @@ npm run dev               # abrir em localhost (127.0.0.1 não fica interativo n
 ```
 - `.env.local` (não versionado): `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SITE_URL` (ver `.env.example`).
 - Usuários do seed: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`, senha `eclak-local`.
-- Testes: `npm run lint && npm run typecheck && npm test && npm run test:integracao && npm run build` (uma execução de integração por vez: a trava do global setup recusa a segunda). Últimos números da 5a (23/11/2026, branch `claude/fatia-5a-operacao`): 319 testes de domínio e 345 de integração (22 arquivos), tudo verde, build ok, seed duas vezes sem duplicar (onda final da revisão); a 4b traz os próprios números no PR #6, e a soma só se confirma depois do rebase. **A integração trunca o banco local**: rodar `npm run seed:local` depois.
+- Testes: `npm run lint && npm run typecheck && npm test && npm run test:integracao && npm run build` (uma execução de integração por vez: a trava do global setup recusa a segunda). Últimos números (23/11/2026, branch `claude/fatia-5a-operacao` integrada com `main` e a 4b): 363 testes de domínio (23 arquivos) e 425 de integração (26 arquivos), tudo verde, build ok, seed duas vezes sem duplicar. **A integração trunca o banco local**: rodar `npm run seed:local` depois.
 - Migração nova: `npm run db:generate` (gerada) ou `npx drizzle-kit generate --custom --name <nome>` (RLS, índices, enums); validar do zero (`npx supabase db reset` + `npm run db:migrate`) e sobre banco populado.
 - Next gera `AGENTS.md` no dev: está no `.gitignore`.
 

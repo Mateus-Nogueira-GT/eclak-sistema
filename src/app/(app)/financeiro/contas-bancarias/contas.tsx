@@ -7,7 +7,7 @@ import { Grade } from "@/components/kit";
 import { formatarReais } from "@/domain/dinheiro";
 import { desativarContaBancaria, salvarContaBancaria } from "@/server/actions/financeiro";
 
-export type ContaTela = { id: string; nome: string; banco: string; saldoInicial: string; saldoInicialEm: string; ativa: boolean };
+export type ContaTela = { id: string; nome: string; banco: string; saldoInicial: string; saldoInicialEm: string; saldoAtual: string; ativa: boolean };
 
 const VAZIO = { nome: "", banco: "", saldoInicial: "0,00", saldoInicialEm: "" };
 
@@ -121,13 +121,14 @@ export function ContasBancarias({ contas }: { contas: ContaTela[] }) {
         ) : (
           <Grade
             className="mt-3"
-            right={[2]}
-            head={["Nome", "Banco", "Saldo inicial", "Em", "Situação", ""]}
+            right={[2, 4]}
+            head={["Nome", "Banco", "Saldo inicial", "Em", "Saldo atual", "Situação", ""]}
             rows={contas.map((c) => [
               <b key="n" className="font-semibold">{c.nome}</b>,
               c.banco,
               formatarReais(BigInt(c.saldoInicial)),
               dataBr(c.saldoInicialEm),
+              <b key="sa" className={`num font-bold ${BigInt(c.saldoAtual) < 0n ? "text-ouro" : "text-verde"}`}>{formatarReais(BigInt(c.saldoAtual))}</b>,
               c.ativa ? <Badge key="s" tom="verde">Ativa</Badge> : <Badge key="s">Desativada</Badge>,
               <span key="a" className="flex justify-end gap-4">
                 {c.ativa && (

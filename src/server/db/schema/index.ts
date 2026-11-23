@@ -6,4 +6,7 @@ export * from "./clientes";
 export * from "./viagens";
 export * from "./vendas";
 export * from "./financeiro";
+export * from "./anexos";
+export * from "./notas-fiscais";
+export * from "./cartoes";
 export * from "./operacao";
