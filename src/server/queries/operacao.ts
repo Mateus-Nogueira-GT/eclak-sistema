@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import {
@@ -12,11 +12,19 @@ import {
   type Prazo,
   type SituacaoTarefa,
 } from "@/domain/tarefas";
+import {
+  aniversariosNaViagem,
+  sugerirIdiomaEFuso,
+  type Aniversario,
+  type ConteudoRoteiro,
+  type Idioma,
+  type StatusRoteiro,
+} from "@/domain/roteiro";
 import { formatarCodigoViagem, noites } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { clientes, pessoas, tarefas, usuarios, viagemPassageiros, viagens } from "@/server/db/schema";
+import { clientes, pessoas, roteiros, tarefas, usuarios, viagemPassageiros, viagens } from "@/server/db/schema";
 
 export type CabecalhoViagem = {
   id: string;
@@ -294,4 +302,130 @@ export async function listarTarefas(filtro: FiltroTarefas): Promise<TarefaDaList
 export async function responsaveisPossiveis(): Promise<{ id: string; nome: string }[]> {
   await exigirPerfil();
   return usuariosAtivos();
+}
+
+// ---------------------------------------------------------------------------
+// Roteiro
+// ---------------------------------------------------------------------------
+
+export type RoteiroTela = {
+  id: string;
+  status: StatusRoteiro;
+  idioma: Idioma;
+  fuso: string;
+  abertura: string;
+  conteudo: ConteudoRoteiro;
+  /** ISO. */
+  enviadoClienteEm: string | null;
+  /** ISO. */
+  aprovadoEm: string | null;
+  /** Nome de quem marcou a aprovação. */
+  aprovadoPor: string | null;
+  /** Aprovado e com o conteúdo salvo depois da aprovação (D16). */
+  alteradoDepoisDaAprovacao: boolean;
+  /** ISO em milissegundos (vai de volta em `salvarRoteiro`). */
+  atualizadoEm: string;
+};
+
+const aprovador = alias(usuarios, "aprovador");
+
+/**
+ * Roteiro da viagem (ou null se ainda não tem), aniversários dos passageiros (pessoas não removidas) que caem na
+ * viagem e a sugestão de idioma e fuso pelo destino. null = sem viagem.
+ */
+export async function roteiroDaViagem(viagemId: string): Promise<{
+  cabecalho: CabecalhoViagem;
+  roteiro: RoteiroTela | null;
+  aniversarios: Aniversario[];
+  sugestao: { idioma: Idioma; fuso: string } | null;
+} | null> {
+  await exigirPerfil();
+  const cabecalho = await cabecalhoDaViagem(viagemId);
+  if (!cabecalho) return null;
+  const [[r], passageiros] = await Promise.all([
+    db
+      .select({
+        id: roteiros.id,
+        status: roteiros.status,
+        idioma: roteiros.idioma,
+        fuso: roteiros.fuso,
+        abertura: roteiros.abertura,
+        conteudo: roteiros.conteudo,
+        enviadoClienteEm: roteiros.enviadoClienteEm,
+        aprovadoEm: roteiros.aprovadoEm,
+        aprovadoPor: aprovador.nome,
+        atualizadoEm: roteiros.atualizadoEm,
+      })
+      .from(roteiros)
+      .leftJoin(aprovador, eq(aprovador.id, roteiros.aprovadoPor))
+      .where(eq(roteiros.viagemId, viagemId))
+      .limit(1),
+    db
+      .select({ id: pessoas.id, nome: pessoas.nome, nascimento: pessoas.nascimento })
+      .from(viagemPassageiros)
+      .innerJoin(pessoas, eq(pessoas.id, viagemPassageiros.pessoaId))
+      .where(and(eq(viagemPassageiros.viagemId, viagemId), isNull(pessoas.removidoEm)))
+      .orderBy(asc(pessoas.ordem), asc(pessoas.nome)),
+  ]);
+  const roteiro: RoteiroTela | null = r
+    ? {
+        id: r.id,
+        status: r.status,
+        idioma: r.idioma,
+        fuso: r.fuso,
+        abertura: r.abertura,
+        conteudo: r.conteudo,
+        enviadoClienteEm: r.enviadoClienteEm?.toISOString() ?? null,
+        aprovadoEm: r.aprovadoEm?.toISOString() ?? null,
+        aprovadoPor: r.aprovadoEm ? r.aprovadoPor : null,
+        alteradoDepoisDaAprovacao: r.status === "aprovado" && r.aprovadoEm !== null && r.atualizadoEm > r.aprovadoEm,
+        atualizadoEm: r.atualizadoEm.toISOString(),
+      }
+    : null;
+  return {
+    cabecalho,
+    roteiro,
+    aniversarios: aniversariosNaViagem(passageiros, cabecalho.inicio, cabecalho.fim, roteiro?.conteudo.hoteis ?? []),
+    sugestao: sugerirIdiomaEFuso(cabecalho.destino),
+  };
+}
+
+export type RoteiroDaLista = {
+  viagemId: string;
+  codigo: string;
+  cliente: string;
+  destino: string;
+  inicio: string;
+  fim: string;
+  situacao: "sem_roteiro" | StatusRoteiro;
+};
+
+/** Viagens vendidas ainda não terminadas (`fim >= hoje` em Cuiabá), por início, com a situação do roteiro. */
+export async function listarRoteiros(): Promise<RoteiroDaLista[]> {
+  await exigirPerfil();
+  const linhas = await db
+    .select({
+      viagemId: viagens.id,
+      clienteCodigo: clientes.codigo,
+      seq: viagens.seq,
+      cliente: clientes.grupo,
+      destino: viagens.destino,
+      inicio: viagens.inicio,
+      fim: viagens.fim,
+      status: roteiros.status,
+    })
+    .from(viagens)
+    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
+    .leftJoin(roteiros, eq(roteiros.viagemId, viagens.id))
+    .where(and(isNull(viagens.excluidoEm), eq(viagens.status, "vendida"), gte(viagens.fim, hojeEmCuiaba())))
+    .orderBy(asc(viagens.inicio), asc(clientes.codigo), asc(viagens.seq));
+  return linhas.map((l) => ({
+    viagemId: l.viagemId,
+    codigo: formatarCodigoViagem(l.clienteCodigo, l.seq),
+    cliente: l.cliente,
+    destino: l.destino,
+    inicio: l.inicio,
+    fim: l.fim,
+    situacao: l.status ?? "sem_roteiro",
+  }));
 }
