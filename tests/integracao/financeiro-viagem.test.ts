@@ -5,16 +5,8 @@ vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSup
 import { converter } from "@/domain/cambio";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { arredondar } from "@/domain/decimal";
-import type { FormaPagamento } from "@/domain/precificacao";
 import { db } from "@/server/db/client";
 import { auditoria, comissoes, contasPagar, pagamentosFornecedor, parcelasReceber, viagens } from "@/server/db/schema";
-import { salvarCliente, type ClienteEntrada } from "@/server/actions/clientes";
-import { salvarFornecedor } from "@/server/actions/fornecedores";
-import { salvarRegras } from "@/server/actions/regras";
-import { regrasVigentes } from "@/server/queries/regras";
-import { aprovar, enviarParaAprovacao } from "@/server/actions/aprovacoes";
-import { criarOrcamento, salvarCotacao, salvarItem, type ItemEntrada } from "@/server/actions/viagens";
-import { fecharVenda } from "@/server/actions/vendas";
 import {
   atualizarPrevisto,
   baixarPagamento,
@@ -31,121 +23,30 @@ import {
   desfazerConciliacao,
   registrarComissao,
 } from "@/server/actions/financeiro-viagem";
-import { obterCliente } from "@/server/queries/clientes";
+import { desativarContaBancaria } from "@/server/actions/financeiro";
 import { margensVendidas, obterViagemVendida } from "@/server/queries/vendas";
 import { listarOrcamentos } from "@/server/queries/viagens";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
-
-const souza: ClienteEntrada = {
-  tipo: "familia",
-  filial: "RS",
-  telefone: "(66) 9 9123-4567",
-  titular: { nome: "Marcos Souza" },
-  acompanhantes: [{ nome: "Júlia Souza", parentesco: "Esposa" }],
-};
+import { contaBancaria, vendida as vendidaSemConta, type Fixture } from "../helpers/venda";
 
 const SEM_PERMISSAO = { ok: false, erro: "Sem permissão" };
 const CONCILIADA = { ok: false, erro: "Viagem conciliada: desfaça a conciliação para alterar" };
-const BOLETO2: FormaPagamento = { tipo: "boleto", parcelas: 2 };
+
+/** Conta bancária ativa do teste em curso (o banco é limpo a cada teste; criada junto com a viagem vendida). */
+let cb = "";
+
+/** Viagem vendida e uma conta bancária ativa (`cb`) para as baixas. */
+async function vendida(o?: Parameters<typeof vendidaSemConta>[0]): Promise<Fixture> {
+  const x = await vendidaSemConta(o);
+  cb = await contaBancaria(x.fin.id);
+  return x;
+}
+
+/** Centavos → "1234,56" (entrada das actions). */
+const reais = (c: bigint) => `${c / 100n},${(c % 100n).toString().padStart(2, "0")}`;
 
 /** JSON com bigint (para inspecionar as chaves da resposta). */
 const json = (x: unknown) => JSON.stringify(x, (_, v) => (typeof v === "bigint" ? v.toString() : v));
-
-async function fornecedor(uid: string, nome: string, modalidade: "net" | "comissionado", tipos: string[]) {
-  const r = await comSessao(uid, () => salvarFornecedor({ nome, tipos, modalidade } as Parameters<typeof salvarFornecedor>[0]));
-  if (!r.ok) throw new Error(r.erro);
-  return r.id;
-}
-
-async function item(uid: string, viagemId: string, dados: Partial<ItemEntrada>) {
-  const r = await comSessao(uid, () => salvarItem(viagemId, { tipo: "Passeio", servico: "Passeio", ...dados }));
-  if (!r.ok) throw new Error(r.erro);
-  return r.id;
-}
-
-async function cotacao(uid: string, itemId: string, dados: Record<string, unknown>) {
-  const r = await comSessao(uid, () => salvarCotacao(itemId, { moeda: "BRL", valor: "1.000,00", ...dados }));
-  if (!r.ok) throw new Error(r.erro);
-  return r.id;
-}
-
-/**
- * Viagem vendida em boleto 2x: hotel em fornecedor comissionado (3.106,00, 4% a receber, 4% à vista), passeio net
- * (500,00), transfer em EUR net (1.000,00 EUR), aéreo (8.000,00) e a taxa de roteiro automática.
- */
-async function vendida(o: { florenca?: boolean } = {}) {
-  const u = await criarUsuarioTeste("consultor");
-  const d = await criarUsuarioTeste("diretor");
-  const fin = await criarUsuarioTeste("fin_operacional");
-  const vig = await comSessao(d.id, () => regrasVigentes());
-  if (vig.valores.taxaRoteiro.minimoItens !== 2) {
-    const g = await comSessao(d.id, () => salvarRegras({ ...vig.valores, taxaRoteiro: { ...vig.valores.taxaRoteiro, minimoItens: 2 } }));
-    if (!g.ok) throw new Error(g.erro);
-  }
-  const c = await comSessao(u.id, () => salvarCliente(souza));
-  if (!c.ok) throw new Error(c.erro);
-  const pessoas = (await comSessao(u.id, () => obterCliente(c.id)))!.pessoas.map((p) => p.id);
-  const r = await comSessao(u.id, () =>
-    criarOrcamento({ clienteId: c.id, destino: "Itália", inicio: "2027-08-14", fim: "2027-09-01", passageiros: pessoas }),
-  );
-  if (!r.ok) throw new Error(r.erro);
-  const viagemId = r.id;
-  const palazzo = await fornecedor(u.id, "Palazzo Hotels", "comissionado", ["Hotelaria"]);
-  const roma = await fornecedor(u.id, "Roma Tours", "net", ["Passeio guiado"]);
-  const euro = await fornecedor(u.id, "Euro Transfer", "net", ["Transfer"]);
-  const hotel = await item(u.id, viagemId, { tipo: "Hotelaria", servico: "Palazzo Barocci", cidade: "Roma", diarias: 3 });
-  await cotacao(u.id, hotel, { valor: "3.106,00", comissao: "4", descontoAVista: "4", fornecedorId: palazzo });
-  const passeio = await item(u.id, viagemId, { servico: "Coliseu", cidade: "Roma" });
-  await cotacao(u.id, passeio, { valor: "500,00", fornecedorId: roma });
-  const transfer = await item(u.id, viagemId, { tipo: "Transfer", servico: "Transfer FCO", cidade: "Roma" });
-  await cotacao(u.id, transfer, { moeda: "EUR", valor: "1.000,00", fornecedorId: euro });
-  const aereo = await item(u.id, viagemId, { tipo: "Aéreo", servico: "GRU-FCO" });
-  await cotacao(u.id, aereo, { valor: "8.000,00", comissao: "6" });
-  // Opcional: o hotel de Florença do caso Ribeiro (4.100,00 net, sem desconto à vista).
-  const florenca = o.florenca ? await item(u.id, viagemId, { tipo: "Hotelaria", servico: "Palazzo Lungarno Nove", cidade: "Florença", diarias: 3 }) : null;
-  if (florenca) await cotacao(u.id, florenca, { valor: "4.100,00", fornecedorId: await fornecedor(u.id, "Lungarno Hotels", "net", ["Hotelaria"]) });
-  const e = await comSessao(u.id, () => enviarParaAprovacao(viagemId, { forma: BOLETO2, alteracao: "Primeira versão" }));
-  if (!e.ok) throw new Error(e.erro);
-  const a = await comSessao(d.id, () => aprovar(e.id));
-  if (!a.ok) throw new Error(a.erro);
-  const f = await comSessao(u.id, () =>
-    fecharVenda(viagemId, {
-      aceiteEm: "2026-11-20",
-      forma: BOLETO2,
-      parcelas: 2,
-      primeiroVencimento: "2026-12-10",
-      faturaNome: "Marcos Souza",
-      faturaDocumento: "529.982.247-25",
-    }),
-  );
-  if (!f.ok) throw new Error(f.erro);
-
-  const contas = await db.select().from(contasPagar).where(eq(contasPagar.viagemId, viagemId));
-  const conta = (itemId: string) => contas.find((x) => x.itemId === itemId)!;
-  const pagamentoDa = async (contaId: string) =>
-    (await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, contaId)).orderBy(asc(pagamentosFornecedor.numero)))[0];
-  const parcelas = await db.select().from(parcelasReceber).where(eq(parcelasReceber.viagemId, viagemId)).orderBy(asc(parcelasReceber.numero));
-  const [comissao] = await db.select().from(comissoes).where(eq(comissoes.viagemId, viagemId));
-  return {
-    u,
-    d,
-    fin,
-    viagemId,
-    hotel: conta(hotel),
-    passeio: conta(passeio),
-    transfer: conta(transfer),
-    aereo: conta(aereo),
-    florenca: florenca ? conta(florenca) : null,
-    pagHotel: await pagamentoDa(conta(hotel).id),
-    pagPasseio: await pagamentoDa(conta(passeio).id),
-    pagTransfer: await pagamentoDa(conta(transfer).id),
-    pagAereo: await pagamentoDa(conta(aereo).id),
-    parcelas,
-    comissao,
-  };
-}
-
-type Fixture = Awaited<ReturnType<typeof vendida>>;
 
 const BAIXA_PARCELA = { recebidaEm: "2026-11-21", valorRecebido: "1,00", observacao: "Teste com valor simbólico" };
 const BAIXA_PAGAMENTO = { pagoEm: "2026-11-21", valorOriginalPago: "500,00" };
@@ -157,12 +58,12 @@ function todasAsActions(x: Fixture) {
     definirComissaoTipo: () => definirComissaoTipo(x.hotel.id, { tipo: "descontada" }),
     atualizarPrevisto: () => atualizarPrevisto(x.passeio.id, "600,00", "Fornecedor reajustou"),
     contestar: () => contestar(x.passeio.id, "Cobrança indevida"),
-    baixarParcela: () => baixarParcela(x.parcelas[0].id, BAIXA_PARCELA),
+    baixarParcela: () => baixarParcela(x.parcelas[0].id, { ...BAIXA_PARCELA, contaBancariaId: cb }),
     desfazerBaixaParcela: () => desfazerBaixaParcela(x.parcelas[0].id),
     cancelarParcela: () => cancelarParcela(x.parcelas[0].id, "Cliente desistiu"),
-    baixarPagamento: () => baixarPagamento(x.pagPasseio.id, BAIXA_PAGAMENTO),
+    baixarPagamento: () => baixarPagamento(x.pagPasseio.id, { ...BAIXA_PAGAMENTO, contaBancariaId: cb }),
     desfazerBaixaPagamento: () => desfazerBaixaPagamento(x.pagPasseio.id),
-    registrarComissao: () => registrarComissao(x.comissao.id, { recebidaEm: "2026-11-21", valorRecebido: "124,24" }),
+    registrarComissao: () => registrarComissao(x.comissao.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: "124,24" }),
     comissaoNaoRecebida: () => comissaoNaoRecebida(x.comissao.id, "Hotel não pagou"),
     desfazerComissao: () => desfazerComissao(x.comissao.id),
     conciliar: () => conciliar(x.viagemId),
@@ -231,10 +132,10 @@ describe("financeiro da viagem: perfis (Review Focus 4)", () => {
     const antes = await estadoFinanceiro(x.viagemId);
     const outro = "00000000-0000-4000-8000-000000000000";
     const f = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
-    expect(await f(() => baixarParcela(outro, BAIXA_PARCELA))).toEqual({ ok: false, erro: "Parcela não encontrada" });
-    expect(await f(() => baixarParcela("x", BAIXA_PARCELA))).toEqual({ ok: false, erro: "Parcela não encontrada" });
-    expect(await f(() => baixarPagamento(outro, BAIXA_PAGAMENTO))).toEqual({ ok: false, erro: "Pagamento não encontrado" });
-    expect(await f(() => registrarComissao(outro, { recebidaEm: "2026-11-21", valorRecebido: "1,00" }))).toEqual({
+    expect(await f(() => baixarParcela(outro, { ...BAIXA_PARCELA, contaBancariaId: cb }))).toEqual({ ok: false, erro: "Parcela não encontrada" });
+    expect(await f(() => baixarParcela("x", { ...BAIXA_PARCELA, contaBancariaId: cb }))).toEqual({ ok: false, erro: "Parcela não encontrada" });
+    expect(await f(() => baixarPagamento(outro, { ...BAIXA_PAGAMENTO, contaBancariaId: cb }))).toEqual({ ok: false, erro: "Pagamento não encontrado" });
+    expect(await f(() => registrarComissao(outro, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: "1,00" }))).toEqual({
       ok: false,
       erro: "Comissão não encontrada",
     });
@@ -244,7 +145,7 @@ describe("financeiro da viagem: perfis (Review Focus 4)", () => {
     await db.update(contasPagar).set({ excluidoEm: new Date() }).where(eq(contasPagar.id, x.aereo.id));
     const antes2 = await estadoFinanceiro(x.viagemId);
     expect(await f(() => contestar(x.aereo.id, "x"))).toEqual({ ok: false, erro: "Conta não encontrada" });
-    expect(await f(() => baixarPagamento(x.pagAereo.id, BAIXA_PAGAMENTO))).toEqual({ ok: false, erro: "Pagamento não encontrado" });
+    expect(await f(() => baixarPagamento(x.pagAereo.id, { ...BAIXA_PAGAMENTO, contaBancariaId: cb }))).toEqual({ ok: false, erro: "Pagamento não encontrado" });
     expect(await estadoFinanceiro(x.viagemId)).toBe(antes2);
     expect(antes2).not.toBe(antes);
   });
@@ -252,7 +153,7 @@ describe("financeiro da viagem: perfis (Review Focus 4)", () => {
   it("viagem que não está vendida: recusado", async () => {
     const x = await vendida();
     await db.update(viagens).set({ status: "aprovado" }).where(eq(viagens.id, x.viagemId));
-    expect(await comSessao(x.fin.id, () => baixarParcela(x.parcelas[0].id, BAIXA_PARCELA))).toEqual({
+    expect(await comSessao(x.fin.id, () => baixarParcela(x.parcelas[0].id, { ...BAIXA_PARCELA, contaBancariaId: cb }))).toEqual({
       ok: false,
       erro: "A viagem ainda não foi vendida",
     });
@@ -269,14 +170,14 @@ describe("baixa de parcela", () => {
     const p = x.parcelas[0];
     const r0 = await estrategico(x.fin.id, x.viagemId);
 
-    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-20", valorRecebido: "1.000,00", taxaEfetiva: "10,00", observacao: "Recebido em partes" }))).toEqual({
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { contaBancariaId: cb, recebidaEm: "2026-11-20", valorRecebido: "1.000,00", taxaEfetiva: "10,00", observacao: "Recebido em partes" }))).toEqual({
       ok: true,
     });
-    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, BAIXA_PARCELA))).toEqual({ ok: false, erro: "Parcela já recebida" });
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { ...BAIXA_PARCELA, contaBancariaId: cb }))).toEqual({ ok: false, erro: "Parcela já recebida" });
     expect(await comSessao(x.fin.id, () => desfazerBaixaParcela(p.id))).toEqual({ ok: true });
     expect(await comSessao(x.fin.id, () => desfazerBaixaParcela(p.id))).toEqual({ ok: false, erro: "Esta parcela não foi baixada" });
     expect(
-      await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: p.valor.toString().replace(/(\d\d)$/, ",$1"), taxaEfetiva: "25,00" })),
+      await comSessao(x.fin.id, () => baixarParcela(p.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: p.valor.toString().replace(/(\d\d)$/, ",$1"), taxaEfetiva: "25,00" })),
     ).toEqual({ ok: true });
 
     const linhas = await db.select().from(parcelasReceber).where(eq(parcelasReceber.viagemId, x.viagemId));
@@ -300,23 +201,24 @@ describe("baixa de parcela", () => {
     const p = x.parcelas[1];
     expect(await comSessao(x.fin.id, () => cancelarParcela(p.id, " "))).toMatchObject({ ok: false, erro: "Escreva o motivo" });
     expect(await comSessao(x.fin.id, () => cancelarParcela(p.id, "Cliente pagou à parte"))).toEqual({ ok: true });
-    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, BAIXA_PARCELA))).toEqual({ ok: false, erro: "Parcela cancelada" });
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { ...BAIXA_PARCELA, contaBancariaId: cb }))).toEqual({ ok: false, erro: "Parcela cancelada" });
     const f = (await ficha(x.fin.id, x.viagemId))!;
     expect(f.resumo.aReceber).toBe(x.parcelas[0].valor);
     expect(f.parcelas.find((l) => l.id === p.id)).toMatchObject({ status: "cancelada", observacao: "Cliente pagou à parte" });
     expect(await comSessao(x.fin.id, () => desfazerBaixaParcela(p.id))).toEqual({ ok: true });
-    expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0]).toMatchObject({ status: "a_receber", observacao: null });
+    // desfazer o cancelamento mantém o motivo na observação (histórico)
+    expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0]).toMatchObject({ status: "a_receber", observacao: "Cliente pagou à parte" });
   });
 
   it("validações da baixa", async () => {
     const x = await vendida();
     const p = x.parcelas[0];
-    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "", valorRecebido: "1,00" }))).toMatchObject({ ok: false, erro: "Informe a data" });
-    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2999-01-01", valorRecebido: "1,00" }))).toMatchObject({
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { contaBancariaId: cb, recebidaEm: "", valorRecebido: "1,00" }))).toMatchObject({ ok: false, erro: "Informe a data" });
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { contaBancariaId: cb, recebidaEm: "2999-01-01", valorRecebido: "1,00" }))).toMatchObject({
       ok: false,
       erro: "Data no futuro",
     });
-    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: "" }))).toMatchObject({
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: "" }))).toMatchObject({
       ok: false,
       erro: "Valor inválido",
       campos: { valorRecebido: "Valor inválido" },
@@ -327,25 +229,23 @@ describe("baixa de parcela", () => {
 describe("recebimento diferente do valor e parcela cancelada na margem real", () => {
   beforeEach(limparBanco);
 
-  const reais = (c: bigint) => `${c / 100n},${(c % 100n).toString().padStart(2, "0")}`;
-
   it("valor diferente exige observação; R$ 100 a menos reduz a margem real exatamente; ponte 'Recebido a menos'", async () => {
     const x = await vendida();
     const p = x.parcelas[0];
     const r0 = await estrategico(x.fin.id, x.viagemId);
     const menos = reais(p.valor - 10000n);
-    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: menos }))).toEqual({
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: menos }))).toEqual({
       ok: false,
       erro: "Explique a diferença do valor recebido",
       campos: { observacao: "Explique a diferença do valor recebido" },
     });
-    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: menos, observacao: "  " }))).toMatchObject({
+    expect(await comSessao(x.fin.id, () => baixarParcela(p.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: menos, observacao: "  " }))).toMatchObject({
       ok: false,
       erro: "Explique a diferença do valor recebido",
     });
     expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0].status).toBe("a_receber");
     expect(
-      await comSessao(x.fin.id, () => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: menos, observacao: "Cliente descontou a tarifa do boleto" })),
+      await comSessao(x.fin.id, () => baixarParcela(p.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: menos, observacao: "Cliente descontou a tarifa do boleto" })),
     ).toEqual({ ok: true });
     expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0]).toMatchObject({
       status: "recebida",
@@ -364,7 +264,7 @@ describe("recebimento diferente do valor e parcela cancelada na margem real", ()
     expect(r1.f.resumo).toMatchObject({ recebido: p.valor - 10000n, aReceber: x.parcelas[1].valor, diferencaRecebimento: -10000n });
     expect(r1.f.divergencias).toBe(r0.f.divergencias + 1);
     // igual ao valor: observação opcional
-    expect(await comSessao(x.fin.id, () => baixarParcela(x.parcelas[1].id, { recebidaEm: "2026-11-21", valorRecebido: reais(x.parcelas[1].valor) }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => baixarParcela(x.parcelas[1].id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: reais(x.parcelas[1].valor) }))).toEqual({ ok: true });
   });
 
   it("parcela cancelada sai da receita (parte do pacote) e das taxas; ponte 'Parcela cancelada: 2 de 2'", async () => {
@@ -390,15 +290,15 @@ describe("baixa de pagamento ao fornecedor", () => {
   it("Review Focus 5 no pagamento: baixar, desfazer, baixar com outro valor → margem real com o último", async () => {
     const x = await vendida();
     const r0 = await estrategico(x.fin.id, x.viagemId);
-    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagPasseio.id, { pagoEm: "2026-11-21", valorOriginalPago: "500,00" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagPasseio.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "500,00" }))).toEqual({ ok: true });
     let [conta] = await db.select().from(contasPagar).where(eq(contasPagar.id, x.passeio.id));
     expect(conta.status).toBe("paga");
-    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagPasseio.id, BAIXA_PAGAMENTO))).toEqual({ ok: false, erro: "Pagamento já baixado" });
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagPasseio.id, { ...BAIXA_PAGAMENTO, contaBancariaId: cb }))).toEqual({ ok: false, erro: "Pagamento já baixado" });
     expect(await comSessao(x.fin.id, () => desfazerBaixaPagamento(x.pagPasseio.id))).toEqual({ ok: true });
     [conta] = await db.select().from(contasPagar).where(eq(contasPagar.id, x.passeio.id));
     expect(conta.status).toBe("a_pagar");
     expect(await comSessao(x.fin.id, () => desfazerBaixaPagamento(x.pagPasseio.id))).toEqual({ ok: false, erro: "Este pagamento não foi baixado" });
-    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagPasseio.id, { pagoEm: "2026-11-21", valorOriginalPago: "520,00", cambioEfetivo: "5,5" }))).toEqual({
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagPasseio.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "520,00", cambioEfetivo: "5,5" }))).toEqual({
       ok: true,
     });
 
@@ -418,7 +318,7 @@ describe("baixa de pagamento ao fornecedor", () => {
   it("duas baixas do mesmo pagamento ao mesmo tempo → uma; a outra 'Pagamento já baixado'", async () => {
     const x = await vendida();
     const rs = await comSessao(x.fin.id, () =>
-      Promise.all([baixarPagamento(x.pagPasseio.id, BAIXA_PAGAMENTO), baixarPagamento(x.pagPasseio.id, { ...BAIXA_PAGAMENTO, valorOriginalPago: "510,00" })]),
+      Promise.all([baixarPagamento(x.pagPasseio.id, { ...BAIXA_PAGAMENTO, contaBancariaId: cb }), baixarPagamento(x.pagPasseio.id, { contaBancariaId: cb, ...BAIXA_PAGAMENTO, valorOriginalPago: "510,00" })]),
     );
     expect(rs.filter((r) => r.ok)).toHaveLength(1);
     expect(rs.find((r) => !r.ok)).toEqual({ ok: false, erro: "Pagamento já baixado" });
@@ -430,12 +330,12 @@ describe("baixa de pagamento ao fornecedor", () => {
     const x = await vendida();
     expect(x.transfer.moeda).toBe("EUR");
     const aplicado = x.transfer.cambioAplicado!;
-    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "1.000,00" }))).toEqual({
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagTransfer.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "1.000,00" }))).toEqual({
       ok: false,
       erro: "Informe o câmbio efetivo",
       campos: { cambioEfetivo: "Informe o câmbio efetivo" },
     });
-    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,5000" }))).toEqual({
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagTransfer.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,5000" }))).toEqual({
       ok: true,
     });
     const [p] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, x.pagTransfer.id));
@@ -451,7 +351,7 @@ describe("baixa de pagamento ao fornecedor", () => {
   it("EUR pago com desconto e câmbio maior: desconto em 'valor pago diferente', câmbio separado", async () => {
     const x = await vendida();
     const aplicado = x.transfer.cambioAplicado!;
-    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "960,00", cambioEfetivo: "6,5000" }))).toEqual({
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagTransfer.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "960,00", cambioEfetivo: "6,5000" }))).toEqual({
       ok: true,
     });
     const pago = converter(96000n, "6.5000");
@@ -472,8 +372,8 @@ describe("comissões", () => {
     expect(r0.ponte).toContainEqual({ rotulo: "Comissão pendente: Palazzo Hotels", valor: -12424n });
     expect(r0.f.comissoes).toMatchObject([{ id: x.comissao.id, status: "prevista", pendente: true }]);
 
-    expect(await comSessao(x.fin.id, () => registrarComissao(x.comissao.id, { recebidaEm: "2026-11-21", valorRecebido: "124,24" }))).toEqual({ ok: true });
-    expect(await comSessao(x.fin.id, () => registrarComissao(x.comissao.id, { recebidaEm: "2026-11-21", valorRecebido: "124,24" }))).toEqual({
+    expect(await comSessao(x.fin.id, () => registrarComissao(x.comissao.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: "124,24" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => registrarComissao(x.comissao.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: "124,24" }))).toEqual({
       ok: false,
       erro: "Comissão já registrada",
     });
@@ -518,7 +418,7 @@ describe("comissões", () => {
     expect(semComissao.real.final - r0.real.final).toBe(
       -(valorDe(r0.ponte, "Comissão pendente: Palazzo Hotels") ?? 0n) + (valorDe(semComissao.ponte, "Imposto") ?? 0n) - (valorDe(r0.ponte, "Imposto") ?? 0n),
     );
-    expect(await comSessao(x.fin.id, () => registrarComissao(x.comissao.id, { recebidaEm: "2026-11-21", valorRecebido: "1,00" }))).toEqual({
+    expect(await comSessao(x.fin.id, () => registrarComissao(x.comissao.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: "1,00" }))).toEqual({
       ok: false,
       erro: "Comissão cancelada",
     });
@@ -558,7 +458,7 @@ describe("comissões", () => {
       erro: "Conta sem fornecedor: a comissão só pode ser descontada",
     });
 
-    expect(await comSessao(x.fin.id, () => baixarPagamento(p.id, { pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => baixarPagamento(p.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
     expect(await comSessao(x.fin.id, () => definirComissaoTipo(x.hotel.id, { tipo: "descontada" }))).toEqual({
       ok: false,
       erro: "Já há pagamento baixado nesta conta",
@@ -596,10 +496,10 @@ describe("contas a pagar", () => {
     expect(aud.filter((a) => a.acao === "excluir").map((a) => a.registroId)).toEqual([x.pagPasseio.id]);
 
     // conta parcelada: paga só quando todas as linhas pagas
-    expect(await comSessao(x.fin.id, () => baixarPagamento(linhas[0].id, { pagoEm: "2026-11-21", valorOriginalPago: "200,00" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => baixarPagamento(linhas[0].id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "200,00" }))).toEqual({ ok: true });
     expect((await db.select().from(contasPagar).where(eq(contasPagar.id, x.passeio.id)))[0].status).toBe("a_pagar");
     expect(await f({ tipo: "a_vista" })).toEqual({ ok: false, erro: "Já há pagamento baixado nesta conta" });
-    expect(await comSessao(x.fin.id, () => baixarPagamento(linhas[1].id, { pagoEm: "2026-11-21", valorOriginalPago: "300,00" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => baixarPagamento(linhas[1].id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "300,00" }))).toEqual({ ok: true });
     expect((await db.select().from(contasPagar).where(eq(contasPagar.id, x.passeio.id)))[0].status).toBe("paga");
 
     // cartão corporativo e à vista (mantém o vencimento) em outra conta
@@ -619,7 +519,7 @@ describe("contas a pagar", () => {
     });
     expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.passeio.id, "x", "Reajuste"))).toMatchObject({ ok: false, erro: "Valor inválido" });
     // abaixo do já pago: recusado
-    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagAereo.id, { pagoEm: "2026-11-21", valorOriginalPago: "7.520,00" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagAereo.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "7.520,00" }))).toEqual({ ok: true });
     expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.aereo.id, "7.519,99", "Reembolso"))).toEqual({
       ok: false,
       erro: "O valor previsto não pode ser menor que o já pago (R$ 7.520,00)",
@@ -663,7 +563,7 @@ describe("previsto acima do já pago, sem linha em aberto", () => {
     const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
     const [pag] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, conta.id));
     expect(pag.valorBrlPrevisto).toBe(410000n);
-    expect(await fin(() => baixarPagamento(pag.id, { pagoEm: "2026-11-21", valorOriginalPago: "4.100,00" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(pag.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "4.100,00" }))).toEqual({ ok: true });
     expect((await db.select().from(contasPagar).where(eq(contasPagar.id, conta.id)))[0].status).toBe("paga");
     const r0 = await estrategico(x.fin.id, x.viagemId);
 
@@ -687,17 +587,17 @@ describe("previsto acima do já pago, sem linha em aberto", () => {
     expect(r1.ponte).toContainEqual({ rotulo: "Lungarno Hotels: valor atualizado", valor: -184000n });
 
     // em aberto: a conciliação lista a linha nova
-    for (const p of x.parcelas) expect(await fin(() => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: (p.valor / 100n).toString() + "," + (p.valor % 100n).toString().padStart(2, "0") }))).toEqual({ ok: true });
-    expect(await fin(() => baixarPagamento(x.pagHotel.id, { pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
-    expect(await fin(() => baixarPagamento(x.pagPasseio.id, BAIXA_PAGAMENTO))).toEqual({ ok: true });
-    expect(await fin(() => baixarPagamento(x.pagAereo.id, { pagoEm: "2026-11-21", valorOriginalPago: "7.520,00" }))).toEqual({ ok: true });
-    expect(await fin(() => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,1" }))).toEqual({ ok: true });
+    for (const p of x.parcelas) expect(await fin(() => baixarParcela(p.id, { contaBancariaId: cb, recebidaEm: "2026-11-21", valorRecebido: (p.valor / 100n).toString() + "," + (p.valor % 100n).toString().padStart(2, "0") }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagHotel.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagPasseio.id, { ...BAIXA_PAGAMENTO, contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagAereo.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "7.520,00" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagTransfer.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,1" }))).toEqual({ ok: true });
     expect(await fin(() => comissaoNaoRecebida(x.comissao.id, "Hotel não pagou"))).toEqual({ ok: true });
     expect(await fin(() => conciliar(x.viagemId))).toEqual({ ok: false, erro: "Ainda há valores em aberto: Palazzo Lungarno Nove (2/2)" });
 
     // paga a linha nova: a conta volta a paga e a margem não muda
     const antesDaBaixa = await estrategico(x.fin.id, x.viagemId);
-    expect(await fin(() => baixarPagamento(linhas[1].id, { pagoEm: hojeEmCuiaba(), valorOriginalPago: "1.840,00" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(linhas[1].id, { contaBancariaId: cb, pagoEm: hojeEmCuiaba(), valorOriginalPago: "1.840,00" }))).toEqual({ ok: true });
     expect((await db.select().from(contasPagar).where(eq(contasPagar.id, conta.id)))[0].status).toBe("paga");
     const r2 = await estrategico(x.fin.id, x.viagemId);
     expect(r2.real.final).toBe(antesDaBaixa.real.final);
@@ -712,7 +612,7 @@ describe("previsto acima do já pago, sem linha em aberto", () => {
   it("EUR pago inteiro: a linha nova volta para a moeda pelo câmbio da conta; à vista com desconto: só o aumento", async () => {
     const x = await vendida();
     const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
-    expect(await fin(() => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,1" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagTransfer.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,1" }))).toEqual({ ok: true });
     const novo = x.transfer.previstoBrl + 61000n;
     expect(await fin(() => atualizarPrevisto(x.transfer.id, (novo / 100n).toString() + "," + (novo % 100n).toString().padStart(2, "0"), "Hora extra do motorista"))).toEqual({ ok: true });
     const lt = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.transfer.id)).orderBy(asc(pagamentosFornecedor.numero));
@@ -722,7 +622,7 @@ describe("previsto acima do já pago, sem linha em aberto", () => {
     expect(lt[1].valorOriginal).toBe(arredondar(61000n * 10_000n, BigInt(x.transfer.cambioAplicado!.replace(".", ""))));
 
     // hotel à vista com 4% de desconto: pago 2.981,76 sobre 3.106,00; previsto sobe 100,00 → linha de 100,00
-    expect(await fin(() => baixarPagamento(x.pagHotel.id, { pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagHotel.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
     expect(await fin(() => atualizarPrevisto(x.hotel.id, "3.206,00", "Diária extra"))).toEqual({ ok: true });
     const lh = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.hotel.id)).orderBy(asc(pagamentosFornecedor.numero));
     expect(lh.map((l) => [l.numero, l.status, l.valorBrlPrevisto])).toEqual([
@@ -744,12 +644,12 @@ describe("conciliar", () => {
     });
 
     const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
-    for (const p of x.parcelas) expect(await fin(() => baixarParcela(p.id, BAIXA_PARCELA))).toEqual({ ok: true });
-    expect(await fin(() => baixarPagamento(x.pagHotel.id, { pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
-    expect(await fin(() => baixarPagamento(x.pagPasseio.id, BAIXA_PAGAMENTO))).toEqual({ ok: true });
-    expect(await fin(() => baixarPagamento(x.pagAereo.id, { pagoEm: "2026-11-21", valorOriginalPago: "7.520,00" }))).toEqual({ ok: true });
+    for (const p of x.parcelas) expect(await fin(() => baixarParcela(p.id, { ...BAIXA_PARCELA, contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagHotel.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "2.981,76" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagPasseio.id, { ...BAIXA_PAGAMENTO, contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagAereo.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "7.520,00" }))).toEqual({ ok: true });
     expect(await fin(() => conciliar(x.viagemId))).toEqual({ ok: false, erro: "Ainda há valores em aberto: Transfer FCO, Comissão Palazzo Hotels" });
-    expect(await fin(() => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,1" }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagTransfer.id, { contaBancariaId: cb, pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,1" }))).toEqual({ ok: true });
     expect(await fin(() => comissaoNaoRecebida(x.comissao.id, "Hotel não pagou"))).toEqual({ ok: true });
     expect((await db.select().from(viagens).where(eq(viagens.id, x.viagemId)))[0].conciliadaEm).toBeNull();
 
@@ -892,5 +792,124 @@ describe("restrições da venda (0018)", () => {
     // excluída logicamente, outra conta ativa do mesmo item é aceita
     await db.update(contasPagar).set({ excluidoEm: new Date() }).where(eq(contasPagar.id, x.passeio.id));
     expect(await codigoDoErro(db.insert(contasPagar).values(conta))).toBeUndefined();
+  });
+});
+
+describe("conta bancária nas baixas da viagem (4a)", () => {
+  beforeEach(limparBanco);
+
+  const ESCOLHA = { ok: false, erro: "Escolha a conta bancária", campos: { contaBancariaId: "Escolha a conta bancária" } };
+
+  it("sem conta, conta inexistente ou desativada → 'Escolha a conta bancária' no campo; nada gravado", async () => {
+    const x = await vendida();
+    const inativa = await contaBancaria(x.fin.id, "Conta antiga");
+    expect((await comSessao(x.fin.id, () => desativarContaBancaria(inativa))).ok).toBe(true);
+    const antes = await estadoFinanceiro(x.viagemId);
+    const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
+    const p = x.parcelas[0].id;
+    for (const conta of [{}, { contaBancariaId: "" }, { contaBancariaId: "00000000-0000-4000-8000-000000000000" }, { contaBancariaId: inativa }]) {
+      expect(await fin(() => baixarParcela(p, { recebidaEm: "2026-11-21", valorRecebido: reais(x.parcelas[0].valor), ...conta } as never))).toEqual(ESCOLHA);
+      expect(await fin(() => baixarPagamento(x.pagPasseio.id, { pagoEm: "2026-11-21", valorOriginalPago: "500,00", ...conta } as never))).toEqual(ESCOLHA);
+      expect(await fin(() => registrarComissao(x.comissao.id, { recebidaEm: "2026-11-21", valorRecebido: "124,24", ...conta } as never))).toEqual(ESCOLHA);
+    }
+    expect(await estadoFinanceiro(x.viagemId)).toBe(antes);
+    // a regra da linha vem antes da conta: parcela já recebida continua "Parcela já recebida"
+    expect(await fin(() => baixarParcela(p, { recebidaEm: "2026-11-21", valorRecebido: reais(x.parcelas[0].valor), contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await fin(() => baixarParcela(p, { recebidaEm: "2026-11-21", valorRecebido: reais(x.parcelas[0].valor), contaBancariaId: inativa }))).toEqual({
+      ok: false,
+      erro: "Parcela já recebida",
+    });
+  });
+
+  it("com conta: grava conta_bancaria_id na parcela, no pagamento e na comissão; desfazer limpa", async () => {
+    const x = await vendida();
+    const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
+    const p = x.parcelas[0];
+    expect(await fin(() => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: reais(p.valor), contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagPasseio.id, { pagoEm: "2026-11-21", valorOriginalPago: "500,00", contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await fin(() => registrarComissao(x.comissao.id, { recebidaEm: "2026-11-21", valorRecebido: "124,24", contaBancariaId: cb }))).toEqual({ ok: true });
+    expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0]).toMatchObject({ status: "recebida", contaBancariaId: cb });
+    expect((await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, x.pagPasseio.id)))[0]).toMatchObject({ status: "pago", contaBancariaId: cb });
+    expect((await db.select().from(comissoes).where(eq(comissoes.id, x.comissao.id)))[0]).toMatchObject({ status: "recebida", contaBancariaId: cb });
+    const aud = await db.select().from(auditoria).where(and(eq(auditoria.registroId, p.id), eq(auditoria.acao, "alterar")));
+    expect(aud[0]).toMatchObject({ antes: { contaBancariaId: null }, depois: { contaBancariaId: cb } });
+
+    expect(await fin(() => desfazerBaixaParcela(p.id))).toEqual({ ok: true });
+    expect(await fin(() => desfazerBaixaPagamento(x.pagPasseio.id))).toEqual({ ok: true });
+    expect(await fin(() => desfazerComissao(x.comissao.id))).toEqual({ ok: true });
+    expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0]).toMatchObject({ status: "a_receber", contaBancariaId: null });
+    expect((await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, x.pagPasseio.id)))[0]).toMatchObject({ status: "a_pagar", contaBancariaId: null });
+    expect((await db.select().from(comissoes).where(eq(comissoes.id, x.comissao.id)))[0]).toMatchObject({ status: "prevista", contaBancariaId: null });
+  });
+
+  it("observação: a nova entra em linha nova; desfazer mantém a anterior e o motivo do cancelamento", async () => {
+    const x = await vendida();
+    const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
+    const obs = async (id: string) => (await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, id)))[0].observacao;
+    const [p, q] = x.parcelas;
+    const cheio = (v: bigint) => ({ recebidaEm: "2026-11-21", valorRecebido: reais(v), contaBancariaId: cb });
+
+    expect(await fin(() => baixarParcela(p.id, { ...cheio(p.valor), observacao: "A" }))).toEqual({ ok: true });
+    expect(await fin(() => desfazerBaixaParcela(p.id))).toEqual({ ok: true });
+    expect(await obs(p.id)).toBe("A");
+    expect(await fin(() => baixarParcela(p.id, { ...cheio(p.valor), observacao: "B" }))).toEqual({ ok: true });
+    expect(await obs(p.id)).toBe("A\nB");
+    // sem observação nova: mantém a que havia
+    expect(await fin(() => desfazerBaixaParcela(p.id))).toEqual({ ok: true });
+    expect(await fin(() => baixarParcela(p.id, cheio(p.valor)))).toEqual({ ok: true });
+    expect(await obs(p.id)).toBe("A\nB");
+
+    // cancelada → desfeita → baixada: o motivo continua
+    expect(await fin(() => cancelarParcela(q.id, "Cliente pediu"))).toEqual({ ok: true });
+    expect(await fin(() => desfazerBaixaParcela(q.id))).toEqual({ ok: true });
+    expect(await obs(q.id)).toBe("Cliente pediu");
+    // valor diferente exige explicação nova, mesmo havendo observação anterior
+    expect(await fin(() => baixarParcela(q.id, cheio(q.valor - 100n)))).toMatchObject({ ok: false, erro: "Explique a diferença do valor recebido" });
+    expect(await fin(() => baixarParcela(q.id, { ...cheio(q.valor), observacao: "B" }))).toEqual({ ok: true });
+    expect(await obs(q.id)).toBe("Cliente pediu\nB");
+  });
+
+  it("achado 5: o motivo do cancelamento é anexado à observação que havia (não a sobrescreve)", async () => {
+    const x = await vendida();
+    const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
+    const p = x.parcelas[0];
+    expect(await fin(() => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: reais(p.valor), contaBancariaId: cb, observacao: "Pago em duas transferências" }))).toEqual({ ok: true });
+    expect(await fin(() => desfazerBaixaParcela(p.id))).toEqual({ ok: true });
+    expect(await fin(() => cancelarParcela(p.id, "Cliente pediu o cancelamento"))).toEqual({ ok: true });
+    expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0].observacao).toBe("Pago em duas transferências\nCliente pediu o cancelamento");
+  });
+
+  it("margem real idêntica à da 3b para o mesmo cenário (núcleo com conta × colunas gravadas à mão, sem conta)", async () => {
+    const x = await vendida();
+    const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
+    const p = x.parcelas[0];
+    // pelo núcleo (action com conta)
+    expect(await fin(() => baixarParcela(p.id, { recebidaEm: "2026-11-20", valorRecebido: reais(p.valor - 10000n), taxaEfetiva: "10,00", observacao: "Desconto", contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await fin(() => baixarPagamento(x.pagTransfer.id, { pagoEm: "2026-11-21", valorOriginalPago: "960,00", cambioEfetivo: "6,5000", contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await fin(() => registrarComissao(x.comissao.id, { recebidaEm: "2026-11-21", valorRecebido: "100,00", contaBancariaId: cb }))).toEqual({ ok: true });
+    const comConta = await estrategico(x.fin.id, x.viagemId);
+
+    // desfaz pelo núcleo e grava o mesmo cenário à mão, como a 3b gravava (colunas da baixa, sem conta bancária)
+    expect(await fin(() => desfazerBaixaParcela(p.id))).toEqual({ ok: true });
+    expect(await fin(() => desfazerBaixaPagamento(x.pagTransfer.id))).toEqual({ ok: true });
+    expect(await fin(() => desfazerComissao(x.comissao.id))).toEqual({ ok: true });
+    await db
+      .update(parcelasReceber)
+      .set({ status: "recebida", recebidaEm: "2026-11-20", valorRecebido: p.valor - 10000n, taxaEfetiva: 1000n })
+      .where(eq(parcelasReceber.id, p.id));
+    await db
+      .update(pagamentosFornecedor)
+      .set({ status: "pago", pagoEm: "2026-11-21", valorOriginalPago: 96000n, cambioEfetivo: "6.5000", valorBrlPago: converter(96000n, "6.5000") })
+      .where(eq(pagamentosFornecedor.id, x.pagTransfer.id));
+    await db.update(contasPagar).set({ status: "paga" }).where(eq(contasPagar.id, x.transfer.id));
+    await db.update(comissoes).set({ status: "recebida", recebidaEm: "2026-11-21", valorRecebido: 10000n }).where(eq(comissoes.id, x.comissao.id));
+    const semConta = await estrategico(x.fin.id, x.viagemId);
+
+    expect(json(comConta.real)).toBe(json(semConta.real));
+    expect(json(comConta.ponte)).toBe(json(semConta.ponte));
+    expect(json(comConta.f.estrategico)).toBe(json(semConta.f.estrategico));
+    // e os números são os da 3b: parcela a menos, taxa efetiva, câmbio e comissão
+    expect(comConta.real.final).not.toBe(comConta.planejada.final);
+    expect(comConta.ponte).toContainEqual({ rotulo: "Recebido a menos", valor: expect.any(BigInt) });
   });
 });

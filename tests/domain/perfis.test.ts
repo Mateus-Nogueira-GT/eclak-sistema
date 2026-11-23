@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FILIAIS, PERFIS, PERFIS_VALORES, podeAcessar, ROTAS_POR_PERFIL, veCamadaEstrategica } from "@/domain/perfis";
+import { FILIAIS, PERFIS, PERFIS_FINANCEIRO, PERFIS_VALORES, podeAcessar, ROTAS_POR_PERFIL, veCamadaEstrategica } from "@/domain/perfis";
 
 describe("perfis", () => {
   it("nomes e listas", () => {
@@ -50,5 +50,13 @@ describe("perfis", () => {
     for (const p of ["diretor", "fin_operacional", "fin_estrategico"] as const)
       expect(veCamadaEstrategica(p)).toBe(true);
     for (const p of ["consultor", "operacional"] as const) expect(veCamadaEstrategica(p)).toBe(false);
+  });
+  it("financeiro: só Diretor e financeiros", () => {
+    expect(podeAcessar("fin_operacional", "/financeiro/lancamentos")).toBe(true);
+    expect(podeAcessar("fin_estrategico", "/financeiro")).toBe(true);
+    expect(podeAcessar("diretor", "/financeiro/faturas")).toBe(true);
+    expect(podeAcessar("consultor", "/financeiro/faturas")).toBe(false);
+    expect(podeAcessar("operacional", "/financeiro")).toBe(false);
+    expect(PERFIS_FINANCEIRO).toEqual(["diretor", "fin_operacional", "fin_estrategico"]);
   });
 });

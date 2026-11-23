@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { garantirBancoLocal } from "../../scripts/local-guard";
 import { db, sql } from "@/server/db/client";
-import { usuarios, type Filial, type Perfil } from "@/server/db/schema";
+import { categoriasFinanceiras, faturasContador, usuarios, type Filial, type Perfil } from "@/server/db/schema";
+import { CATEGORIAS_INICIAIS, PROXIMA_FATURA_INICIAL } from "@/server/db/seed-financeiro-inicial";
 
 function adminClient() {
   return createClient(
@@ -27,7 +28,10 @@ function exigirLocal() {
   garantirBancoLocal(process.env.DATABASE_URL ?? "", process.env.NEXT_PUBLIC_SUPABASE_URL ?? "");
 }
 
-/** Trunca todas as tabelas de `public` e apaga os usuários de `auth.users`. */
+/**
+ * Trunca todas as tabelas de `public` e apaga os usuários de `auth.users`. Depois reinsere os dados iniciais que as
+ * migrações gravam (categorias financeiras e contador de faturas em 1405), do mesmo módulo que a 0020 replica.
+ */
 export async function limparBanco(): Promise<void> {
   exigirLocal();
   const tabelas = await sql<{ tablename: string }[]>`
@@ -41,6 +45,8 @@ export async function limparBanco(): Promise<void> {
     select sequencename from pg_sequences where schemaname = 'public'`;
   for (const s of sequencias) await sql.unsafe(`alter sequence "public"."${s.sequencename}" restart`);
   await sql`delete from auth.users`;
+  await db.insert(categoriasFinanceiras).values(CATEGORIAS_INICIAIS);
+  await db.insert(faturasContador).values({ id: 1, proximo: PROXIMA_FATURA_INICIAL });
 }
 
 export async function criarUsuarioTeste(

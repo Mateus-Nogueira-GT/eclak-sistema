@@ -5,6 +5,8 @@ export const PERFIS_VALORES = [
   "fin_operacional",
   "fin_estrategico",
 ] as const;
+/** Quem usa as telas e actions do financeiro (fatia 4). */
+export const PERFIS_FINANCEIRO = ["diretor", "fin_operacional", "fin_estrategico"] as const;
 export const FILIAIS = ["Rondonópolis", "RS"] as const;
 
 export type Perfil = (typeof PERFIS_VALORES)[number];
@@ -20,11 +22,11 @@ export const PERFIS: Record<Perfil, { nome: string }> = {
 
 // Fatias seguintes acrescentam rotas aqui.
 export const ROTAS_POR_PERFIL: Record<Perfil, string[]> = {
-  diretor: ["/clientes", "/viagens", "/fornecedores", "/vendas", "/aprovacoes", "/admin/usuarios", "/admin/parametros"],
+  diretor: ["/clientes", "/viagens", "/fornecedores", "/vendas", "/aprovacoes", "/admin/usuarios", "/admin/parametros", "/financeiro"],
   consultor: ["/clientes", "/viagens", "/fornecedores", "/vendas"],
   operacional: ["/clientes", "/viagens", "/fornecedores", "/vendas"],
-  fin_operacional: ["/clientes", "/viagens", "/fornecedores"],
-  fin_estrategico: ["/clientes", "/viagens", "/fornecedores"],
+  fin_operacional: ["/clientes", "/viagens", "/fornecedores", "/financeiro"],
+  fin_estrategico: ["/clientes", "/viagens", "/fornecedores", "/financeiro"],
 };
 
 export function podeAcessar(perfil: Perfil, caminho: string): boolean {

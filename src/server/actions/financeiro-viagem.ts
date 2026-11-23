@@ -3,7 +3,6 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { Snapshot } from "@/domain/aprovacoes";
-import { converter } from "@/domain/cambio";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { arredondar, lerDecimal } from "@/domain/decimal";
 import { formatarReais } from "@/domain/dinheiro";
@@ -19,24 +18,14 @@ import {
   motivoSchema,
   msgEmAberto,
   msgPrevistoAbaixoDoPago,
-  MSG_CAMBIO_EFETIVO,
-  MSG_COMISSAO_CANCELADA,
-  MSG_COMISSAO_EM_ABERTO,
   MSG_COMISSAO_REGISTRADA,
-  MSG_CONCILIADA,
-  MSG_DIFERENCA_RECEBIDA,
   MSG_JA_BAIXADO_NA_CONTA,
   MSG_NAO_CONCILIADA,
-  MSG_NAO_VENDIDA,
-  MSG_PAGAMENTO_EM_ABERTO,
-  MSG_PAGAMENTO_PAGO,
-  MSG_PARCELA_CANCELADA,
-  MSG_PARCELA_EM_ABERTO,
-  MSG_PARCELA_RECEBIDA,
   MSG_SEM_FORNECEDOR,
   valorReaisSchema,
 } from "@/domain/venda-entrada";
 import { MSG_NAO_CALCULA } from "@/domain/aprovacoes";
+import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
@@ -51,7 +40,33 @@ import {
   versoesPrecificacao,
   viagens,
 } from "@/server/db/schema";
-import { travarViagem } from "@/server/trava-viagem";
+import {
+  auditarAlteracao,
+  baixarPagamentoNa,
+  baixarParcelaNa,
+  cancelarParcelaNa,
+  comissaoNaoRecebidaNa,
+  contaTravada,
+  COMISSAO_NAO_ENCONTRADA,
+  Desfazer,
+  desfazerBaixaPagamentoNa,
+  desfazerBaixaParcelaNa,
+  desfazerComissaoNa,
+  ehFalha,
+  falha,
+  linhasDaConta,
+  naViagemVendidaNa,
+  OK,
+  PAGAMENTO_NAO_ENCONTRADO,
+  PARCELA_NAO_ENCONTRADA,
+  registrarComissaoNa,
+  type ContaLinha,
+  type Falha,
+  type Feito,
+  type Ok,
+  type PagamentoLinha,
+  type ViagemLinha,
+} from "@/server/financeiro/baixas-viagem";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -61,35 +76,10 @@ import { travarViagem } from "@/server/trava-viagem";
 // alterada pela cadeia de dono (pagamento → conta → viagem; comissão → conta → viagem; parcela → viagem).
 // Viagem conciliada não muda até o Diretor desfazer a conciliação. Respostas só `{ ok }`.
 
-const PERFIS_FINANCEIRO = ["diretor", "fin_operacional", "fin_estrategico"] as const;
-
-type Falha = { ok: false; erro: string; campos?: Record<string, string> };
-type Ok = { ok: true };
-const OK: Ok = { ok: true };
-
-const falha = (erro: string, campo?: string): Falha => (campo ? { ok: false, erro, campos: { [campo]: erro } } : { ok: false, erro });
 const VIAGEM_NAO_ENCONTRADA = falha("Viagem não encontrada");
 const CONTA_NAO_ENCONTRADA = falha("Conta não encontrada");
-const PARCELA_NAO_ENCONTRADA = falha("Parcela não encontrada");
-const PAGAMENTO_NAO_ENCONTRADO = falha("Pagamento não encontrado");
-const COMISSAO_NAO_ENCONTRADA = falha("Comissão não encontrada");
-const NAO_VENDIDA = falha(MSG_NAO_VENDIDA);
-const CONCILIADA = falha(MSG_CONCILIADA);
 const JA_BAIXADO = falha(MSG_JA_BAIXADO_NA_CONTA);
 const NAO_CALCULA = falha(MSG_NAO_CALCULA);
-
-type ViagemLinha = typeof viagens.$inferSelect;
-type ContaLinha = typeof contasPagar.$inferSelect;
-type PagamentoLinha = typeof pagamentosFornecedor.$inferSelect;
-
-/** Recusa dentro da transação que precisa desfazer o que já foi gravado; vira a `falha` fora dela. */
-class Desfazer extends Error {
-  constructor(readonly falha: Falha) {
-    super(falha.erro);
-  }
-}
-
-const ehFalha = (x: unknown): x is Falha => typeof x === "object" && x !== null && "ok" in x && (x as Falha).ok === false;
 
 /** Erro de banco inesperado: loga só o código (sem parâmetros) e relança genérico. */
 function erroDeBanco(mensagem: string, e: unknown): Error {
@@ -112,18 +102,6 @@ const minimo = (a: bigint, b: bigint) => (a < b ? a : b);
 
 const semId = (x: Record<string, unknown>) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== "id"));
 
-/** Auditoria de alteração: `antes` só com as chaves alteradas. */
-async function auditarAlteracao<T extends { id: string }>(
-  tx: Transacao,
-  usuarioId: string,
-  tabela: string,
-  linha: T,
-  depois: Partial<T>,
-): Promise<void> {
-  const antes = Object.fromEntries(Object.keys(depois).map((k) => [k, linha[k as keyof T]]));
-  await registrarAuditoria(tx, { usuarioId, tabela, registroId: linha.id, acao: "alterar", antes, depois });
-}
-
 function revalidar(viagemId: string) {
   revalidatePath("/viagens");
   revalidatePath(`/viagens/${viagemId}`);
@@ -131,35 +109,34 @@ function revalidar(viagemId: string) {
 }
 
 /**
+ * Transação da action: roda o núcleo (`fn`) numa transação nova; `Desfazer` vira a falha e desfaz tudo, outro
+ * erro é logado só com o código. No sucesso revalida as telas da viagem e responde só `{ ok: true }`.
+ */
+async function naTransacao(mensagemErro: string, fn: (tx: Transacao) => Promise<Feito | Falha>): Promise<Ok | Falha> {
+  let r: Feito | Falha;
+  try {
+    r = await db.transaction(fn);
+  } catch (x) {
+    if (x instanceof Desfazer) return x.falha;
+    throw erroDeBanco(mensagemErro, x);
+  }
+  if (ehFalha(r)) return r;
+  revalidar(r.viagemId);
+  return OK;
+}
+
+/**
  * Esqueleto das actions: descobre a viagem do registro (`viagemDe`, sem trava), trava a viagem, exige `vendida`
  * e não conciliada (salvo `aceitaConciliada`), e roda `fn` na mesma transação. `Desfazer` desfaz tudo.
  */
-async function naViagemVendida(
+function naViagemVendida(
   viagemDe: (tx: Transacao) => Promise<string | null>,
   naoEncontrado: Falha,
   mensagemErro: string,
   fn: (tx: Transacao, v: ViagemLinha) => Promise<Ok | Falha>,
   aceitaConciliada = false,
 ): Promise<Ok | Falha> {
-  const achada: { id: string | null } = { id: null };
-  let r: Ok | Falha;
-  try {
-    r = await db.transaction(async (tx) => {
-      achada.id = await viagemDe(tx);
-      if (!achada.id) return naoEncontrado;
-      const v = await travarViagem(tx, achada.id);
-      if (!v) return naoEncontrado;
-      if (v.status !== "vendida") return NAO_VENDIDA;
-      if (v.conciliadaEm && !aceitaConciliada) return CONCILIADA;
-      return fn(tx, v);
-    });
-  } catch (x) {
-    if (x instanceof Desfazer) return x.falha;
-    throw erroDeBanco(mensagemErro, x);
-  }
-  if (ehFalha(r)) return r;
-  if (achada.id) revalidar(achada.id);
-  return r;
+  return naTransacao(mensagemErro, (tx) => naViagemVendidaNa(tx, viagemDe, naoEncontrado, fn, aceitaConciliada));
 }
 
 // ---------------------------------------------------------------------------
@@ -174,47 +151,6 @@ async function viagemDaConta(tx: Transacao, contaId: string): Promise<string | n
   return c?.viagemId ?? null;
 }
 
-async function viagemDoPagamento(tx: Transacao, pagamentoId: string): Promise<string | null> {
-  const [c] = await tx
-    .select({ viagemId: contasPagar.viagemId })
-    .from(pagamentosFornecedor)
-    .innerJoin(contasPagar, eq(contasPagar.id, pagamentosFornecedor.contaId))
-    .where(and(eq(pagamentosFornecedor.id, pagamentoId), isNull(contasPagar.excluidoEm)));
-  return c?.viagemId ?? null;
-}
-
-async function viagemDaComissao(tx: Transacao, comissaoId: string): Promise<string | null> {
-  const [c] = await tx
-    .select({ viagemId: contasPagar.viagemId })
-    .from(comissoes)
-    .innerJoin(contasPagar, and(eq(contasPagar.id, comissoes.contaId), eq(contasPagar.viagemId, comissoes.viagemId)))
-    .where(and(eq(comissoes.id, comissaoId), isNull(contasPagar.excluidoEm)));
-  return c?.viagemId ?? null;
-}
-
-async function viagemDaParcela(tx: Transacao, parcelaId: string): Promise<string | null> {
-  const [p] = await tx.select({ viagemId: parcelasReceber.viagemId }).from(parcelasReceber).where(eq(parcelasReceber.id, parcelaId));
-  return p?.viagemId ?? null;
-}
-
-/** Conta ativa da viagem travada, `for update`. */
-async function contaTravada(tx: Transacao, contaId: string, viagemId: string): Promise<ContaLinha | null> {
-  const [c] = await tx
-    .select()
-    .from(contasPagar)
-    .where(and(eq(contasPagar.id, contaId), eq(contasPagar.viagemId, viagemId), isNull(contasPagar.excluidoEm)))
-    .for("update");
-  return c ?? null;
-}
-
-async function linhasDaConta(tx: Transacao, contaId: string): Promise<PagamentoLinha[]> {
-  return tx
-    .select()
-    .from(pagamentosFornecedor)
-    .where(eq(pagamentosFornecedor.contaId, contaId))
-    .orderBy(asc(pagamentosFornecedor.numero))
-    .for("update");
-}
 
 // ---------------------------------------------------------------------------
 // Previsto da conta na moeda (a partir do snapshot da versão vendida)
@@ -529,74 +465,27 @@ export async function contestar(contaId: string, textoContestacao: string): Prom
 }
 
 // ---------------------------------------------------------------------------
-// Parcelas a receber
+// Parcelas a receber, pagamentos e comissões: o núcleo (`@/server/financeiro/baixas-viagem`) numa transação nova
 // ---------------------------------------------------------------------------
 
-export type BaixaParcelaEntrada = { recebidaEm: string; valorRecebido: string; taxaEfetiva?: string | null; observacao?: string | null };
-
-async function parcelaTravada(tx: Transacao, parcelaId: string, viagemId: string) {
-  const [p] = await tx
-    .select()
-    .from(parcelasReceber)
-    .where(and(eq(parcelasReceber.id, parcelaId), eq(parcelasReceber.viagemId, viagemId)))
-    .for("update");
-  return p ?? null;
-}
-
-type ParcelaLinha = typeof parcelasReceber.$inferSelect;
-
-/** Roda `mudar` sobre a parcela travada da viagem e grava o resultado (ou recusa). */
-function naParcela(
-  parcelaId: string,
-  mensagemErro: string,
-  mudar: (p: ParcelaLinha) => Partial<ParcelaLinha> | Falha,
-  usuarioId: string,
-): Promise<Ok | Falha> {
-  return naViagemVendida(
-    (tx) => viagemDaParcela(tx, parcelaId),
-    PARCELA_NAO_ENCONTRADA,
-    mensagemErro,
-    async (tx, v) => {
-      const p = await parcelaTravada(tx, parcelaId, v.id);
-      if (!p) return PARCELA_NAO_ENCONTRADA;
-      const depois = mudar(p);
-      if (ehFalha(depois)) return depois;
-      await tx.update(parcelasReceber).set(depois).where(eq(parcelasReceber.id, p.id));
-      await auditarAlteracao(tx, usuarioId, "parcelas_receber", p, depois);
-      return OK;
-    },
-  );
-}
-
-const recusaParcelaFechada = (p: ParcelaLinha): Falha | null =>
-  p.status === "recebida" ? falha(MSG_PARCELA_RECEBIDA) : p.status === "cancelada" ? falha(MSG_PARCELA_CANCELADA) : null;
+export type BaixaParcelaEntrada = {
+  recebidaEm: string;
+  valorRecebido: string;
+  taxaEfetiva?: string | null;
+  observacao?: string | null;
+  contaBancariaId: string;
+};
 
 /**
- * Baixa da parcela: data, valor recebido, taxa efetiva (vazia = a prevista) e observação, obrigatória quando o
- * valor recebido é diferente do valor da parcela (a diferença entra na margem real).
+ * Baixa da parcela: data, valor recebido, taxa efetiva (vazia = a prevista), conta bancária ativa e observação,
+ * obrigatória quando o valor recebido é diferente do valor da parcela (a diferença entra na margem real).
  */
 export async function baixarParcela(parcelaId: string, dados: BaixaParcelaEntrada): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
     if (!ehUuid(parcelaId)) return PARCELA_NAO_ENCONTRADA;
     const b = baixaParcelaSchema().safeParse(dados);
     if (!b.success) return falhaDeValidacao(b.error);
-    return naParcela(
-      parcelaId,
-      "Erro ao baixar a parcela",
-      (p) => {
-        const recusa = recusaParcelaFechada(p);
-        if (recusa) return recusa;
-        if (b.data.valorRecebido !== p.valor && !b.data.observacao) return falha(MSG_DIFERENCA_RECEBIDA, "observacao");
-        return {
-          status: "recebida",
-          recebidaEm: b.data.recebidaEm,
-          valorRecebido: b.data.valorRecebido,
-          taxaEfetiva: b.data.taxaEfetiva,
-          observacao: b.data.observacao,
-        };
-      },
-      usuario.id,
-    );
+    return naTransacao("Erro ao baixar a parcela", (tx) => baixarParcelaNa(tx, usuario.id, parcelaId, b.data));
   });
 }
 
@@ -604,15 +493,7 @@ export async function baixarParcela(parcelaId: string, dados: BaixaParcelaEntrad
 export async function desfazerBaixaParcela(parcelaId: string): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
     if (!ehUuid(parcelaId)) return PARCELA_NAO_ENCONTRADA;
-    return naParcela(
-      parcelaId,
-      "Erro ao desfazer a baixa da parcela",
-      (p) =>
-        p.status === "a_receber"
-          ? falha(MSG_PARCELA_EM_ABERTO)
-          : { status: "a_receber", recebidaEm: null, valorRecebido: null, taxaEfetiva: null, observacao: null },
-      usuario.id,
-    );
+    return naTransacao("Erro ao desfazer a baixa da parcela", (tx) => desfazerBaixaParcelaNa(tx, usuario.id, parcelaId));
   });
 }
 
@@ -622,48 +503,11 @@ export async function cancelarParcela(parcelaId: string, motivo: string): Promis
     if (!ehUuid(parcelaId)) return PARCELA_NAO_ENCONTRADA;
     const m = texto(motivoSchema, motivo, "motivo");
     if (ehFalha(m)) return m;
-    return naParcela(parcelaId, "Erro ao cancelar a parcela", (p) => recusaParcelaFechada(p) ?? { status: "cancelada", observacao: m }, usuario.id);
+    return naTransacao("Erro ao cancelar a parcela", (tx) => cancelarParcelaNa(tx, usuario.id, parcelaId, m));
   });
 }
 
-// ---------------------------------------------------------------------------
-// Pagamentos ao fornecedor
-// ---------------------------------------------------------------------------
-
-export type BaixaPagamentoEntrada = { pagoEm: string; valorOriginalPago: string; cambioEfetivo?: string | null };
-
-/** Roda `mudar` sobre o pagamento travado (com a conta travada) e acerta o status da conta. */
-function noPagamento(
-  pagamentoId: string,
-  mensagemErro: string,
-  mudar: (p: PagamentoLinha, conta: ContaLinha) => Partial<PagamentoLinha> | Falha,
-  usuarioId: string,
-): Promise<Ok | Falha> {
-  return naViagemVendida(
-    (tx) => viagemDoPagamento(tx, pagamentoId),
-    PAGAMENTO_NAO_ENCONTRADO,
-    mensagemErro,
-    async (tx, v) => {
-      const [dono] = await tx.select({ contaId: pagamentosFornecedor.contaId }).from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, pagamentoId));
-      const conta = dono ? await contaTravada(tx, dono.contaId, v.id) : null;
-      if (!conta) return PAGAMENTO_NAO_ENCONTRADO;
-      const linhas = await linhasDaConta(tx, conta.id);
-      const p = linhas.find((l) => l.id === pagamentoId);
-      if (!p) return PAGAMENTO_NAO_ENCONTRADO;
-      const depois = mudar(p, conta);
-      if (ehFalha(depois)) return depois;
-      await tx.update(pagamentosFornecedor).set(depois).where(eq(pagamentosFornecedor.id, p.id));
-      await auditarAlteracao(tx, usuarioId, "pagamentos_fornecedor", p, depois);
-      const todasPagas = linhas.every((l) => (l.id === p.id ? depois.status : l.status) === "pago");
-      const status = todasPagas ? "paga" : "a_pagar";
-      if (conta.status !== status && conta.status !== "cancelada") {
-        await tx.update(contasPagar).set({ status }).where(eq(contasPagar.id, conta.id));
-        await auditarAlteracao(tx, usuarioId, "contas_pagar", conta, { status });
-      }
-      return OK;
-    },
-  );
-}
+export type BaixaPagamentoEntrada = { pagoEm: string; valorOriginalPago: string; cambioEfetivo?: string | null; contaBancariaId: string };
 
 /**
  * Baixa do pagamento: data e valor pago na moeda da conta; fora do real, câmbio efetivo obrigatório e o valor em
@@ -674,18 +518,7 @@ export async function baixarPagamento(pagamentoId: string, dados: BaixaPagamento
     if (!ehUuid(pagamentoId)) return PAGAMENTO_NAO_ENCONTRADO;
     const b = baixaPagamentoSchema().safeParse(dados);
     if (!b.success) return falhaDeValidacao(b.error);
-    const { pagoEm, valorOriginalPago, cambioEfetivo } = b.data;
-    return noPagamento(
-      pagamentoId,
-      "Erro ao baixar o pagamento",
-      (p, conta) => {
-        if (p.status === "pago") return falha(MSG_PAGAMENTO_PAGO);
-        if (conta.moeda === "BRL") return { status: "pago", pagoEm, valorOriginalPago, cambioEfetivo: null, valorBrlPago: valorOriginalPago };
-        if (!cambioEfetivo) return falha(MSG_CAMBIO_EFETIVO, "cambioEfetivo");
-        return { status: "pago", pagoEm, valorOriginalPago, cambioEfetivo, valorBrlPago: converter(valorOriginalPago, cambioEfetivo) };
-      },
-      usuario.id,
-    );
+    return naTransacao("Erro ao baixar o pagamento", (tx) => baixarPagamentoNa(tx, usuario.id, pagamentoId, b.data));
   });
 }
 
@@ -693,53 +526,11 @@ export async function baixarPagamento(pagamentoId: string, dados: BaixaPagamento
 export async function desfazerBaixaPagamento(pagamentoId: string): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
     if (!ehUuid(pagamentoId)) return PAGAMENTO_NAO_ENCONTRADO;
-    return noPagamento(
-      pagamentoId,
-      "Erro ao desfazer a baixa do pagamento",
-      (p) =>
-        p.status !== "pago"
-          ? falha(MSG_PAGAMENTO_EM_ABERTO)
-          : { status: "a_pagar", pagoEm: null, valorOriginalPago: null, cambioEfetivo: null, valorBrlPago: null },
-      usuario.id,
-    );
+    return naTransacao("Erro ao desfazer a baixa do pagamento", (tx) => desfazerBaixaPagamentoNa(tx, usuario.id, pagamentoId));
   });
 }
 
-// ---------------------------------------------------------------------------
-// Comissões a receber
-// ---------------------------------------------------------------------------
-
-type ComissaoLinha = typeof comissoes.$inferSelect;
-
-function naComissao(
-  comissaoId: string,
-  mensagemErro: string,
-  mudar: (c: ComissaoLinha) => Partial<ComissaoLinha> | Falha,
-  usuarioId: string,
-): Promise<Ok | Falha> {
-  return naViagemVendida(
-    (tx) => viagemDaComissao(tx, comissaoId),
-    COMISSAO_NAO_ENCONTRADA,
-    mensagemErro,
-    async (tx, v) => {
-      const [c] = await tx
-        .select({ c: comissoes })
-        .from(comissoes)
-        .innerJoin(contasPagar, eq(contasPagar.id, comissoes.contaId))
-        .where(and(eq(comissoes.id, comissaoId), eq(comissoes.viagemId, v.id), eq(contasPagar.viagemId, v.id), isNull(contasPagar.excluidoEm)))
-        .for("update");
-      if (!c) return COMISSAO_NAO_ENCONTRADA;
-      if (c.c.status === "cancelada") return falha(MSG_COMISSAO_CANCELADA);
-      const depois = mudar(c.c);
-      if (ehFalha(depois)) return depois;
-      await tx.update(comissoes).set(depois).where(eq(comissoes.id, comissaoId));
-      await auditarAlteracao(tx, usuarioId, "comissoes", c.c, depois);
-      return OK;
-    },
-  );
-}
-
-export type ComissaoRecebidaEntrada = { recebidaEm: string; valorRecebido: string };
+export type ComissaoRecebidaEntrada = { recebidaEm: string; valorRecebido: string; contaBancariaId: string };
 
 /** Comissão recebida: data e valor. */
 export async function registrarComissao(comissaoId: string, dados: ComissaoRecebidaEntrada): Promise<Ok | Falha> {
@@ -747,15 +538,7 @@ export async function registrarComissao(comissaoId: string, dados: ComissaoReceb
     if (!ehUuid(comissaoId)) return COMISSAO_NAO_ENCONTRADA;
     const b = comissaoRecebidaSchema().safeParse(dados);
     if (!b.success) return falhaDeValidacao(b.error);
-    return naComissao(
-      comissaoId,
-      "Erro ao registrar a comissão",
-      (c) =>
-        c.status !== "prevista"
-          ? falha(MSG_COMISSAO_REGISTRADA)
-          : { status: "recebida", recebidaEm: b.data.recebidaEm, valorRecebido: b.data.valorRecebido, motivo: null },
-      usuario.id,
-    );
+    return naTransacao("Erro ao registrar a comissão", (tx) => registrarComissaoNa(tx, usuario.id, comissaoId, b.data));
   });
 }
 
@@ -765,12 +548,7 @@ export async function comissaoNaoRecebida(comissaoId: string, motivo: string): P
     if (!ehUuid(comissaoId)) return COMISSAO_NAO_ENCONTRADA;
     const m = texto(motivoSchema, motivo, "motivo");
     if (ehFalha(m)) return m;
-    return naComissao(
-      comissaoId,
-      "Erro ao registrar a comissão",
-      (c) => (c.status !== "prevista" ? falha(MSG_COMISSAO_REGISTRADA) : { status: "nao_recebida", motivo: m }),
-      usuario.id,
-    );
+    return naTransacao("Erro ao registrar a comissão", (tx) => comissaoNaoRecebidaNa(tx, usuario.id, comissaoId, m));
   });
 }
 
@@ -778,13 +556,7 @@ export async function comissaoNaoRecebida(comissaoId: string, motivo: string): P
 export async function desfazerComissao(comissaoId: string): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
     if (!ehUuid(comissaoId)) return COMISSAO_NAO_ENCONTRADA;
-    return naComissao(
-      comissaoId,
-      "Erro ao desfazer a comissão",
-      (c) =>
-        c.status === "prevista" ? falha(MSG_COMISSAO_EM_ABERTO) : { status: "prevista", recebidaEm: null, valorRecebido: null, motivo: null },
-      usuario.id,
-    );
+    return naTransacao("Erro ao desfazer a comissão", (tx) => desfazerComissaoNa(tx, usuario.id, comissaoId));
   });
 }
 

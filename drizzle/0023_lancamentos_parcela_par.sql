@@ -1,0 +1,2 @@
+ALTER TABLE "lancamentos" DROP CONSTRAINT "lancamentos_parcela";--> statement-breakpoint
+ALTER TABLE "lancamentos" ADD CONSTRAINT "lancamentos_parcela" CHECK (num_nonnulls("lancamentos"."parcela_numero", "lancamentos"."parcela_total") IN (0, 2) AND ("lancamentos"."parcela_numero" IS NULL OR ("lancamentos"."parcela_numero" >= 1 AND "lancamentos"."parcela_total" >= "lancamentos"."parcela_numero")));

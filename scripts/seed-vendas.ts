@@ -123,7 +123,7 @@ type Linhas = {
 };
 
 /** Fechamento da venda com as mesmas funções de domínio do servidor (parcelas, contas, pagamentos, comissões). */
-async function fechar(tx: Transacao, ctx: Contexto, c: Criado, clienteId: string, f: Fechamento): Promise<Linhas> {
+async function fechar(tx: Transacao, ctx: Contexto, c: Criado, clienteId: string, f: Fechamento, contaBancariaId: string): Promise<Linhas> {
   const resultado = c.resultado as ResultadoVersao;
   const total = c.precoCliente;
   const forma = c.forma;
@@ -143,17 +143,18 @@ async function fechar(tx: Transacao, ctx: Contexto, c: Criado, clienteId: string
   let numero = 1;
   if (f.entrada > 0n) {
     const [p] = await tx`
-      insert into parcelas_receber (viagem_id, venda_id, numero, total_parcelas, vencimento, valor, meio, taxa_prevista, status, recebida_em, valor_recebido, taxa_efetiva)
-      values (${c.viagemId}, ${venda.id}, 1, ${nParcelas}, ${f.aceiteEm}, ${f.entrada.toString()}, 'pix', 0, 'recebida', ${f.aceiteEm}, ${f.entrada.toString()}, 0)
+      insert into parcelas_receber (viagem_id, venda_id, numero, total_parcelas, vencimento, valor, meio, taxa_prevista, status, recebida_em, valor_recebido, taxa_efetiva, conta_bancaria_id)
+      values (${c.viagemId}, ${venda.id}, 1, ${nParcelas}, ${f.aceiteEm}, ${f.entrada.toString()}, 'pix', 0, 'recebida', ${f.aceiteEm}, ${f.entrada.toString()}, 0, ${contaBancariaId})
       returning id`;
     parcelas.push({ id: p.id, numero: 1, valor: f.entrada, meio: "pix" });
     numero = 2;
   }
   for (const [i, b] of boletos.entries()) {
     const [p] = await tx`
-      insert into parcelas_receber (viagem_id, venda_id, numero, total_parcelas, vencimento, valor, meio, taxa_prevista, status, recebida_em, valor_recebido, taxa_efetiva)
+      insert into parcelas_receber (viagem_id, venda_id, numero, total_parcelas, vencimento, valor, meio, taxa_prevista, status, recebida_em, valor_recebido, taxa_efetiva, conta_bancaria_id)
       values (${c.viagemId}, ${venda.id}, ${numero + i}, ${nParcelas}, ${b.vencimento}, ${b.valor.toString()}, ${meio}, ${taxas[i].toString()},
-              ${f.baixarTudo ? "recebida" : "a_receber"}, ${f.baixarTudo ? b.vencimento : null}, ${f.baixarTudo ? b.valor.toString() : null}, ${f.baixarTudo ? taxas[i].toString() : null})
+              ${f.baixarTudo ? "recebida" : "a_receber"}, ${f.baixarTudo ? b.vencimento : null}, ${f.baixarTudo ? b.valor.toString() : null}, ${f.baixarTudo ? taxas[i].toString() : null},
+              ${f.baixarTudo ? contaBancariaId : null})
       returning id`;
     parcelas.push({ id: p.id, numero: numero + i, valor: b.valor, meio });
   }
@@ -192,12 +193,19 @@ async function fechar(tx: Transacao, ctx: Contexto, c: Criado, clienteId: string
   return saida;
 }
 
-/** Baixa o pagamento: BRL pelo previsto; moeda estrangeira com o câmbio efetivo informado. */
-async function pagar(tx: Transacao, pag: Linhas["contas"][number]["pagamentos"][number], conta: Linhas["contas"][number], pagoEm: string, cambio?: string) {
+/** Baixa o pagamento pela conta bancária: BRL pelo previsto; moeda estrangeira com o câmbio efetivo informado. */
+async function pagar(
+  tx: Transacao,
+  pag: Linhas["contas"][number]["pagamentos"][number],
+  conta: Linhas["contas"][number],
+  pagoEm: string,
+  contaBancariaId: string,
+  cambio?: string,
+) {
   const brl = conta.moeda === "BRL" ? pag.valorBrlPrevisto : converter(pag.valorOriginal, cambio!);
   await tx`
     update pagamentos_fornecedor set status = 'pago', pago_em = ${pagoEm}, valor_original_pago = ${pag.valorOriginal.toString()},
-           cambio_efetivo = ${conta.moeda === "BRL" ? null : cambio!}, valor_brl_pago = ${brl.toString()}
+           cambio_efetivo = ${conta.moeda === "BRL" ? null : cambio!}, valor_brl_pago = ${brl.toString()}, conta_bancaria_id = ${contaBancariaId}
     where id = ${pag.id}`;
   await tx`update contas_pagar set status = 'paga' where id = ${conta.id}`;
 }
@@ -211,7 +219,7 @@ const NOMES_PAGOS_RIBEIRO = [
   "Maison Rivoli Seize",
 ];
 
-async function semearRibeiro(sql: Sql, ctx: Contexto): Promise<boolean> {
+async function semearRibeiro(sql: Sql, ctx: Contexto, contaBancariaId: string): Promise<boolean> {
   const hoje = hojeEmCuiaba();
   const inicio = somarDias(hoje, -5);
   await sql.begin((tx) => garantirFornecedor(tx, "Operadora Mediterrânea", "comissionado", "10.000", ["Passeio guiado", "Hotelaria"]));
@@ -240,11 +248,11 @@ async function semearRibeiro(sql: Sql, ctx: Contexto): Promise<boolean> {
         entrada: ENTRADA,
         primeiroVencimento: somarDias(hoje, 6),
         baixarTudo: false,
-      });
+      }, contaBancariaId);
       // Pagamentos feitos: cartão e Pix já saíram; Paris em euro com câmbio efetivo acima do da venda.
       for (const conta of l.contas.filter((x) => NOMES_PAGOS_RIBEIRO.includes(x.descricao))) {
         for (const pag of conta.pagamentos) {
-          await pagar(tx, pag, conta, somarDias(hoje, -12), conta.moeda === "BRL" ? undefined : "6.3500");
+          await pagar(tx, pag, conta, somarDias(hoje, -12), contaBancariaId, conta.moeda === "BRL" ? undefined : "6.3500");
         }
       }
       // Florença: o hotel cobrou R$ 1.840 a mais; contestado com o fornecedor.
@@ -277,7 +285,7 @@ const LINHAS_CONCILIADA = (inicio: string): Linha[] => [
   ["Taxa", null, "Taxa de roteiro", null, null, null, 250, null, null],
 ];
 
-async function semearConciliada(sql: Sql, ctx: Contexto): Promise<boolean> {
+async function semearConciliada(sql: Sql, ctx: Contexto, contaBancariaId: string): Promise<boolean> {
   const inicio = "2026-05-04";
   const fim = "2026-05-14";
   const [cli] = await sql`select id from clientes where grupo = 'Casal Vasconcelos' and excluido_em is null`;
@@ -304,10 +312,12 @@ async function semearConciliada(sql: Sql, ctx: Contexto): Promise<boolean> {
         entrada: 0n,
         primeiroVencimento: aceiteEm,
         baixarTudo: true,
-      });
-      for (const conta of l.contas) for (const pag of conta.pagamentos) await pagar(tx, pag, conta, "2026-03-20");
+      }, contaBancariaId);
+      for (const conta of l.contas) for (const pag of conta.pagamentos) await pagar(tx, pag, conta, "2026-03-20", contaBancariaId);
       for (const com of l.comissoes) {
-        await tx`update comissoes set status = 'recebida', recebida_em = '2026-06-15', valor_recebido = ${com.valorPrevisto.toString()} where id = ${com.id}`;
+        await tx`
+          update comissoes set status = 'recebida', recebida_em = '2026-06-15', valor_recebido = ${com.valorPrevisto.toString()}, conta_bancaria_id = ${contaBancariaId}
+          where id = ${com.id}`;
       }
       await tx`update viagens set conciliada_em = '2026-06-20T12:00:00Z' where id = ${c.viagemId}`;
     },
@@ -315,11 +325,25 @@ async function semearConciliada(sql: Sql, ctx: Contexto): Promise<boolean> {
   return r !== null;
 }
 
+const CONTA_SEED = "Sicredi";
+
+/** Conta bancária ativa das baixas do seed (toda baixa nova tem conta); cria se não existe. */
+async function garantirContaBancaria(sql: Sql): Promise<string> {
+  const [e] = await sql`select id from contas_bancarias where nome = ${CONTA_SEED} and ativa and excluido_em is null`;
+  if (e) return e.id as string;
+  const [c] = await sql`
+    insert into contas_bancarias (nome, banco, saldo_inicial, saldo_inicial_em)
+    values (${CONTA_SEED}, '748', 0, '2026-01-01')
+    returning id`;
+  return c.id as string;
+}
+
 /** Cria as viagens vendidas que ainda não existem; devolve quantas foram criadas. */
 export async function semearVendas(sql: Sql): Promise<number> {
   const ctx = await contextoSeed(sql);
+  const contaBancariaId = await garantirContaBancaria(sql);
   let n = 0;
-  if (await semearRibeiro(sql, ctx)) n++;
-  if (await semearConciliada(sql, ctx)) n++;
+  if (await semearRibeiro(sql, ctx, contaBancariaId)) n++;
+  if (await semearConciliada(sql, ctx, contaBancariaId)) n++;
   return n;
 }

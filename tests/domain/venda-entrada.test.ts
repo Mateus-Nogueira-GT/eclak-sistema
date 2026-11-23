@@ -3,6 +3,7 @@ import {
   alteracaoNovaForma,
   baixaPagamentoSchema,
   baixaParcelaSchema,
+  comissaoRecebidaSchema,
   contestacaoSchema,
   fechamentoSchema,
   formaFornecedorSchema,
@@ -13,6 +14,7 @@ import {
 } from "@/domain/venda-entrada";
 
 const HOJE = "2026-11-22";
+const CB = "6f1c3a52-8d4e-4b7a-9c21-0e5f7d8a9b10";
 const base = {
   aceiteEm: "2026-11-20",
   forma: { tipo: "boleto", parcelas: 4 },
@@ -76,28 +78,43 @@ describe("entradas do financeiro da viagem", () => {
   const msg = (r: { success: boolean; error?: { issues: { message: string }[] } }) => (r.success ? null : r.error!.issues[0].message);
 
   it("baixa de parcela: data até hoje, valor em reais, taxa opcional", () => {
-    expect(baixaParcelaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "1.234,56" })).toEqual({
+    expect(baixaParcelaSchema(HOJE).parse({ contaBancariaId: CB, recebidaEm: "2026-11-21", valorRecebido: "1.234,56" })).toEqual({
       recebidaEm: "2026-11-21",
       valorRecebido: 123456n,
       taxaEfetiva: null,
       observacao: null,
+      contaBancariaId: CB,
     });
-    expect(baixaParcelaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "10", taxaEfetiva: "1,50" }).taxaEfetiva).toBe(150n);
-    expect(baixaParcelaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "10", observacao: "  Tarifa  " }).observacao).toBe("Tarifa");
-    expect(baixaParcelaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "10", observacao: "  " }).observacao).toBeNull();
-    expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "", valorRecebido: "10" }))).toBe("Informe a data");
-    expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "2026-11-23", valorRecebido: "10" }))).toBe("Data no futuro");
-    expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "2026-11-21", valorRecebido: "abc" }))).toBe("Valor inválido");
+    expect(baixaParcelaSchema(HOJE).parse({ contaBancariaId: CB, recebidaEm: "2026-11-21", valorRecebido: "10", taxaEfetiva: "1,50" }).taxaEfetiva).toBe(150n);
+    expect(baixaParcelaSchema(HOJE).parse({ contaBancariaId: CB, recebidaEm: "2026-11-21", valorRecebido: "10", observacao: "  Tarifa  " }).observacao).toBe("Tarifa");
+    expect(baixaParcelaSchema(HOJE).parse({ contaBancariaId: CB, recebidaEm: "2026-11-21", valorRecebido: "10", observacao: "  " }).observacao).toBeNull();
+    expect(msg(baixaParcelaSchema(HOJE).safeParse({ contaBancariaId: CB, recebidaEm: "", valorRecebido: "10" }))).toBe("Informe a data");
+    expect(msg(baixaParcelaSchema(HOJE).safeParse({ contaBancariaId: CB, recebidaEm: "2026-11-23", valorRecebido: "10" }))).toBe("Data no futuro");
+    expect(msg(baixaParcelaSchema(HOJE).safeParse({ contaBancariaId: CB, recebidaEm: "2026-11-21", valorRecebido: "abc" }))).toBe("Valor inválido");
+  });
+
+  it("conta bancária obrigatória nas três baixas: 'Escolha a conta bancária'", () => {
+    for (const conta of [{}, { contaBancariaId: "" }, { contaBancariaId: "x" }, { contaBancariaId: null }]) {
+      expect(msg(baixaParcelaSchema(HOJE).safeParse({ recebidaEm: "2026-11-21", valorRecebido: "10", ...conta }))).toBe("Escolha a conta bancária");
+      expect(msg(baixaPagamentoSchema(HOJE).safeParse({ pagoEm: "2026-11-21", valorOriginalPago: "10", ...conta }))).toBe("Escolha a conta bancária");
+      expect(msg(comissaoRecebidaSchema(HOJE).safeParse({ recebidaEm: "2026-11-21", valorRecebido: "10", ...conta }))).toBe("Escolha a conta bancária");
+    }
+    expect(comissaoRecebidaSchema(HOJE).parse({ recebidaEm: "2026-11-21", valorRecebido: "10", contaBancariaId: CB })).toEqual({
+      recebidaEm: "2026-11-21",
+      valorRecebido: 1000n,
+      contaBancariaId: CB,
+    });
   });
 
   it("baixa de pagamento: câmbio efetivo opcional no schema, canônico", () => {
-    expect(baixaPagamentoSchema(HOJE).parse({ pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,3" })).toEqual({
+    expect(baixaPagamentoSchema(HOJE).parse({ contaBancariaId: CB, pagoEm: "2026-11-21", valorOriginalPago: "1.000,00", cambioEfetivo: "6,3" })).toEqual({
       pagoEm: "2026-11-21",
       valorOriginalPago: 100000n,
       cambioEfetivo: "6.3000",
+      contaBancariaId: CB,
     });
-    expect(baixaPagamentoSchema(HOJE).parse({ pagoEm: "2026-11-21", valorOriginalPago: "1" }).cambioEfetivo).toBeNull();
-    expect(msg(baixaPagamentoSchema(HOJE).safeParse({ pagoEm: "2026-11-21", valorOriginalPago: "1", cambioEfetivo: "0" }))).toBe("Câmbio inválido");
+    expect(baixaPagamentoSchema(HOJE).parse({ contaBancariaId: CB, pagoEm: "2026-11-21", valorOriginalPago: "1" }).cambioEfetivo).toBeNull();
+    expect(msg(baixaPagamentoSchema(HOJE).safeParse({ contaBancariaId: CB, pagoEm: "2026-11-21", valorOriginalPago: "1", cambioEfetivo: "0" }))).toBe("Câmbio inválido");
   });
 
   it("forma ao fornecedor", () => {

@@ -28,10 +28,11 @@ export const MSG_PEDIDO_CLIENTE = "Escreva o pedido do cliente";
 export const MSG_VENCIMENTO_ANTES_DO_ACEITE =
   "O primeiro vencimento não pode ser antes do aceite";
 export const MSG_ACEITE_FUTURO = "Data do aceite no futuro";
+export const MSG_FORNECEDOR_CARTAO = "Escolha o fornecedor que recebeu no cartão";
 export const ALTERACAO_NOVA_FORMA =
   "Nova forma de pagamento acordada com o cliente";
 
-const texto = (max: number) =>
+export const texto = (max: number) =>
   z
     .string({ error: "Texto inválido" })
     .trim()
@@ -39,10 +40,10 @@ const texto = (max: number) =>
     .nullish()
     .transform((v) => (v ? v : null));
 
-const obrigatorio = (msg: string, max: number) =>
+export const obrigatorio = (msg: string, max: number) =>
   z.string({ error: msg }).trim().min(1, msg).max(max, "Texto muito longo");
 
-const data = (msg: string) =>
+export const data = (msg: string) =>
   z.string({ error: msg }).trim().min(1, msg).refine(dataReal, "Data inválida");
 
 /**
@@ -70,6 +71,14 @@ export function fechamentoSchema(hoje: string = hojeEmCuiaba()) {
         .refine(documentoValido, MSG_DOCUMENTO),
       comprovante: texto(4000),
       observacao: texto(4000),
+      /**
+       * Cartão direto no fornecedor: quem recebeu no cartão (exigido na action, entre os fornecedores com conta
+       * na viagem; ignorado nas outras formas). Select vazio chega como "".
+       */
+      fornecedorCartaoId: z.preprocess(
+        (v) => (v === "" || v === null ? undefined : v),
+        z.string({ error: MSG_FORNECEDOR_CARTAO }).uuid(MSG_FORNECEDOR_CARTAO).optional(),
+      ),
     })
     .superRefine((v, ctx) => {
       if (v.primeiroVencimento < v.aceiteEm)
@@ -124,6 +133,19 @@ export const MSG_COMISSAO_REGISTRADA = "Comissão já registrada";
 export const MSG_COMISSAO_CANCELADA = "Comissão cancelada";
 export const MSG_COMISSAO_EM_ABERTO = "Esta comissão não foi registrada";
 export const MSG_SEM_FORNECEDOR = "Conta sem fornecedor: a comissão só pode ser descontada";
+export const MSG_CONTA_BANCARIA = "Escolha a conta bancária";
+export const MSG_USE_REPASSE = "Use o repasse do fornecedor para esta parcela";
+export const MSG_PAGO_PELO_REPASSE = "Pagamento quitado pelo repasse: desfaça o repasse";
+export const MSG_PAGO_NO_CARTAO = "Pago pelo cliente no cartão do fornecedor: use o repasse";
+export const MSG_REPASSE_MAIOR = "O repasse é maior que o esperado: atualize o previsto das contas do fornecedor na viagem";
+export const MSG_REPASSE_ESTRANGEIRA = "Dê baixa no pagamento em moeda estrangeira na viagem antes do repasse";
+export const MSG_NAO_CARTAO_FORNECEDOR = "Esta parcela não é de cartão direto no fornecedor";
+export const MSG_DESFACA_REPASSE = "Desfaça o repasse para trocar o fornecedor";
+export const MSG_ESCOLHA_FORNECEDOR_ANTES = "Escolha o fornecedor que recebeu no cartão antes de dar baixa";
+export const MSG_FORNECEDOR_JA_PAGO = "Este fornecedor já tem pagamento feito pela ECLAK: desfaça a baixa antes";
+
+/** Conta bancária da baixa: obrigatória (ativa: conferido no núcleo, na transação). Select vazio chega como "". */
+export const contaBancariaId = z.string({ error: MSG_CONTA_BANCARIA }).uuid(MSG_CONTA_BANCARIA);
 
 const MAX_CENTAVOS = 999_999_999_999n;
 
@@ -139,9 +161,9 @@ function lerValor(v: string | null | undefined): bigint | null | string {
   return c > MAX_CENTAVOS ? "Valor muito alto" : c;
 }
 
-function reais(opcional: true): z.ZodType<bigint | null, string | null | undefined>;
-function reais(opcional: false): z.ZodType<bigint, string | null | undefined>;
-function reais(opcional: boolean): z.ZodType<bigint | null, string | null | undefined> {
+export function reais(opcional: true): z.ZodType<bigint | null, string | null | undefined>;
+export function reais(opcional: false): z.ZodType<bigint, string | null | undefined>;
+export function reais(opcional: boolean): z.ZodType<bigint | null, string | null | undefined> {
   return z
     .string({ error: "Valor inválido" })
     .nullish()
@@ -167,8 +189,9 @@ export function baixaParcelaSchema(hoje: string = hojeEmCuiaba()) {
     valorRecebido: reais(false),
     /** Taxa cobrada de fato (maquininha, boleto); vazia = a prevista. */
     taxaEfetiva: reais(true),
-    /** Obrigatória (na action) quando o valor recebido é diferente do valor da parcela. */
+    /** Obrigatória (no núcleo) quando o valor recebido é diferente do valor da parcela; entra em linha nova. */
     observacao: texto(2000),
+    contaBancariaId,
   });
 }
 
@@ -190,12 +213,17 @@ export function baixaPagamentoSchema(hoje: string = hojeEmCuiaba()) {
           return z.NEVER;
         }
       }),
+    contaBancariaId,
   });
 }
 
 export function comissaoRecebidaSchema(hoje: string = hojeEmCuiaba()) {
-  return z.strictObject({ recebidaEm: dataBaixa(hoje), valorRecebido: reais(false) });
+  return z.strictObject({ recebidaEm: dataBaixa(hoje), valorRecebido: reais(false), contaBancariaId });
 }
+
+export type BaixaParcelaValidada = z.output<ReturnType<typeof baixaParcelaSchema>>;
+export type BaixaPagamentoValidada = z.output<ReturnType<typeof baixaPagamentoSchema>>;
+export type ComissaoRecebidaValidada = z.output<ReturnType<typeof comissaoRecebidaSchema>>;
 
 /** Forma de pagamento ao fornecedor. Parcelas na moeda da conta, somando o previsto (conferido na action). */
 export const formaFornecedorSchema = z.discriminatedUnion(

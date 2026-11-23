@@ -38,7 +38,7 @@ const dois = (n: number) => String(n).padStart(2, "0");
 const iso = (a: number, m: number, d: number) => `${String(a).padStart(4, "0")}-${dois(m)}-${dois(d)}`;
 
 /** Mesma data `meses` depois; dia inexistente no mês de destino vira o último dia dele. */
-function somarMeses(data: string, meses: number): string {
+export function somarMeses(data: string, meses: number): string {
   const [a, m, d] = lerData(data);
   const indice = a * 12 + (m - 1) + meses;
   const an = Math.floor(indice / 12);
@@ -155,6 +155,12 @@ export type ComissaoTipo = (typeof COMISSAO_TIPOS)[number];
 
 export const FORMAS_PAGAMENTO_FORNECEDOR = ["a_vista", "parcelado", "cartao_corporativo"] as const;
 export type FormaPagamentoFornecedorTipo = (typeof FORMAS_PAGAMENTO_FORNECEDOR)[number];
+
+export const ROTULO_FORMA_FORNECEDOR: Record<FormaPagamentoFornecedorTipo, string> = {
+  a_vista: "À vista",
+  parcelado: "Parcelado",
+  cartao_corporativo: "Cartão corporativo",
+};
 
 export const STATUS_PARCELA = ["a_receber", "recebida", "cancelada"] as const;
 export type StatusParcela = (typeof STATUS_PARCELA)[number];

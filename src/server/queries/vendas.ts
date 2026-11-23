@@ -39,6 +39,7 @@ import {
   contasPagar,
   fornecedores,
   itensViagem,
+  lancamentosFinanceiros,
   pagamentosFornecedor,
   pessoas,
   parcelasReceber,
@@ -80,6 +81,11 @@ export type PropostaLista = {
   /** Titular do cliente, para preencher "Fatura em nome de" (nome e CPF formatado; vazio se não há). */
   titularNome: string;
   titularDocumento: string;
+  /**
+   * Fornecedores com conta na viagem (itens não-Taxa da versão aprovada com fornecedor), por nome: o select de
+   * quem recebeu no "Cartão direto no fornecedor".
+   */
+  fornecedores: { id: string; nome: string }[];
   /** Só `vendida`: cronograma lançado (valores em centavos como texto). */
   parcelasLancadas?: { numero: number; totalParcelas: number; vencimento: string; valor: string; meio: string }[];
 };
@@ -115,6 +121,9 @@ export async function listarPropostas(): Promise<PropostaLista[]> {
       passageiros: sql<string[]>`(select coalesce(jsonb_agg(p.e->>'nome' order by p.n), '[]'::jsonb)
         from jsonb_array_elements(${snap}->'passageiros') with ordinality as p(e, n))`,
       precoCliente: sql<string | null>`${versoesPrecificacao.resultado}->>'precoCliente'`,
+      fornecedorIds: sql<string[]>`(select coalesce(jsonb_agg(distinct i.e->'escolhida'->>'fornecedorId'), '[]'::jsonb)
+        from jsonb_array_elements(${snap}->'itens') as i(e)
+        where i.e->>'tipo' <> 'Taxa' and i.e->'escolhida'->>'fornecedorId' is not null)`,
       regrasVersaoId: versoesPrecificacao.regrasVersaoId,
       clienteCodigo: clientes.codigo,
       cliente: clientes.grupo,
@@ -152,6 +161,13 @@ export async function listarPropostas(): Promise<PropostaLista[]> {
           .where(and(inArray(pessoas.clienteId, idsClientes), eq(pessoas.titular, true), isNull(pessoas.removidoEm)));
   const titularDe = new Map(titulares.map((t) => [t.clienteId, t]));
 
+  const idsFornecedores = [...new Set(linhas.flatMap((l) => l.fornecedorIds))];
+  const nomes =
+    idsFornecedores.length === 0
+      ? []
+      : await db.select({ id: fornecedores.id, nome: fornecedores.nome }).from(fornecedores).where(inArray(fornecedores.id, idsFornecedores));
+  const porNome = (a: { nome: string }, b: { nome: string }) => a.nome.localeCompare(b.nome, "pt-BR");
+
   const idsVendidas = linhas.filter((l) => l.status === "vendida").map((l) => l.id);
   const parcelas =
     idsVendidas.length === 0
@@ -183,6 +199,7 @@ export async function listarPropostas(): Promise<PropostaLista[]> {
       formaAprovada: l.forma as FormaPagamento,
       titularNome: titularDe.get(l.clienteId)?.nome ?? "",
       titularDocumento: titularDe.get(l.clienteId)?.cpf ? formatarDocumento(titularDe.get(l.clienteId)!.cpf!) : "",
+      fornecedores: nomes.filter((f) => l.fornecedorIds.includes(f.id)).sort(porNome),
       ...(l.status === "vendida"
         ? {
             parcelasLancadas: parcelas
@@ -234,6 +251,8 @@ export type PagamentoVendido = {
   valorOriginalPago: bigint | null;
   cambioEfetivo: string | null;
   valorBrlPago: bigint | null;
+  /** Quitado pelo repasse do cartão direto no fornecedor (desfaz-se pelo repasse). */
+  peloRepasse: boolean;
 };
 
 export type ComissaoVendida = {
@@ -320,6 +339,18 @@ export type ViagemVendida = {
   parcelas: ParcelaVendida[];
   contas: ContaVendida[];
   comissoes: ComissaoVendida[];
+  /**
+   * Só na venda "Cartão direto no fornecedor" com a parcela não cancelada: a parcela, o fornecedor que recebeu no cartão (nulo em venda antiga,
+   * sem ele), as opções (fornecedores com conta ativa na viagem) e o repasse esperado da view
+   * `lancamentos_financeiros` (fonte única; nulo sem fornecedor).
+   */
+  cartaoFornecedor: {
+    parcelaId: string;
+    fornecedorId: string | null;
+    fornecedor: string | null;
+    opcoes: { id: string; nome: string }[];
+    repasseEsperado: bigint | null;
+  } | null;
   /** Contas divergentes ou contestadas + comissões pendentes + parcelas recebidas com diferença ou canceladas. */
   divergencias: number;
   /** Só para quem vê a camada estratégica; montada só para esses perfis. */
@@ -397,6 +428,7 @@ function montarContas(cs: ContaLinha[], pags: PagamentoLinha[], coms: ComissaoLi
         valorOriginalPago: p.valorOriginalPago,
         cambioEfetivo: p.cambioEfetivo,
         valorBrlPago: p.valorBrlPago,
+        peloRepasse: p.repasseParcelaId !== null,
       })),
     comissao: comissoesVendidas.find((x) => x.contaId === c.id) ?? null,
   }));
@@ -666,6 +698,31 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
     aPagar: soma(linhasAtivas.filter((p) => p.status !== "pago").map((p) => p.valorBrlPrevisto)),
   };
 
+  // Cartão direto ativo: parcela `cartao_fornecedor` não cancelada (a mesma condição do `cartao_direto` da view e de
+  // `vendaCartaoDireto`). Cancelada, a venda deixa de ser de cartão direto e as contas do fornecedor voltam à baixa.
+  const parcelaCartao = ps.find((p) => p.meio === "cartao_fornecedor" && p.status !== "cancelada");
+  let cartaoFornecedor: ViagemVendida["cartaoFornecedor"] = null;
+  if (parcelaCartao) {
+    const opcoes = new Map<string, string>();
+    for (const c of contas) if (c.status !== "cancelada" && c.fornecedorId && c.fornecedor) opcoes.set(c.fornecedorId, c.fornecedor);
+    const [linha] = venda.fornecedorCartaoId
+      ? await db
+          .select({ esperado: lancamentosFinanceiros.valorPrevisto })
+          .from(lancamentosFinanceiros)
+          .where(and(eq(lancamentosFinanceiros.origem, "parcela"), eq(lancamentosFinanceiros.id, parcelaCartao.id)))
+      : [];
+    const [nome] = venda.fornecedorCartaoId
+      ? await db.select({ nome: fornecedores.nome }).from(fornecedores).where(eq(fornecedores.id, venda.fornecedorCartaoId))
+      : [];
+    cartaoFornecedor = {
+      parcelaId: parcelaCartao.id,
+      fornecedorId: venda.fornecedorCartaoId,
+      fornecedor: nome?.nome ?? null,
+      opcoes: [...opcoes].map(([id, nome]) => ({ id, nome })).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")),
+      repasseEsperado: linha?.esperado ?? null,
+    };
+  }
+
   const status = statusDaViagem({
     status: v.status,
     inicio: v.inicio,
@@ -702,6 +759,7 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
     parcelas,
     contas,
     comissoes: comissoesVendidas,
+    cartaoFornecedor,
     divergencias:
       contas.filter((c) => c.divergente || c.contestada).length +
       comissoesVendidas.filter((c) => c.pendente).length +

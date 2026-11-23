@@ -5,6 +5,7 @@ import { margemDaAprovacao, FORMA_REFERENCIA, FORMAS_SIMULADOR, resultadoDoPreco
 import { veCamadaEstrategica } from "@/domain/perfis";
 import { exigirPerfil } from "@/server/auth";
 import { obterCliente } from "@/server/queries/clientes";
+import { listarContasBancarias } from "@/server/queries/financeiro";
 import { listarFornecedores } from "@/server/queries/fornecedores";
 import { regrasVigentes } from "@/server/queries/regras";
 import { obterViagemVendida } from "@/server/queries/vendas";
@@ -50,6 +51,8 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
     if (vendida) {
       const estrategico = veCamadaEstrategica(usuario.perfil);
       const regras = estrategico ? (await regrasVigentes()).valores : null;
+      // Só quem age (Diretor e financeiros) recebe as contas bancárias das baixas.
+      const contas = estrategico ? (await listarContasBancarias({ ativas: true })).map((c) => ({ id: c.id, nome: c.nome })) : [];
       return (
         <div className="mx-auto max-w-[1240px]">
           <BlocoEmbarque avisos={avisos} />
@@ -60,6 +63,7 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
             ehDiretor={usuario.perfil === "diretor"}
             margem={regras ? { alvoPct: regras.margemAlvoPct, referenciaPct: regras.margemReferenciaPct } : null}
             hoje={hojeEmCuiaba()}
+            contasBancarias={contas}
           />
         </div>
       );

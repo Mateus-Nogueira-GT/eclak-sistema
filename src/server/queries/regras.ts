@@ -22,16 +22,16 @@ export async function garantirVersaoInicial(tx: Transacao): Promise<void> {
 }
 
 /**
- * Regras em vigor na data `em` (padrão: agora): a versão mais recente com vigente_desde <= em.
+ * Regras em vigor na data `em` (padrão: agora, pelo relógio do banco, que é quem grava vigente_desde): a versão mais recente com vigente_desde <= em.
  * A versão inicial vale desde 1970, então sempre há resposta. Exige apenas login.
  */
-export async function regrasVigentes(em: Date = new Date()): Promise<RegrasVigentes> {
+export async function regrasVigentes(em?: Date): Promise<RegrasVigentes> {
   await exigirPerfil();
   const buscar = async () => {
     const [v] = await db
       .select()
       .from(regrasVersoes)
-      .where(lte(regrasVersoes.vigenteDesde, em))
+      .where(lte(regrasVersoes.vigenteDesde, em ?? sql`clock_timestamp()`))
       .orderBy(desc(regrasVersoes.vigenteDesde), desc(regrasVersoes.seq))
       .limit(1);
     return v;
