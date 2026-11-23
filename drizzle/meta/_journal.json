@@ -246,6 +246,20 @@
       "when": 1795426021597,
       "tag": "0034_view_fatura_cartao_baixada",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1795439624405,
+      "tag": "0035_operacao",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795439638700,
+      "tag": "0036_operacao_rls",
+      "breakpoints": true
     }
   ]
 }
