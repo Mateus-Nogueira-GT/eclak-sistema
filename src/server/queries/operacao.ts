@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, gte, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import {
@@ -13,18 +13,31 @@ import {
   type SituacaoTarefa,
 } from "@/domain/tarefas";
 import {
+  conferirDaily,
+  converterHorario,
+  dataDeEnvio,
+  estadoDoDaily,
+  formatarHora,
+  trocaDeHotel,
+  type EstadoDaily,
+  type Indicador,
+} from "@/domain/daily";
+import {
   aniversariosNaViagem,
+  rotuloDiaRoteiro,
   sugerirIdiomaEFuso,
   type Aniversario,
   type ConteudoRoteiro,
   type Idioma,
   type StatusRoteiro,
 } from "@/domain/roteiro";
+import { somarDias } from "@/domain/venda";
 import { formatarCodigoViagem, noites } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { clientes, pessoas, roteiros, tarefas, usuarios, viagemPassageiros, viagens } from "@/server/db/schema";
+import { clientes, dailies, pessoas, roteiros, tarefas, usuarios, viagemPassageiros, viagens } from "@/server/db/schema";
+import { regrasVigentes } from "@/server/queries/regras";
 
 export type CabecalhoViagem = {
   id: string;
@@ -428,4 +441,228 @@ export async function listarRoteiros(): Promise<RoteiroDaLista[]> {
     fim: l.fim,
     situacao: l.status ?? "sem_roteiro",
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Dailies
+// ---------------------------------------------------------------------------
+
+export type HorarioPlantao = { hora: string; titulo: string; destino: string; mt: string; brasilia: string };
+
+export type DailyTela = {
+  data: string;
+  /** "16/08 (segunda-feira)". */
+  rotuloDia: string;
+  /** Cidade do hotel em que se dorme na noite do dia, senão o destino. */
+  cidade: string;
+  troca: boolean;
+  /** D-1. */
+  dataEnvio: string;
+  estado: ReturnType<typeof estadoDoDaily>;
+  daily: {
+    id: string;
+    texto: string | null;
+    estado: EstadoDaily;
+    /** ISO. */
+    geradoEm: string | null;
+    /** ISO. */
+    enviadoEm: string | null;
+    /** Nome de quem marcou o envio. */
+    enviadoPor: string | null;
+    plantao: { id: string; nome: string } | null;
+    interno: string | null;
+    /** ISO em milissegundos (vai de volta nas actions de texto e interno). */
+    atualizadoEm: string;
+  } | null;
+  /** Os 6 indicadores do texto gravado, com o encerramento vigente; null sem texto. */
+  indicadores: Indicador[] | null;
+  /** O conteúdo do roteiro foi salvo depois da geração. */
+  roteiroMudou: boolean;
+  horarios: HorarioPlantao[];
+};
+
+type RoteiroDoDaily = {
+  id: string;
+  idioma: Idioma;
+  fuso: string;
+  conteudo: ConteudoRoteiro;
+  atualizadoEm: Date;
+};
+
+const plantonista = alias(usuarios, "plantonista");
+const remetente = alias(usuarios, "remetente");
+
+/** Colunas explícitas do daily, com os nomes do plantão e de quem marcou o envio. */
+const colunasDaily = {
+  id: dailies.id,
+  roteiroId: dailies.roteiroId,
+  data: dailies.data,
+  estado: dailies.estado,
+  texto: dailies.texto,
+  geradoEm: dailies.geradoEm,
+  enviadoEm: dailies.enviadoEm,
+  enviadoPor: remetente.nome,
+  plantaoId: dailies.plantaoId,
+  plantaoNome: plantonista.nome,
+  interno: dailies.interno,
+  atualizadoEm: dailies.atualizadoEm,
+};
+
+type LinhaDaily = {
+  id: string;
+  roteiroId: string;
+  data: string;
+  estado: EstadoDaily;
+  texto: string | null;
+  geradoEm: Date | null;
+  enviadoEm: Date | null;
+  enviadoPor: string | null;
+  plantaoId: string | null;
+  plantaoNome: string | null;
+  interno: string | null;
+  atualizadoEm: Date;
+};
+
+function linhasDosDailies(roteiroIds: string[], de?: string, ate?: string): Promise<LinhaDaily[]> {
+  if (roteiroIds.length === 0) return Promise.resolve([]);
+  const conds: SQL[] = [inArray(dailies.roteiroId, roteiroIds)];
+  if (de) conds.push(gte(dailies.data, de));
+  if (ate) conds.push(lte(dailies.data, ate));
+  return db
+    .select(colunasDaily)
+    .from(dailies)
+    .leftJoin(plantonista, eq(plantonista.id, dailies.plantaoId))
+    .leftJoin(remetente, eq(remetente.id, dailies.enviadoPor))
+    .where(and(...conds));
+}
+
+function cidadeDoDia(conteudo: ConteudoRoteiro, data: string, destino: string): string {
+  const h = conteudo.hoteis.find((x) => x.entrada && x.saida && x.entrada <= data && data < x.saida);
+  return h?.cidade || destino;
+}
+
+/** Monta o dia da tela a partir do roteiro, da linha gravada (se houver) e do encerramento vigente. */
+function dailyTela(r: RoteiroDoDaily, data: string, destino: string, linha: LinhaDaily | undefined, encerramento: string, hoje: string): DailyTela {
+  const dia = r.conteudo.dias.find((d) => d.data === data);
+  const troca = trocaDeHotel(r.conteudo.hoteis, data).troca;
+  const comTexto = linha && linha.estado !== "pendente" && linha.texto !== null ? linha.texto : null;
+  const horarios = (dia?.itens ?? [])
+    .filter((i) => i.hora)
+    .sort((a, b) => (a.hora as string).localeCompare(b.hora as string))
+    .map((i) => {
+      const hora = i.hora as string;
+      return {
+        hora,
+        titulo: i.titulo,
+        destino: formatarHora(hora),
+        mt: formatarHora(converterHorario(data, hora, r.fuso, "America/Cuiaba")),
+        brasilia: formatarHora(converterHorario(data, hora, r.fuso, "America/Sao_Paulo")),
+      };
+    });
+  return {
+    data,
+    rotuloDia: rotuloDiaRoteiro(data),
+    cidade: cidadeDoDia(r.conteudo, data, destino),
+    troca,
+    dataEnvio: dataDeEnvio(data),
+    estado: estadoDoDaily(data, linha?.estado ?? null, hoje),
+    daily: linha
+      ? {
+          id: linha.id,
+          texto: linha.texto,
+          estado: linha.estado,
+          geradoEm: linha.geradoEm?.toISOString() ?? null,
+          enviadoEm: linha.enviadoEm?.toISOString() ?? null,
+          enviadoPor: linha.enviadoEm ? linha.enviadoPor : null,
+          plantao: linha.plantaoId ? { id: linha.plantaoId, nome: linha.plantaoNome ?? "" } : null,
+          interno: linha.interno,
+          atualizadoEm: linha.atualizadoEm.toISOString(),
+        }
+      : null,
+    indicadores: comTexto === null ? null : conferirDaily(comTexto, { troca, idioma: r.idioma, encerramento }),
+    roteiroMudou: !!linha?.geradoEm && r.atualizadoEm.getTime() > linha.geradoEm.getTime(),
+    horarios,
+  };
+}
+
+const colunasRoteiroDoDaily = {
+  id: roteiros.id,
+  idioma: roteiros.idioma,
+  fuso: roteiros.fuso,
+  conteudo: roteiros.conteudo,
+  atualizadoEm: roteiros.atualizadoEm,
+};
+
+/**
+ * Dailies da viagem: um por dia do roteiro, com o estado exibido, os indicadores (encerramento vigente) e os
+ * horários do plantão. Nada é gravado ao abrir (D10). Sem roteiro, `roteiro` é null e `dias` vazio. null = sem viagem.
+ */
+export async function dailiesDaViagem(viagemId: string): Promise<{
+  cabecalho: CabecalhoViagem;
+  roteiro: { id: string; idioma: Idioma; fuso: string; atualizadoEm: string } | null;
+  encerramento: string;
+  usuarios: { id: string; nome: string }[];
+  dias: DailyTela[];
+} | null> {
+  await exigirPerfil();
+  const cabecalho = await cabecalhoDaViagem(viagemId);
+  if (!cabecalho) return null;
+  const [[r], vigentes, ativos] = await Promise.all([
+    db.select(colunasRoteiroDoDaily).from(roteiros).where(eq(roteiros.viagemId, viagemId)).limit(1),
+    regrasVigentes(),
+    usuariosAtivos(),
+  ]);
+  const encerramento = vigentes.valores.encerramentoDaily;
+  if (!r) return { cabecalho, roteiro: null, encerramento, usuarios: ativos, dias: [] };
+  const linhas = await linhasDosDailies([r.id]);
+  const porData = new Map(linhas.map((l) => [l.data, l]));
+  const hoje = hojeEmCuiaba();
+  return {
+    cabecalho,
+    roteiro: { id: r.id, idioma: r.idioma, fuso: r.fuso, atualizadoEm: r.atualizadoEm.toISOString() },
+    encerramento,
+    usuarios: ativos,
+    dias: r.conteudo.dias.map((d) => dailyTela(r, d.data, cabecalho.destino, porData.get(d.data), encerramento, hoje)),
+  };
+}
+
+export type DailyDaLista = DailyTela & { viagem: { id: string; codigo: string; cliente: string } };
+
+/** Dailies de hoje até hoje + 3 (Cuiabá) das viagens vendidas com roteiro, por data e código da viagem (D22). */
+export async function listarDailies(): Promise<DailyDaLista[]> {
+  await exigirPerfil();
+  const hoje = hojeEmCuiaba();
+  const ate = somarDias(hoje, 3);
+  const [rs, vigentes] = await Promise.all([
+    db
+      .select({
+        ...colunasRoteiroDoDaily,
+        viagemId: viagens.id,
+        clienteCodigo: clientes.codigo,
+        seq: viagens.seq,
+        cliente: clientes.grupo,
+        destino: viagens.destino,
+      })
+      .from(roteiros)
+      .innerJoin(viagens, eq(viagens.id, roteiros.viagemId))
+      .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
+      .where(and(isNull(viagens.excluidoEm), eq(viagens.status, "vendida"), lte(viagens.inicio, ate), gte(viagens.fim, hoje))),
+    regrasVigentes(),
+  ]);
+  const encerramento = vigentes.valores.encerramentoDaily;
+  const linhas = await linhasDosDailies(
+    rs.map((r) => r.id),
+    hoje,
+    ate,
+  );
+  const porChave = new Map(linhas.map((l) => [`${l.roteiroId}|${l.data}`, l]));
+  const saida: DailyDaLista[] = [];
+  for (const r of rs) {
+    const viagem = { id: r.viagemId, codigo: formatarCodigoViagem(r.clienteCodigo, r.seq), cliente: r.cliente };
+    for (const d of r.conteudo.dias) {
+      if (d.data < hoje || d.data > ate) continue;
+      saida.push({ ...dailyTela(r, d.data, r.destino, porChave.get(`${r.id}|${d.data}`), encerramento, hoje), viagem });
+    }
+  }
+  return saida.sort((a, b) => a.data.localeCompare(b.data) || a.viagem.codigo.localeCompare(b.viagem.codigo));
 }
