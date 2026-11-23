@@ -136,6 +136,7 @@ export const MSG_SEM_FORNECEDOR = "Conta sem fornecedor: a comissão só pode se
 export const MSG_CONTA_BANCARIA = "Escolha a conta bancária";
 export const MSG_USE_REPASSE = "Use o repasse do fornecedor para esta parcela";
 export const MSG_PAGO_PELO_REPASSE = "Pagamento quitado pelo repasse: desfaça o repasse";
+export const MSG_PAGO_NO_CARTAO = "Pago pelo cliente no cartão do fornecedor: use o repasse";
 export const MSG_REPASSE_MAIOR = "O repasse é maior que o esperado: atualize o previsto das contas do fornecedor na viagem";
 export const MSG_REPASSE_ESTRANGEIRA = "Dê baixa no pagamento em moeda estrangeira na viagem antes do repasse";
 export const MSG_NAO_CARTAO_FORNECEDOR = "Esta parcela não é de cartão direto no fornecedor";

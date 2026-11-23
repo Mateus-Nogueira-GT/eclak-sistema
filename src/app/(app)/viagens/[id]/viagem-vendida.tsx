@@ -804,7 +804,7 @@ function Saidas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p
             {contas.map((c) => {
               const semPagamento = !c.pagamentos.some((p) => p.status === "pago");
               return (
-                <ContaLinhas key={c.id} c={c} agir={agir} semPagamento={semPagamento} abrir={abrir} />
+                <ContaLinhas key={c.id} c={c} agir={agir} semPagamento={semPagamento} noCartao={c.moeda === "BRL" && c.fornecedorId !== null && c.fornecedorId === v.cartaoFornecedor?.fornecedorId} abrir={abrir} />
               );
             })}
             {contas.length === 0 && (
@@ -817,7 +817,8 @@ function Saidas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p
   );
 }
 
-function ContaLinhas({ c, agir, semPagamento, abrir }: { c: ContaVendida; agir: boolean; semPagamento: boolean; abrir: (p: Painel) => void }) {
+/** `noCartao`: conta em reais do fornecedor que recebeu no cartão direto (quitada só pelo repasse, sem baixa direta). */
+function ContaLinhas({ c, agir, semPagamento, noCartao, abrir }: { c: ContaVendida; agir: boolean; semPagamento: boolean; noCartao: boolean; abrir: (p: Painel) => void }) {
   return (
     <>
       <tr className={`border-t border-linha ${c.divergente || c.contestada ? "bg-ouro/10" : ""}`}>
@@ -865,6 +866,8 @@ function ContaLinhas({ c, agir, semPagamento, abrir }: { c: ContaVendida; agir: 
                     agir && <AcaoDireta rotulo="Desfazer baixa" mini variante="fantasma" executar={() => desfazerBaixaPagamento(p.id)} />
                   )}
                 </>
+              ) : noCartao ? (
+                <span className="text-[12px]">Pago pelo cliente no cartão do fornecedor (quitado pelo repasse em Entradas)</span>
               ) : (
                 agir && <BotaoMini onClick={() => abrir({ tipo: "baixaPagamento", conta: c, pag: p })}>Dar baixa</BotaoMini>
               )}

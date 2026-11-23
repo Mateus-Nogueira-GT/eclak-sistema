@@ -56,6 +56,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
         subtitle="Tudo o que a ECLAK tem a pagar e a receber: o que vem das viagens entra sozinho, ligado a ela; aqui você lança as contas da empresa e dá baixa no que foi pago ou recebido."
       />
       <ListaLancamentos
+        key={JSON.stringify(filtro)}
         filtro={filtro}
         hoje={hoje}
         linhas={lista.linhas}

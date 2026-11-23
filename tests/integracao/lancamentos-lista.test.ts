@@ -18,8 +18,8 @@ import {
   parcelasReceber,
   viagens,
 } from "@/server/db/schema";
-import { baixarEmLote, baixarLancamento, baixarLinha, criarLancamento, desfazerBaixaLinha } from "@/server/actions/financeiro";
-import { baixarParcela, definirFormaFornecedor } from "@/server/actions/financeiro-viagem";
+import { baixarEmLote, baixarLancamento, baixarLinha, baixarRepasse, criarLancamento, desfazerBaixaLinha } from "@/server/actions/financeiro";
+import { baixarPagamento, baixarParcela, definirFormaFornecedor } from "@/server/actions/financeiro-viagem";
 import { listarLancamentos } from "@/server/queries/financeiro";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
@@ -282,6 +282,44 @@ describe("lista única de lançamentos", () => {
     const cb = await contaBancaria(x.fin.id);
     const d = { recebidaEm: hojeEmCuiaba(), valorRecebido: reais(x.parcelas[0].valor), taxaEfetiva: null, observacao: null, contaBancariaId: cb };
     expect(await comSessao(x.fin.id, () => baixarLinha("parcela", x.parcelas[0].id, d))).toEqual({ ok: false, erro: "Use o repasse do fornecedor para esta parcela" });
+  });
+
+  it("pagamento do fornecedor do cartão direto: baixa pela lista e pela viagem recusadas, nada gravado; o repasse segue", async () => {
+    const x = await vendida({ cartao: "hotel" });
+    const cb = await contaBancaria(x.fin.id);
+    const hoje = hojeEmCuiaba();
+    const d = { pagoEm: hoje, valorOriginalPago: reais(x.pagHotel.valorOriginal), contaBancariaId: cb };
+    const recusa = { ok: false, erro: "Pago pelo cliente no cartão do fornecedor: use o repasse" };
+    const antes = (await db.select().from(auditoria)).length;
+    expect(await comSessao(x.fin.id, () => baixarLinha("pagamento", x.pagHotel.id, d))).toEqual(recusa);
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagHotel.id, d))).toEqual(recusa);
+    const [pg] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, x.pagHotel.id));
+    expect(pg).toMatchObject({ status: "a_pagar", pagoEm: null, contaBancariaId: null });
+    expect((await db.select().from(auditoria)).length).toBe(antes);
+    // Os demais fornecedores da mesma viagem seguem normais.
+    expect(await comSessao(x.fin.id, () => baixarLinha("pagamento", x.pagPasseio.id, { ...d, valorOriginalPago: reais(x.pagPasseio.valorOriginal) }))).toEqual({ ok: true });
+    // O repasse quita o pagamento do hotel.
+    const [rep] = (await listar(x.fin.id)).linhas.filter((l) => l.origem === "parcela");
+    expect(await comSessao(x.fin.id, () => baixarRepasse(x.parcelas[0].id, { data: hoje, valorRepassado: reais(rep.valorPrevisto), contaBancariaId: cb }))).toEqual({ ok: true });
+    expect((await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, x.pagHotel.id)))[0]).toMatchObject({ status: "pago", repasseParcelaId: x.parcelas[0].id });
+  });
+
+  it("situação em aberto: vencidas, de hoje e a vencer (sem baixadas e canceladas); totais iguais", async () => {
+    const fin = (await criarUsuarioTeste("fin_operacional")).id;
+    const cb = await contaBancaria(fin);
+    const hoje = hojeEmCuiaba();
+    const aluguel = await categoria("Aluguel");
+    const [vencido] = await manual(fin, { vencimento: dias(hoje, -5), valor: "100,00", categoria: aluguel });
+    const [deHoje] = await manual(fin, { vencimento: hoje, valor: "200,00", categoria: aluguel });
+    const [futuro] = await manual(fin, { vencimento: dias(hoje, 10), valor: "400,00", categoria: aluguel });
+    const [baixado] = await manual(fin, { vencimento: dias(hoje, -2), valor: "800,00", categoria: aluguel });
+    const [cancelado] = await manual(fin, { vencimento: dias(hoje, 3), valor: "1.600,00", categoria: aluguel });
+    expect((await comSessao(fin, () => baixarLancamento(baixado, { data: hoje, valorPago: "800,00", juros: "", desconto: "", contaBancariaId: cb, observacao: "" }))).ok).toBe(true);
+    await db.update(lancamentos).set({ status: "cancelado", motivoCancelamento: "Teste" }).where(eq(lancamentos.id, cancelado));
+    const r = await listar(fin, { situacao: "em_aberto" });
+    expect(r.linhas.map((l) => l.id)).toEqual([vencido, deHoje, futuro]);
+    expect(r.totalLinhas).toBe(3);
+    expect(r.totais).toEqual((await listar(fin)).totais);
   });
 
   it("consultor: listarLancamentos lança ErroAcesso; baixarEmLote, baixarLinha e desfazerBaixaLinha → Sem permissão", async () => {

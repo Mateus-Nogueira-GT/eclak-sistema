@@ -175,7 +175,8 @@ export const filtroLancamentosSchema = z.strictObject({
   de: data(MSG_DATA),
   ate: data(MSG_DATA),
   base: z.enum(["vencimento", "competencia", "baixa"], { error: "Base inválida" }),
-  situacao: opcional(z.enum(SITUACOES, { error: "Situação inválida" })),
+  /** As situações derivadas e "em_aberto" (vencidas, de hoje e a vencer). */
+  situacao: opcional(z.enum([...SITUACOES, "em_aberto"], { error: "Situação inválida" })),
   categoriaId: opcional(uuid),
   grupo: opcional(z.string().trim().min(1).max(80)),
   centro: opcional(centro),

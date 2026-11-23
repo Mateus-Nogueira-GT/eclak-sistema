@@ -88,7 +88,15 @@ export function ListaLancamentos(p: Props) {
   const [recusadas, setRecusadas] = useState<Map<Chave, string>>(new Map());
   const [contaInvalida, setContaInvalida] = useState(false);
 
-  const ir = (mudar: Record<string, string | number | undefined>) => router.push(urlDe(f, mudar));
+  // A seleção do lote vale só para o que está na tela: mudar filtro, aba ou página limpa.
+  const limparSelecao = () => {
+    setMarcadas(new Map());
+    setRecusadas(new Map());
+  };
+  const ir = (mudar: Record<string, string | number | undefined>) => {
+    if (!("novo" in mudar) && !("editar" in mudar)) limparSelecao();
+    router.push(urlDe(f, mudar));
+  };
   const nomeCategoria = new Map(p.categorias.flatMap((g) => g.categorias.map((c) => [c.id, c.nome] as const)));
   const lista = periodos(hoje);
   const periodoAtual = lista.find((x) => x.de === f.de && x.ate === f.ate)?.id ?? "personalizado";
@@ -236,6 +244,7 @@ export function ListaLancamentos(p: Props) {
         <div className="flex flex-wrap items-end gap-3 px-5 pt-3">
           <Select value={f.situacao ?? ""} onChange={(s) => ir({ situacao: s || undefined })}>
             <option value="">Todas as situações</option>
+            <option value="em_aberto">Em aberto</option>
             <option value="vencida">Vencidas</option>
             <option value="vence_hoje">Vencem hoje</option>
             <option value="a_vencer">A vencer</option>
@@ -275,7 +284,7 @@ export function ListaLancamentos(p: Props) {
             <option value="manual">Só lançados à mão</option>
           </Select>
           {(f.situacao || f.categoriaId || f.grupo || f.centro || f.contaBancariaId || f.origem || f.busca) && (
-            <Link href={urlDe(f, { situacao: undefined, categoriaId: undefined, grupo: undefined, centro: undefined, contaBancariaId: undefined, origem: undefined, busca: undefined })} className="py-2 text-[13px] font-semibold text-verde hover:underline" onClick={() => setBusca("")}>
+            <Link href={urlDe(f, { situacao: undefined, categoriaId: undefined, grupo: undefined, centro: undefined, contaBancariaId: undefined, origem: undefined, busca: undefined })} className="py-2 text-[13px] font-semibold text-verde hover:underline" onClick={() => { setBusca(""); limparSelecao(); }}>
               Limpar filtros
             </Link>
           )}
@@ -302,7 +311,7 @@ export function ListaLancamentos(p: Props) {
             <div className="w-[220px]">
               <CampoConta contas={ativas} valor={contaLote} onChange={setContaLote} invalido={contaInvalida} />
             </div>
-            <Botao variante="secundario" onClick={() => { setMarcadas(new Map()); setRecusadas(new Map()); }}>Limpar</Botao>
+            <Botao variante="secundario" onClick={limparSelecao}>Limpar</Botao>
             <Botao disabled={pendente} onClick={baixarLote}>Baixar selecionadas ({marcadas.size})</Botao>
           </div>
         )}
@@ -416,9 +425,9 @@ export function ListaLancamentos(p: Props) {
           </span>
           {ultimaPagina > 1 && (
             <span className="flex items-center gap-3">
-              {f.pagina > 1 ? <Link href={urlDe(f, { pagina: f.pagina - 1 })} className="font-semibold text-verde hover:underline">Anterior</Link> : <span>Anterior</span>}
+              {f.pagina > 1 ? <Link href={urlDe(f, { pagina: f.pagina - 1 })} onClick={limparSelecao} className="font-semibold text-verde hover:underline">Anterior</Link> : <span>Anterior</span>}
               <span className="num">Página {f.pagina} de {ultimaPagina}</span>
-              {f.pagina < ultimaPagina ? <Link href={urlDe(f, { pagina: f.pagina + 1 })} className="font-semibold text-verde hover:underline">Próxima</Link> : <span>Próxima</span>}
+              {f.pagina < ultimaPagina ? <Link href={urlDe(f, { pagina: f.pagina + 1 })} onClick={limparSelecao} className="font-semibold text-verde hover:underline">Próxima</Link> : <span>Próxima</span>}
             </span>
           )}
         </div>

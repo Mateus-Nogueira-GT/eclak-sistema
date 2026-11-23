@@ -13,6 +13,7 @@ import {
   MSG_FORNECEDOR_CARTAO,
   MSG_NAO_CARTAO_FORNECEDOR,
   MSG_NAO_VENDIDA,
+  MSG_PAGO_NO_CARTAO,
   MSG_PAGO_PELO_REPASSE,
   MSG_PAGAMENTO_EM_ABERTO,
   MSG_PAGAMENTO_PAGO,
@@ -301,6 +302,22 @@ function noPagamento(
 }
 
 /**
+ * A conta é do fornecedor que recebeu no cartão numa venda de cartão direto da viagem (a mesma condição do
+ * `no_cartao` da view): o cliente pagou esse fornecedor e a conta em reais é quitada só pelo repasse (que não
+ * passa por `baixarPagamentoNa`). A em moeda estrangeira é baixada antes, na viagem, com o câmbio efetivo.
+ */
+async function pagoNoCartao(tx: Transacao, conta: ContaLinha): Promise<boolean> {
+  if (!conta.fornecedorId) return false;
+  const [v] = await tx
+    .select({ id: vendas.id })
+    .from(vendas)
+    .innerJoin(parcelasReceber, and(eq(parcelasReceber.vendaId, vendas.id), eq(parcelasReceber.meio, "cartao_fornecedor")))
+    .where(and(eq(vendas.viagemId, conta.viagemId), eq(vendas.fornecedorCartaoId, conta.fornecedorId)))
+    .limit(1);
+  return v !== undefined;
+}
+
+/**
  * Baixa do pagamento: data, valor pago na moeda da conta e conta bancária ativa; fora do real, câmbio efetivo
  * obrigatório e o valor em reais é a conversão (meio para cima). A conta fica `paga` quando todas as linhas estão
  * pagas.
@@ -310,6 +327,8 @@ export function baixarPagamentoNa(tx: Transacao, usuarioId: string, pagamentoId:
   return noPagamento(tx, usuarioId, pagamentoId, async (t, p, conta) => {
     if (p.repasseParcelaId) return PAGO_PELO_REPASSE;
     if (p.status === "pago") return falha(MSG_PAGAMENTO_PAGO);
+    // Em moeda estrangeira a baixa direta continua (com o câmbio): o repasse exige que ela venha antes.
+    if (conta.moeda === "BRL" && (await pagoNoCartao(t, conta))) return falha(MSG_PAGO_NO_CARTAO);
     const cambio = conta.moeda === "BRL" ? null : cambioEfetivo;
     if (conta.moeda !== "BRL" && !cambio) return falha(MSG_CAMBIO_EFETIVO, "cambioEfetivo");
     const semConta = await recusaContaBancaria(t, contaBancariaId);

@@ -164,7 +164,7 @@ export async function listarLancamentos(filtro: FiltroLancamentos): Promise<List
     ...comuns,
     periodo(f),
     f.lado === "todos" ? undefined : eq(lf.lado, f.lado),
-    f.situacao ? sql`${situacao} = ${f.situacao}` : ne(lf.statusBase, "cancelado"),
+    f.situacao === "em_aberto" ? eq(lf.statusBase, "em_aberto") : f.situacao ? sql`${situacao} = ${f.situacao}` : ne(lf.statusBase, "cancelado"),
   );
 
   const [linhas, [contagem], totais] = await Promise.all([
