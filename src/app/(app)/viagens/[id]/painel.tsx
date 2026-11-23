@@ -34,6 +34,7 @@ const PROXIMO_PASSO: Record<StatusOrcamento, string> = {
   aguardando_aprovacao: "Pedido enviado. O Diretor aprova ou devolve com comentário. Responsável: Diretor.",
   aprovado: "Proposta liberada. Gere o PDF e envie ao cliente. Responsável: Consultor.",
   devolvido: "Devolvido pelo Diretor. Veja o comentário em Versões, ajuste e envie de novo. Responsável: Consultor.",
+  vendida: "Venda fechada. Acompanhe recebimentos e pagamentos a fornecedores. Responsável: Financeiro.",
 };
 
 export function Painel({
@@ -117,7 +118,7 @@ export function Painel({
             removidos={removidos}
             id={ficha.id}
             atualizadoEm={ficha.atualizadoEm}
-            inicial={{ destino: ficha.destino, inicio: ficha.inicio, fim: ficha.fim, observacoes: ficha.observacoes ?? "", passageiros: ficha.passageiros.map((p) => p.id) }}
+            inicial={{ destino: ficha.destino, inicio: ficha.inicio, fim: ficha.fim, observacoes: ficha.observacoes ?? "", passageiros: ficha.passageiros.map((p) => p.id), internacional: ficha.internacional }}
             onFechar={() => setEditando(false)}
           />
         </div>
@@ -206,6 +207,11 @@ export function Painel({
         <div className="flex flex-wrap gap-2">
           {!aguardando && (
             <Botao onClick={() => setEnviando((x) => !x)} aria-expanded={enviando}><Send size={15} /> Enviar para aprovação</Botao>
+          )}
+          {ficha.status === "aprovado" && (
+            <Link href={`/vendas?viagem=${ficha.id}`} className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[5px] border border-[#C9CDD1] bg-white px-3.5 py-2 text-[14px] font-semibold text-texto hover:border-verde hover:text-verde">
+              Registrar resposta do cliente
+            </Link>
           )}
           {pdf}
         </div>

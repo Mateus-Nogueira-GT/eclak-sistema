@@ -7,7 +7,7 @@ import { Botao, Campo, Card, CardHeader, inputCls } from "@/components/ui";
 import { alterarOrcamento, criarOrcamento } from "@/server/actions/viagens";
 
 export type PessoaOpcao = { id: string; nome: string; detalhe: string };
-export type ValoresOrcamento = { destino: string; inicio: string; fim: string; observacoes: string; passageiros: string[] };
+export type ValoresOrcamento = { destino: string; inicio: string; fim: string; observacoes: string; passageiros: string[]; internacional: boolean };
 
 const MSG_REMOVIDOS = "Remova do orçamento os passageiros que saíram do cadastro antes de salvar";
 
@@ -67,7 +67,7 @@ export function FormularioOrcamento({
       setMsg(MSG_REMOVIDOS);
       return;
     }
-    const dados = { destino: v.destino, inicio: v.inicio, fim: v.fim, passageiros: v.passageiros, observacoes: v.observacoes.trim() || null };
+    const dados = { destino: v.destino, inicio: v.inicio, fim: v.fim, passageiros: v.passageiros, internacional: v.internacional, observacoes: v.observacoes.trim() || null };
     iniciar(async () => {
       const r = id ? await alterarOrcamento(id, dados, atualizadoEm ?? "") : await criarOrcamento({ ...dados, clienteId });
       if (r.ok) {
@@ -116,6 +116,11 @@ export function FormularioOrcamento({
           {erro("fim")}
         </Campo>
       </div>
+
+      <label className="mx-6 mt-4 flex cursor-pointer items-center gap-2.5 text-[14px]">
+        <input type="checkbox" checked={v.internacional} onChange={(e) => mudar("internacional", e.target.checked)} />
+        Viagem internacional (exige passaporte)
+      </label>
 
       <fieldset className="mx-6 mt-5">
         <legend className="mb-2 text-[11px] font-bold uppercase tracking-[0.06em] text-cinza">Passageiros</legend>

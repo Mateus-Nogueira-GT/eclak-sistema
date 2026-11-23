@@ -21,7 +21,7 @@ describe("viagens", () => {
   });
 
   it("expõe status e rótulos", () => {
-    expect(STATUS_ORCAMENTO).toEqual(["em_edicao", "aguardando_aprovacao", "aprovado", "devolvido"]);
+    expect(STATUS_ORCAMENTO).toEqual(["em_edicao", "aguardando_aprovacao", "aprovado", "devolvido", "vendida"]);
     expect(ROTULOS_STATUS_ORCAMENTO.aguardando_aprovacao).toBe("Aguardando aprovação");
     expect(ROTULOS_STATUS_ORCAMENTO.em_edicao).toBe("Em edição");
   });

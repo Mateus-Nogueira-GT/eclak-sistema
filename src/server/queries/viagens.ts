@@ -25,6 +25,8 @@ import {
 } from "@/domain/precificacao";
 import { veCamadaEstrategica } from "@/domain/perfis";
 import type { Regras } from "@/domain/regras";
+import { hojeEmCuiaba } from "@/domain/clientes";
+import { ROTULO_STATUS_VIAGEM, statusDaViagem, type StatusViagem } from "@/domain/venda";
 import { diasDaViagem, formatarCodigoViagem, noites, type StatusOrcamento, type StatusVersao } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
@@ -41,6 +43,7 @@ import {
   viagens,
 } from "@/server/db/schema";
 import { regrasDaVersao, regrasVigentes } from "@/server/queries/regras";
+import { margensVendidas } from "@/server/queries/vendas";
 
 // Segurança: a camada estratégica (custo líquido, venda, compensação, margem) só é montada dentro de
 // `estrategico`, e só quando `veCamadaEstrategica(perfil)`. Para os demais perfis ela nunca é calculada.
@@ -106,6 +109,10 @@ export type FichaPrecificacao = {
   status: StatusOrcamento;
   versaoAprovadaId: string | null;
   observacoes: string | null;
+  /** Viagem internacional (aviso de passaporte × volta). */
+  internacional: boolean;
+  /** Pedido de ajustes do cliente (registrado na resposta à proposta); limpo no próximo envio. */
+  notaCliente: string | null;
   /** ISO em milissegundos; devolvido em `alterarOrcamento` para controle de concorrência. */
   atualizadoEm: string;
   /** Itens do terrestre (sem Aéreo), na ordem; a taxa de roteiro por último. */
@@ -163,6 +170,10 @@ export type OrcamentoLista = {
    * vigentes não permitem calcular (ex.: taxas e margem somam 100% ou mais).
    */
   estrategico?: { preco: bigint | null; margemPct: string | null } | { erro: string };
+  /** Só `vendida`: status derivado (Vendida, Em viagem, Recebendo, Conciliada). */
+  statusViagem?: { status: StatusViagem; rotulo: string };
+  /** Só `vendida` e camada estratégica: margem planejada × real (percentuais em texto; real nulo se não calculou). */
+  margemVendida?: { planejadaPct: string; realPct: string | null };
 };
 
 type ItemLinha = typeof itensViagem.$inferSelect;
@@ -312,6 +323,9 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
   const itens = estrategico ? await itensDe(ids) : null;
   const regras = estrategico ? (await regrasVigentes()).valores : null;
 
+  const hoje = hojeEmCuiaba();
+  // Margem planejada × real das vendidas: uma leitura em lote (nunca uma consulta por linha).
+  const margens = estrategico ? await margensVendidas(linhas.filter((l) => l.v.status === "vendida").map((l) => l.v.id)) : null;
   return linhas.map((l) => {
     const linha: OrcamentoLista = {
       id: l.v.id,
@@ -326,6 +340,18 @@ export async function listarOrcamentos(filtro: { busca?: string; status?: Status
       status: l.v.status,
       versaoAprovada: l.versaoAprovada ?? null,
     };
+    if (l.v.status === "vendida") {
+      const status = statusDaViagem({
+        status: l.v.status,
+        inicio: l.v.inicio,
+        fim: l.v.fim,
+        conciliadaEm: l.v.conciliadaEm ? l.v.conciliadaEm.toISOString() : null,
+        hoje,
+      });
+      linha.statusViagem = { status, rotulo: ROTULO_STATUS_VIAGEM[status] };
+      const m = margens?.get(l.v.id);
+      if (m) linha.margemVendida = { planejadaPct: m.planejada.finalPct, realPct: "erro" in m.real ? null : m.real.finalPct };
+    }
     if (itens && regras) {
       const doItem = itens.get(l.v.id) ?? [];
       const cotados = doItem.filter((x) => x.item.tipo !== "Aéreo" && x.cotacoes.length > 0);
@@ -424,6 +450,8 @@ export async function obterPrecificacao(viagemId: string): Promise<FichaPrecific
     status: v.status,
     versaoAprovadaId: v.versaoAprovadaId,
     observacoes: v.observacoes,
+    internacional: v.internacional,
+    notaCliente: v.notaCliente,
     atualizadoEm: v.atualizadoEm.toISOString(),
     itens: terrestre.map(ficha),
     aereo: todos.filter((x) => x.item.tipo === "Aéreo").map(ficha),

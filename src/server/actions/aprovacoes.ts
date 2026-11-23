@@ -20,6 +20,7 @@ import {
 } from "@/domain/aprovacoes";
 import type { FormaPagamento, Rateio } from "@/domain/precificacao";
 import type { Regras } from "@/domain/regras";
+import { MSG_VIAGEM_VENDIDA } from "@/domain/venda-entrada";
 import { diasDaViagem } from "@/domain/viagens";
 import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
@@ -27,6 +28,7 @@ import { db, type Transacao } from "@/server/db/client";
 import { cotacoes, fornecedores, itensViagem, pessoas, versoesPrecificacao, viagemPassageiros, viagens } from "@/server/db/schema";
 import { regrasDaVersao, regrasVigentes } from "@/server/queries/regras";
 import { sincronizarTaxaRoteiro } from "@/server/taxa-roteiro";
+import { travarViagem } from "@/server/trava-viagem";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -60,6 +62,7 @@ const ORCAMENTO_NAO_ENCONTRADO: Falha = { ok: false, erro: "Orçamento não enco
 const PEDIDO_NAO_ENCONTRADO: Falha = { ok: false, erro: "Pedido não encontrado" };
 const DECIDIDO: Falha = { ok: false, erro: MSG_JA_DECIDIDO };
 const NAO_CALCULA: Falha = { ok: false, erro: MSG_NAO_CALCULA };
+const VENDIDA: Falha = { ok: false, erro: MSG_VIAGEM_VENDIDA };
 const AGUARDANDO: Falha = {
   ok: false,
   erro: "Orçamento aguardando aprovação. Peça ao Diretor para devolver antes de alterar.",
@@ -89,17 +92,6 @@ function falhaDeValidacao(erro: import("zod").ZodError): Falha {
 }
 
 const semId = (x: Record<string, unknown>) => Object.fromEntries(Object.entries(x).filter(([k]) => k !== "id"));
-
-/** Lock consultivo da viagem (até o fim da transação) e a viagem `for update`. */
-async function travarViagem(tx: Transacao, viagemId: string): Promise<ViagemLinha | null> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"viagem:" + viagemId}))`);
-  const [v] = await tx
-    .select()
-    .from(viagens)
-    .where(and(eq(viagens.id, viagemId), isNull(viagens.excluidoEm)))
-    .for("update");
-  return v ?? null;
-}
 
 /** Itens ativos da viagem com as cotações ativas (mais antigas primeiro); taxa automática por último. */
 async function lerItens(tx: Transacao, viagemId: string): Promise<ItemLido[]> {
@@ -157,7 +149,7 @@ async function mudarStatusViagem(
   tx: Transacao,
   usuarioId: string,
   v: ViagemLinha,
-  depois: Pick<ViagemLinha, "status"> & Partial<Pick<ViagemLinha, "versaoAprovadaId">>,
+  depois: Pick<ViagemLinha, "status"> & Partial<Pick<ViagemLinha, "versaoAprovadaId" | "notaCliente">>,
   agora: Date,
 ): Promise<void> {
   await tx
@@ -169,7 +161,11 @@ async function mudarStatusViagem(
     tabela: "viagens",
     registroId: v.id,
     acao: "alterar",
-    antes: { status: v.status, ...("versaoAprovadaId" in depois ? { versaoAprovadaId: v.versaoAprovadaId } : {}) },
+    antes: {
+      status: v.status,
+      ...("versaoAprovadaId" in depois ? { versaoAprovadaId: v.versaoAprovadaId } : {}),
+      ...("notaCliente" in depois ? { notaCliente: v.notaCliente } : {}),
+    },
     depois,
   });
 }
@@ -206,6 +202,7 @@ export async function enviarParaAprovacao(
         const v = await travarViagem(tx, viagemId);
         if (!v) return ORCAMENTO_NAO_ENCONTRADO;
         if (v.status === "aguardando_aprovacao") return AGUARDANDO;
+        if (v.status === "vendida") return VENDIDA;
         const agora = new Date();
         // A taxa de roteiro acompanha os Parâmetros vigentes antes do snapshot (mudou desde a última edição?).
         // Daqui em diante, recusa desfaz a transação (Desfazer): envio que falha não muda nada.
@@ -255,7 +252,9 @@ export async function enviarParaAprovacao(
           acao: "criar",
           depois: semId(ver),
         });
-        await mudarStatusViagem(tx, usuario.id, v, { status: "aguardando_aprovacao" }, agora);
+        // O pedido de ajustes do cliente foi atendido por esta versão.
+        const depois = v.notaCliente === null ? {} : { notaCliente: null };
+        await mudarStatusViagem(tx, usuario.id, v, { status: "aguardando_aprovacao", ...depois }, agora);
         return { id: ver.id, numero: ver.numero };
       });
     } catch (e) {
@@ -286,6 +285,7 @@ async function versaoSemTrava(versaoId: string): Promise<Pick<VersaoLinha, "viag
 async function travarPedido(tx: Transacao, versaoId: string, viagemId: string): Promise<{ v: ViagemLinha; ver: VersaoLinha } | Falha> {
   const v = await travarViagem(tx, viagemId);
   if (!v) return PEDIDO_NAO_ENCONTRADO;
+  if (v.status === "vendida") return VENDIDA;
   const [ver] = await tx.select().from(versoesPrecificacao).where(eq(versoesPrecificacao.id, versaoId)).for("update");
   if (!ver) return PEDIDO_NAO_ENCONTRADO;
   if (ver.status !== "aguardando") return DECIDIDO;
@@ -352,7 +352,11 @@ export async function aprovar(versaoId: string): Promise<{ ok: true } | Falha> {
   );
 }
 
-/** Devolve a versão com o motivo (obrigatório): viagem `devolvido`; a última versão aprovada, se houver, fica. */
+/**
+ * Devolve a versão com o motivo (obrigatório): viagem `devolvido`; a última versão aprovada, se houver, fica.
+ * Nova forma recusada (`resultado.origem = "nova_forma"`): a viagem volta a `aprovado` com a versão aprovada
+ * anterior (a forma original continua valendo para fechar a venda).
+ */
 export async function devolver(versaoId: string, comentario: string): Promise<{ ok: true } | Falha> {
   return comPerfil(["diretor"], async (usuario) => {
     const m = motivoSchema.safeParse(comentario);
@@ -361,7 +365,8 @@ export async function devolver(versaoId: string, comentario: string): Promise<{ 
       versaoId,
       async (tx, { v, ver, agora }) => {
         await decidirVersao(tx, usuario.id, ver, "devolvida", m.data, agora);
-        await mudarStatusViagem(tx, usuario.id, v, { status: "devolvido" }, agora);
+        const novaForma = (ver.resultado as ResultadoVersao).origem === "nova_forma" && v.versaoAprovadaId !== null;
+        await mudarStatusViagem(tx, usuario.id, v, { status: novaForma ? "aprovado" : "devolvido" }, agora);
         return {};
       },
       "Erro ao devolver",

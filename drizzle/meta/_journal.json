@@ -92,6 +92,48 @@
       "when": 1795317344522,
       "tag": "0012_integridade_versao_aprovada",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795350203287,
+      "tag": "0013_vendida_enum",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795350208294,
+      "tag": "0014_venda",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795350213173,
+      "tag": "0015_rls_venda",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795352159824,
+      "tag": "0016_comissao_cancelada",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795352702447,
+      "tag": "0017_comissao_tipo_venda",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795366623323,
+      "tag": "0018_restricoes_caixa",
+      "breakpoints": true
     }
   ]
 }

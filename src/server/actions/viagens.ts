@@ -6,6 +6,7 @@ import { cambioAplicado, converter, type Moeda } from "@/domain/cambio";
 import type { TipoItem } from "@/domain/precificacao";
 import type { Regras } from "@/domain/regras";
 import { formatarCodigoViagem } from "@/domain/viagens";
+import { MSG_VIAGEM_VENDIDA } from "@/domain/venda-entrada";
 import {
   cotacaoSchema,
   itemSchema,
@@ -30,6 +31,8 @@ export type OrcamentoEntrada = {
   /** Ids de pessoas ativas do cliente. */
   passageiros: string[];
   observacoes?: string | null;
+  /** Padrão `true` no novo; omitido na edição, mantém. */
+  internacional?: boolean;
 };
 
 export type NovoOrcamentoEntrada = OrcamentoEntrada & { clienteId: string };
@@ -69,6 +72,7 @@ const AGUARDANDO: Falha = {
   ok: false,
   erro: "Orçamento aguardando aprovação. Peça ao Diretor para devolver antes de alterar.",
 };
+const VENDIDA: Falha = { ok: false, erro: MSG_VIAGEM_VENDIDA };
 const CONCORRENCIA: Falha = {
   ok: false,
   erro: "Este orçamento foi alterado por outra pessoa. Recarregue a página.",
@@ -112,9 +116,9 @@ async function conferirPassageiros(tx: Transacao, clienteId: string, ids: string
 
 /**
  * Trava a viagem (`for update`) para uma alteração de item/cotação/cabeçalho.
- * Em `aguardando_aprovacao` recusa.
+ * Em `aguardando_aprovacao` ou `vendida` recusa.
  */
-async function travarViagem(tx: Transacao, viagemId: string): Promise<ViagemLinha | Falha> {
+async function travarViagemEdicao(tx: Transacao, viagemId: string): Promise<ViagemLinha | Falha> {
   const [v] = await tx
     .select()
     .from(viagens)
@@ -122,6 +126,7 @@ async function travarViagem(tx: Transacao, viagemId: string): Promise<ViagemLinh
     .for("update");
   if (!v) return ORCAMENTO_NAO_ENCONTRADO;
   if (v.status === "aguardando_aprovacao") return AGUARDANDO;
+  if (v.status === "vendida") return VENDIDA;
   return v;
 }
 
@@ -216,7 +221,8 @@ export async function alterarOrcamento(
     const p = orcamentoSchema.safeParse(dados);
     if (!p.success) return falhaDeValidacao(p.error);
     if (!ehUuid(id)) return ORCAMENTO_NAO_ENCONTRADO;
-    const { passageiros, ...campos } = p.data;
+    const { passageiros, internacional, ...resto } = p.data;
+    const campos = internacional === undefined ? resto : { ...resto, internacional };
 
     let r: Falha | null;
     try {
@@ -227,6 +233,7 @@ export async function alterarOrcamento(
           .where(and(eq(viagens.id, id), isNull(viagens.excluidoEm)))
           .for("update");
         if (!atual) return ORCAMENTO_NAO_ENCONTRADO;
+        if (atual.status === "vendida") return VENDIDA;
         if (!atualizadoEmEsperado || new Date(atualizadoEmEsperado).getTime() !== atual.atualizadoEm.getTime()) {
           return CONCORRENCIA;
         }
@@ -285,7 +292,7 @@ export async function salvarItem(
     let r: { id: string } | Falha;
     try {
       r = await db.transaction(async (tx) => {
-        const v = await travarViagem(tx, viagemId);
+        const v = await travarViagemEdicao(tx, viagemId);
         if (ehFalha(v)) return v;
         const agora = new Date();
         let linha: ItemLinha;
@@ -355,7 +362,7 @@ export async function removerItem(itemId: string): Promise<{ ok: true } | Falha>
     let r: Falha | null;
     try {
       r = await db.transaction(async (tx) => {
-        const v = await travarViagem(tx, viagemId);
+        const v = await travarViagemEdicao(tx, viagemId);
         if (ehFalha(v)) return v.erro === ORCAMENTO_NAO_ENCONTRADO.erro ? ITEM_NAO_ENCONTRADO : v;
         const i = await travarItem(tx, viagemId, itemId);
         if (ehFalha(i)) return i;
@@ -417,7 +424,7 @@ export async function salvarCotacao(
     let r: { id: string } | Falha;
     try {
       r = await db.transaction(async (tx) => {
-        const v = await travarViagem(tx, viagemId);
+        const v = await travarViagemEdicao(tx, viagemId);
         if (ehFalha(v)) return v.erro === ORCAMENTO_NAO_ENCONTRADO.erro ? ITEM_NAO_ENCONTRADO : v;
         const i = await travarItem(tx, viagemId, itemId);
         if (ehFalha(i)) return i;
@@ -511,7 +518,7 @@ async function abrirCotacao(
   let r: Falha | null;
   try {
     r = await db.transaction(async (tx) => {
-      const v = await travarViagem(tx, ref.viagemId);
+      const v = await travarViagemEdicao(tx, ref.viagemId);
       if (ehFalha(v)) return v.erro === ORCAMENTO_NAO_ENCONTRADO.erro ? COTACAO_NAO_ENCONTRADA : v;
       const i = await travarItem(tx, ref.viagemId, ref.itemId);
       if (ehFalha(i)) return i.erro === ITEM_NAO_ENCONTRADO.erro ? COTACAO_NAO_ENCONTRADA : i;

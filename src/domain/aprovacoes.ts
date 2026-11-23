@@ -104,6 +104,11 @@ export type ResultadoVersao = {
   precoCliente?: string;
   porPessoa?: string;
   numeroPassageiros?: number;
+  /**
+   * `nova_forma`: versão criada por `pedirNovaForma` (só a forma muda). Devolvida, a viagem volta a `aprovado`
+   * com a versão aprovada anterior (a forma original continua valendo).
+   */
+  origem?: "nova_forma";
 };
 
 /** Cotação ativa como vem do banco (dinheiro em bigint). */

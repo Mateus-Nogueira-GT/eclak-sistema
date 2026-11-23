@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   alertasDoCliente,
+  dataEmCuiaba,
   cpfValido,
   formatarCodigoCliente,
   formatarCpf,
@@ -155,9 +156,91 @@ describe("alertasDoCliente", () => {
   });
 });
 
+describe("alertasDoCliente: passaporte × volta da viagem", () => {
+  const viagem = (o: Partial<{ destino: string; fim: string; internacional: boolean; passageiros: string[] }> = {}) => ({
+    destino: "Itália",
+    fim: "2027-01-29",
+    internacional: true,
+    passageiros: ["p1"],
+    ...o,
+  });
+  const ana = (validadePassaporte: string | null, o: Partial<{ passaporte: string | null; titular: boolean; nome: string; id: string }> = {}) =>
+    pessoa({ id: "p1", validadePassaporte, ...o });
+
+  it("validade antes de volta + 182 dias: aviso", () => {
+    const a = alertasDoCliente({ tipo: "individual", pessoas: [ana("2027-06-30")] }, "2026-11-22", [viagem()]);
+    expect(a).toEqual([
+      {
+        tipo: "passaporte_volta",
+        pessoa: "Ana Lima",
+        pessoaId: "p1",
+        texto: "Passaporte de Ana Lima vence em 30/06/2027, menos de 6 meses depois da volta de Itália.",
+      },
+    ]);
+  });
+  it("182 dias exatos não avisa; um dia a menos avisa", () => {
+    // 2027-01-29 + 182 dias = 2027-07-30
+    expect(alertasDoCliente({ tipo: "individual", pessoas: [ana("2027-07-30")] }, "2026-11-22", [viagem()])).toEqual([]);
+    expect(alertasDoCliente({ tipo: "individual", pessoas: [ana("2027-07-29")] }, "2026-11-22", [viagem()])).toHaveLength(1);
+  });
+  it("volta em 2026-12-01: sem aviso", () => {
+    expect(alertasDoCliente({ tipo: "individual", pessoas: [ana("2027-06-30")] }, "2026-11-22", [viagem({ fim: "2026-12-01" })])).toEqual([]);
+  });
+  it("viagem não internacional, já terminada ou sem a pessoa: sem aviso", () => {
+    const c = { tipo: "individual" as const, pessoas: [ana("2027-06-30")] };
+    expect(alertasDoCliente(c, "2026-11-22", [viagem({ internacional: false })])).toEqual([]);
+    expect(alertasDoCliente(c, "2027-02-01", [viagem()])).toEqual([]);
+    expect(alertasDoCliente(c, "2026-11-22", [viagem({ passageiros: ["outra"] })])).toEqual([]);
+  });
+  it("sem passaporte com viagem: aviso com destino e data da volta, no lugar do genérico", () => {
+    const a = alertasDoCliente({ tipo: "individual", pessoas: [ana(null, { passaporte: null })] }, "2026-11-22", [
+      viagem(),
+      viagem({ destino: "Japão", fim: "2027-04-10" }),
+    ]);
+    expect(a.map((x) => [x.tipo, x.texto])).toEqual([
+      ["sem_passaporte", "Ana Lima não tem passaporte cadastrado para Itália (29/01/2027)."],
+      ["sem_passaporte", "Ana Lima não tem passaporte cadastrado para Japão (10/04/2027)."],
+    ]);
+  });
+  it("passaporte vencido não repete o aviso da volta", () => {
+    const a = alertasDoCliente({ tipo: "individual", pessoas: [ana("2026-11-01")] }, "2026-11-22", [viagem()]);
+    expect(a.map((x) => x.tipo)).toEqual(["passaporte_vencido"]);
+  });
+  it("grupo: na viagem, todo passageiro é conferido (não só o titular)", () => {
+    const a = alertasDoCliente(
+      { tipo: "grupo", pessoas: [ana("2027-06-30"), pessoa({ id: "p2", nome: "Bia Souza", titular: false, validadePassaporte: "2027-06-30" })] },
+      "2026-11-22",
+      [viagem({ passageiros: ["p1", "p2"] })],
+    );
+    expect(a.map((x) => [x.tipo, x.pessoa])).toEqual([
+      ["passaporte_volta", "Ana Lima"],
+      ["passaporte_volta", "Bia Souza"],
+    ]);
+  });
+  it("grupo: passageiro sem passaporte na viagem avisa; quem não viaja segue a regra antiga (só o titular)", () => {
+    const a = alertasDoCliente(
+      {
+        tipo: "grupo",
+        pessoas: [
+          ana("2031-01-01"),
+          pessoa({ id: "p2", nome: "Bia Souza", titular: false, passaporte: null, validadePassaporte: null }),
+          pessoa({ id: "p3", nome: "Caio Souza", titular: false, passaporte: null, validadePassaporte: null }),
+        ],
+      },
+      "2026-11-22",
+      [viagem({ passageiros: ["p1", "p2"] })],
+    );
+    expect(a.map((x) => x.texto)).toEqual(["Bia Souza não tem passaporte cadastrado para Itália (29/01/2027)."]);
+  });
+});
+
 describe("hojeEmCuiaba", () => {
   it("usa UTC-4", () => {
     expect(hojeEmCuiaba(new Date("2026-11-19T03:30:00Z"))).toBe("2026-11-18");
     expect(hojeEmCuiaba(new Date("2026-11-19T04:30:00Z"))).toBe("2026-11-19");
+  });
+  it("dataEmCuiaba: a data do instante em Cuiabá (não a de UTC)", () => {
+    expect(dataEmCuiaba(new Date("2026-11-21T02:00:00Z"))).toBe("2026-11-20");
+    expect(dataEmCuiaba(new Date("2026-11-21T04:00:00Z"))).toBe("2026-11-21");
   });
 });
