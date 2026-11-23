@@ -170,6 +170,7 @@ describe("RLS: anon não lê nada", () => {
     "faturas_versoes",
     "lancamentos_financeiros",
     "anexos",
+    "notas_fiscais",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
@@ -178,7 +179,7 @@ describe("RLS: anon não lê nada", () => {
   }
 
   it("tabelas do financeiro com RLS ligado", async () => {
-    const tabelas = ["categorias_financeiras", "contas_bancarias", "lancamentos", "faturas_contador", "faturas", "faturas_versoes", "anexos"];
+    const tabelas = ["categorias_financeiras", "contas_bancarias", "lancamentos", "faturas_contador", "faturas", "faturas_versoes", "anexos", "notas_fiscais"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());

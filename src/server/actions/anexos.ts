@@ -8,7 +8,7 @@ import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { comPerfil, ehUuid } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db } from "@/server/db/client";
-import { anexos, comissoes, lancamentos, pagamentosFornecedor, parcelasReceber } from "@/server/db/schema";
+import { anexos, comissoes, lancamentos, notasFiscais, pagamentosFornecedor, parcelasReceber } from "@/server/db/schema";
 import { linkAssinado, removerObjeto, subirObjeto } from "@/server/storage";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
@@ -20,6 +20,7 @@ import { linkAssinado, removerObjeto, subirObjeto } from "@/server/storage";
 type Falha = { ok: false; erro: string };
 const falha = (erro: string): Falha => ({ ok: false, erro });
 const DONO_NAO_ENCONTRADO = falha("Lançamento não encontrado");
+const NOTA_NAO_ENCONTRADA = falha("Nota fiscal não encontrada");
 const ANEXO_NAO_ENCONTRADO = falha("Anexo não encontrado");
 const FALHA_ENVIO = falha("Não foi possível enviar o arquivo. Tente de novo.");
 
@@ -28,8 +29,7 @@ const FINANCEIRO = [...PERFIS_FINANCEIRO];
 const ehDono = (t: unknown): t is DonoAnexo => typeof t === "string" && (DONOS_ANEXO as readonly string[]).includes(t);
 
 /**
- * O dono existe? Um caso por tabela; `fatura_cartao` e `nota_fiscal` entram nas tasks que criam essas tabelas
- * (até lá, recusados como não encontrados).
+ * O dono existe? Um caso por tabela; `fatura_cartao` entra na task que cria a tabela (até lá, recusado como não encontrado).
  */
 async function donoExiste(tipo: DonoAnexo, id: string): Promise<boolean> {
   switch (tipo) {
@@ -41,6 +41,8 @@ async function donoExiste(tipo: DonoAnexo, id: string): Promise<boolean> {
       return (await db.select({ id: pagamentosFornecedor.id }).from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, id))).length > 0;
     case "comissao":
       return (await db.select({ id: comissoes.id }).from(comissoes).where(eq(comissoes.id, id))).length > 0;
+    case "nota_fiscal":
+      return (await db.select({ id: notasFiscais.id }).from(notasFiscais).where(eq(notasFiscais.id, id))).length > 0;
     default:
       return false;
   }
@@ -63,7 +65,7 @@ export async function enviarAnexo(formData: FormData) {
     const donoTipo = formData.get("donoTipo");
     const donoId = formData.get("donoId");
     if (!ehDono(donoTipo) || typeof donoId !== "string" || !ehUuid(donoId)) return DONO_NAO_ENCONTRADO;
-    if (!(await donoExiste(donoTipo, donoId))) return DONO_NAO_ENCONTRADO;
+    if (!(await donoExiste(donoTipo, donoId))) return donoTipo === "nota_fiscal" ? NOTA_NAO_ENCONTRADA : DONO_NAO_ENCONTRADO;
 
     const arquivo = formData.get("arquivo");
     if (!(arquivo instanceof File) || arquivo.size === 0) return falha(MSG_TIPO_ANEXO);

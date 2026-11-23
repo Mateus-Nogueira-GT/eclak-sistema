@@ -204,6 +204,20 @@
       "when": 1795420458410,
       "tag": "0028_anexos_rls_bucket",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1795421585410,
+      "tag": "0029_notas_fiscais",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795421585983,
+      "tag": "0030_notas_fiscais_rls",
+      "breakpoints": true
     }
   ]
 }
