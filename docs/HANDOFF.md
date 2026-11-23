@@ -200,10 +200,10 @@ Teste de auditoria sem `orderBy`; sem teste de concorrência no "esta e as próx
 - Achados menores da revisão deixados para depois:
   - `marcarEnviado` (e as outras mudanças de estado do daily) não confere a versão (`atualizado_em`); trava a linha e confere o estado, mas não detecta edição de texto feita por outra pessoa no meio tempo.
   - Testes de D5/D29 não distinguem o consultor da viagem de quem fechou a venda (no fixture são a mesma pessoa) nem usam `vendida_em` retroativa.
-  - `ordem` das tarefas pode repetir sob concorrência (max + 1 sem trava); a lista desempata, mas a ordem fica ambígua.
-  - Filtro de responsável em `/tarefas` não lista usuários inativos (tarefas de quem saiu só aparecem em "Todas").
-  - `lpad` do código do cliente nas listas da operação trunca códigos com 5 dígitos (≥ 10000).
-  - `dataBr` duplicado (`src/domain/tarefas.ts` e o formatador do app).
+  - `ordem` das tarefas pode repetir sob concorrência (duas criações ao mesmo tempo).
+  - Filtro de responsável em `/tarefas` só lista usuários ativos.
+  - `lpad(…, 4, '0')` do código na lista `/tarefas` (`src/server/queries/operacao.ts`) trunca códigos de cliente ≥ 10000.
+  - `dataBr` duplicado (domínio e `formatos.ts` do app).
   - Testes de CHECK usam `toThrow()` genérico (não conferem o nome da restrição).
   - Desfazer a aprovação de um roteiro aprovado direto do rascunho leva a "Aguardando o cliente", não de volta a "Rascunho".
   - O seed reimplementa em SQL o insert das tarefas automáticas (mesma lista e mesmo ON CONFLICT, mas código duplicado de `criarTarefasAutomaticas`).
@@ -229,7 +229,7 @@ npm run dev               # abrir em localhost (127.0.0.1 não fica interativo n
 ```
 - `.env.local` (não versionado): `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SITE_URL` (ver `.env.example`).
 - Usuários do seed: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`, senha `eclak-local`.
-- Testes: `npm run lint && npm run typecheck && npm test && npm run test:integracao && npm run build` (uma execução de integração por vez: a trava do global setup recusa a segunda). Últimos números da 5a (23/11/2026, branch `claude/fatia-5a-operacao`): 318 testes de domínio e 345 de integração (22 arquivos), tudo verde, build ok, seed duas vezes sem duplicar (onda final da revisão); a 4b traz os próprios números no PR #6, e a soma só se confirma depois do rebase. **A integração trunca o banco local**: rodar `npm run seed:local` depois.
+- Testes: `npm run lint && npm run typecheck && npm test && npm run test:integracao && npm run build` (uma execução de integração por vez: a trava do global setup recusa a segunda). Últimos números da 5a (23/11/2026, branch `claude/fatia-5a-operacao`): 319 testes de domínio e 345 de integração (22 arquivos), tudo verde, build ok, seed duas vezes sem duplicar (onda final da revisão); a 4b traz os próprios números no PR #6, e a soma só se confirma depois do rebase. **A integração trunca o banco local**: rodar `npm run seed:local` depois.
 - Migração nova: `npm run db:generate` (gerada) ou `npx drizzle-kit generate --custom --name <nome>` (RLS, índices, enums); validar do zero (`npx supabase db reset` + `npm run db:migrate`) e sobre banco populado.
 - Next gera `AGENTS.md` no dev: está no `.gitignore`.
 

@@ -80,6 +80,11 @@ describe("conteudoRoteiroSchema", () => {
     expect(msgs({ ...base, voos: [voo] })).toEqual([]);
     expect(msgs({ ...base, voos: [{ ...voo, trecho: "x".repeat(201) }] })).toContain("Texto muito longo");
   });
+  it("voo trazido de um item aéreo com serviço de 200 caracteres passa na validação", () => {
+    const longo = [{ tipo: "Aéreo" as const, cidade: null, servico: "y".repeat(200), checkin: "2027-08-14", checkout: null }];
+    const r = roteiroInicial({ inicio: "2027-08-14", fim: "2027-09-01", itens: longo });
+    expect(schema.safeParse(r).success).toBe(true);
+  });
   it("recusa dias que não batem", () => {
     expect(msgs({ ...base, dias: base.dias.slice(0, 18) })).toContain("Os dias do roteiro não batem com as datas da viagem");
   });
