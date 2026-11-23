@@ -208,8 +208,8 @@ export async function concluirTarefa(id: string): Promise<{ ok: true } | Falha> 
         : [];
       return { ok: false, erro: `Tarefa já concluída por ${quem?.nome ?? "outra pessoa"} em ${dataBr(dataEmCuiaba(t.concluidaEm))}` };
     }
-    const agora = new Date();
-    return { concluidaEm: agora, concluidaPor: usuarioId, atualizadoEm: agora };
+    // Sem mexer em `atualizado_em`: a edição não grava a conclusão, então um formulário aberto não entra em conflito.
+    return { concluidaEm: new Date(), concluidaPor: usuarioId };
   });
 }
 
@@ -217,7 +217,7 @@ export async function concluirTarefa(id: string): Promise<{ ok: true } | Falha> 
 export async function desfazerConclusao(id: string): Promise<{ ok: true } | Falha> {
   return mudar(id, "Erro ao desfazer a conclusão", async (_tx, t) => {
     if (!t.concluidaEm) return NAO_CONCLUIDA;
-    return { concluidaEm: null, concluidaPor: null, atualizadoEm: new Date() };
+    return { concluidaEm: null, concluidaPor: null };
   });
 }
 

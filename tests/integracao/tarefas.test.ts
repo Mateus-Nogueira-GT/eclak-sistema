@@ -181,6 +181,16 @@ describe("tarefa manual", () => {
     });
   });
 
+  it("concluir e desfazer não invalidam um formulário de edição aberto", async () => {
+    const id = await criar(f.u.id);
+    const t = await linha(f.u.id, id);
+    await comSessao(f.u.id, () => concluirTarefa(id));
+    await comSessao(f.u.id, () => desfazerConclusao(id));
+    await comSessao(f.u.id, () => concluirTarefa(id));
+    expect(await comSessao(f.u.id, () => editarTarefa(id, { ...trem, item: "Trem 2" }, t.atualizadoEm))).toEqual({ ok: true, id });
+    expect((await linha(f.u.id, id)).concluidaPor).toBe("Teste consultor");
+  });
+
   it("excluída some da tela e não aceita mais ações", async () => {
     const id = await criar(f.u.id);
     expect(await comSessao(f.u.id, () => excluirTarefa(id))).toEqual({ ok: true });

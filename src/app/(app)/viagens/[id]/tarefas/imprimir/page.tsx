@@ -88,14 +88,14 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
         return (
           <section key={cat} className="mt-6">
             <h2 className="mb-1.5 text-[13.5px] font-bold text-verde">{ROTULO_CATEGORIA[cat]}</h2>
-            <table className="w-full border-collapse text-[12px]">
+            <table className="w-full table-fixed border-collapse text-[12px]">
               <thead>
                 <tr className="border-b border-linha text-left text-[10px] font-bold uppercase tracking-[0.06em] text-cinza">
                   <th className="w-[26px] py-1.5 pr-2"><span className="sr-only">Concluída</span></th>
                   <th className="w-[80px] py-1.5 pr-2">Dia</th>
                   <th className="py-1.5 pr-2">Item</th>
                   <th className="py-1.5 pr-2">O que fazer</th>
-                  <th className="w-[140px] py-1.5 pr-2">Prazo</th>
+                  <th className="w-[150px] py-1.5 pr-2">Prazo</th>
                   <th className="w-[110px] py-1.5 pr-2">Responsável</th>
                   <th className="py-1.5">Observações</th>
                 </tr>
