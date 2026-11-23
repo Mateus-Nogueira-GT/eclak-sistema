@@ -26,6 +26,15 @@ const areas: { titulo: string; itens: Item[] }[] = [
   },
   { titulo: "Gestão", itens: [{ href: "/aprovacoes", label: "Aprovações" }] },
   {
+    titulo: "Financeiro",
+    itens: [
+      { href: "/financeiro/lancamentos", label: "Lançamentos" },
+      { href: "/financeiro/faturas", label: "Faturas" },
+      { href: "/financeiro/categorias", label: "Categorias" },
+      { href: "/financeiro/contas-bancarias", label: "Contas bancárias" },
+    ],
+  },
+  {
     titulo: "Administração",
     itens: [
       { href: "/admin/usuarios", label: "Usuários e acessos" },

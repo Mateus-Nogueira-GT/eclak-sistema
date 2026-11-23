@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   CENTROS,
   FORMAS_FINANCEIRO,
+  FORMAS_FINANCEIRO_SLUG,
+  ROTULO_FORMA_FINANCEIRO,
+  STATUS_LANCAMENTO,
   LADOS,
   ORIGENS,
   SITUACOES,
@@ -81,5 +84,25 @@ describe("centro, competência e situação", () => {
     expect(rotuloSituacao("vence_hoje", "receber")).toBe("Vence hoje");
     expect(rotuloSituacao("a_vencer", "pagar")).toBe("A vencer");
     expect(rotuloSituacao("cancelada", "pagar")).toBe("Cancelada");
+  });
+});
+
+describe("formas no banco (slug) e na tela (texto)", () => {
+  it("um slug por texto, na mesma ordem", () => {
+    expect(FORMAS_FINANCEIRO_SLUG).toEqual([
+      "a_prazo",
+      "boleto",
+      "cartao_credito",
+      "cartao_debito",
+      "debito_conta",
+      "deposito",
+      "dinheiro",
+      "pix",
+      "transferencia",
+    ]);
+    expect(FORMAS_FINANCEIRO_SLUG.map((f) => ROTULO_FORMA_FINANCEIRO[f])).toEqual([...FORMAS_FINANCEIRO]);
+  });
+  it("status do lançamento", () => {
+    expect(STATUS_LANCAMENTO).toEqual(["em_aberto", "baixado", "cancelado"]);
   });
 });

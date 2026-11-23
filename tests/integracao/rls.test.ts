@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
-import { db } from "@/server/db/client";
+import { db, sql } from "@/server/db/client";
 import {
   auditoria,
   clientes,
@@ -133,6 +133,15 @@ describe("RLS: anon não lê nada", () => {
       valorPrevisto: 10000n,
       previstaPara: "2027-04-15",
     });
+    // Financeiro (fatia 4a): categorias e contador já vêm do limparBanco; uma linha em cada tabela nova.
+    const [cat] = await sql`select id from categorias_financeiras where sistema = 'vendas_viagem'`;
+    const [cb] = await sql`insert into contas_bancarias (nome, saldo_inicial, saldo_inicial_em) values ('Banco', 0, '2027-01-01') returning id`;
+    await sql`insert into lancamentos (lado, descricao, categoria_id, centro, competencia, emissao, vencimento, valor, forma, conta_bancaria_id, criado_por)
+              values ('receber', 'Teste', ${cat.id}, 'MT', '2027-01', '2027-01-01', '2027-01-10', 100, 'pix', ${cb.id}, ${u.id})`;
+    const [fat] = await sql`insert into faturas (venda_id, numero, emitida_por) values (${venda.id}, 1405, ${u.id}) returning id`;
+    await sql`insert into faturas_versoes (fatura_id, versao, emitida_por, dados) values (${fat.id}, 1, ${u.id}, '{}')`;
+    const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from lancamentos_financeiros`;
+    expect(n).toBeGreaterThan(0);
   });
 
   for (const tabela of [
@@ -150,10 +159,34 @@ describe("RLS: anon não lê nada", () => {
     "contas_pagar",
     "pagamentos_fornecedor",
     "comissoes",
+    "categorias_financeiras",
+    "contas_bancarias",
+    "lancamentos",
+    "faturas_contador",
+    "faturas",
+    "faturas_versoes",
+    "lancamentos_financeiros",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
       expect(error ? [] : data).toEqual([]);
     });
   }
+
+  it("tabelas do financeiro com RLS ligado", async () => {
+    const tabelas = ["categorias_financeiras", "contas_bancarias", "lancamentos", "faturas_contador", "faturas", "faturas_versoes"];
+    const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
+      select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
+    expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
+  });
+
+  it("view lancamentos_financeiros: security_invoker e sem privilégio para anon/authenticated", async () => {
+    const [v] = await sql<{ reloptions: string[] | null }[]>`
+      select reloptions from pg_class where relnamespace = 'public'::regnamespace and relname = 'lancamentos_financeiros' and relkind = 'v'`;
+    expect(v.reloptions).toContain("security_invoker=true");
+    for (const papel of ["anon", "authenticated"]) {
+      const [p] = await sql<{ ok: boolean }[]>`select has_table_privilege(${papel}, 'public.lancamentos_financeiros', 'SELECT') as ok`;
+      expect(p.ok).toBe(false);
+    }
+  });
 });

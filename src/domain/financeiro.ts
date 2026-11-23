@@ -17,6 +17,38 @@ export const FORMAS_FINANCEIRO = [
 ] as const;
 export type FormaFinanceiro = (typeof FORMAS_FINANCEIRO)[number];
 
+/** Valores do enum `forma_financeiro` no banco, 1:1 e na mesma ordem de `FORMAS_FINANCEIRO`. */
+export const FORMAS_FINANCEIRO_SLUG = [
+  "a_prazo",
+  "boleto",
+  "cartao_credito",
+  "cartao_debito",
+  "debito_conta",
+  "deposito",
+  "dinheiro",
+  "pix",
+  "transferencia",
+] as const;
+export type FormaFinanceiroSlug = (typeof FORMAS_FINANCEIRO_SLUG)[number];
+export const ROTULO_FORMA_FINANCEIRO: Record<FormaFinanceiroSlug, FormaFinanceiro> = {
+  a_prazo: "A prazo",
+  boleto: "Boleto bancário",
+  cartao_credito: "Cartão de crédito",
+  cartao_debito: "Cartão de débito",
+  debito_conta: "Débito em conta",
+  deposito: "Depósito bancário",
+  dinheiro: "Dinheiro",
+  pix: "PIX",
+  transferencia: "Transferência",
+};
+
+export const STATUS_LANCAMENTO = ["em_aberto", "baixado", "cancelado"] as const;
+export type StatusLancamento = (typeof STATUS_LANCAMENTO)[number];
+
+/** Categorias fixas usadas pelas linhas de viagem (`categorias_financeiras.sistema`). */
+export const CATEGORIAS_SISTEMA = ["vendas_viagem", "fornecedores_viagem", "comissoes_hotel", "comissoes_operadora"] as const;
+export type CategoriaSistema = (typeof CATEGORIAS_SISTEMA)[number];
+
 export const LADOS = ["pagar", "receber"] as const;
 export type Lado = (typeof LADOS)[number];
 

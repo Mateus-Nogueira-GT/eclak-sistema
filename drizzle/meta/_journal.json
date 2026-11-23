@@ -134,6 +134,27 @@
       "when": 1795366623323,
       "tag": "0018_restricoes_caixa",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795391568249,
+      "tag": "0019_financeiro_tabelas",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795391569363,
+      "tag": "0020_financeiro",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795391570449,
+      "tag": "0021_view_lancamentos",
+      "breakpoints": true
     }
   ]
 }
