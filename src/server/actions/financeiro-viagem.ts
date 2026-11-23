@@ -21,6 +21,7 @@ import {
   MSG_COMISSAO_REGISTRADA,
   MSG_JA_BAIXADO_NA_CONTA,
   MSG_NAO_CONCILIADA,
+  MSG_DESFACA_FATURA_CARTAO,
   MSG_SEM_FORNECEDOR,
   valorReaisSchema,
 } from "@/domain/venda-entrada";
@@ -31,6 +32,7 @@ import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
 import {
   comissoes,
+  faturasCartao,
   contasPagar,
   fornecedores,
   itensViagem,
@@ -67,7 +69,7 @@ import {
   type PagamentoLinha,
   type ViagemLinha,
 } from "@/server/financeiro/baixas-viagem";
-import { desvincularCompraNa, vincularCompraNa } from "@/server/financeiro/cartoes";
+import { travarFaturasNa } from "@/server/financeiro/cartoes";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -244,11 +246,16 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
         const conta = await contaTravada(tx, contaId, v.id);
         if (!conta) return CONTA_NAO_ENCONTRADA;
         const linhas = await linhasDaConta(tx, conta.id);
-        // Antes do "já baixado": o pagamento quitado pela fatura do cartão pede desfazer a baixa da fatura.
-        const faturas = [...new Set(linhas.map((l) => l.faturaCartaoId).filter((x): x is string => x !== null))].sort();
-        for (const id of faturas) {
-          const r = await desvincularCompraNa(tx, id);
-          if (ehFalha(r)) return r;
+        // Antes do "já baixado": o pagamento quitado pela fatura do cartão pede desfazer a baixa da fatura (ruling 12).
+        // Leitura sem trava (a baixa da fatura trava as compras antes da fatura, e as linhas já estão travadas); a
+        // conferência travada vem em `travarFaturasNa`, junto com as outras faturas.
+        const faturasAntigas = linhas.map((l) => l.faturaCartaoId).filter((x): x is string => x !== null);
+        if (faturasAntigas.length > 0) {
+          const pagas = await tx
+            .select({ id: faturasCartao.id })
+            .from(faturasCartao)
+            .where(and(inArray(faturasCartao.id, faturasAntigas), eq(faturasCartao.status, "baixado")));
+          if (pagas.length > 0) return falha(MSG_DESFACA_FATURA_CARTAO);
         }
         if (linhas.some((l) => l.status === "pago")) return JA_BAIXADO;
         const snapshot = await snapshotDaVenda(tx, v.id);
@@ -269,16 +276,17 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
         }
         if (novas.some((l) => l.vencimento === null) && !vencimentoAtual) return falha("Informe a data", "vencimento");
         // Cartão corporativo: cada linha na fatura do ciclo da sua data (a data informada é a da compra).
-        const vinculos: { cartaoId: string | null; faturaCartaoId: string | null }[] = [];
-        for (const l of novas) {
-          if (f.tipo !== "cartao_corporativo") {
-            vinculos.push({ cartaoId: null, faturaCartaoId: null });
-            continue;
-          }
-          const r = await vincularCompraNa(tx, usuario.id, f.cartaoId, l.vencimento ?? vencimentoAtual!);
-          if (ehFalha(r)) throw new Desfazer(r);
-          vinculos.push(r);
-        }
+        // As faturas de saída (das linhas antigas) e de entrada são travadas juntas, em ordem única, antes das escritas.
+        const entradas = f.tipo === "cartao_corporativo" ? novas.map((l) => ({
+                cartaoId: f.cartaoId,
+                dataCompra: l.vencimento ?? vencimentoAtual!,
+                // Cartão desativado só se já era o da conta (como na edição do lançamento manual).
+                exigeAtivo: !linhas.some((x) => x.cartaoId === f.cartaoId),
+              })) : [];
+        const travadas = await travarFaturasNa(tx, usuario.id, faturasAntigas, entradas);
+        if (ehFalha(travadas)) throw new Desfazer(travadas);
+        const vinculos: { cartaoId: string | null; faturaCartaoId: string | null }[] =
+          f.tipo === "cartao_corporativo" ? travadas : novas.map(() => ({ cartaoId: null, faturaCartaoId: null }));
 
         for (const l of linhas) {
           await tx.delete(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, l.id));

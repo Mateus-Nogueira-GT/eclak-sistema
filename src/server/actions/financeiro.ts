@@ -53,7 +53,7 @@ import {
   registrarComissaoNa,
   type Feito,
 } from "@/server/financeiro/baixas-viagem";
-import { desvincularCompraNa, vincularCompraNa, type Vinculo } from "@/server/financeiro/cartoes";
+import { travarFaturasNa, type EntradaFatura, type SemCartao, type Vinculo } from "@/server/financeiro/cartoes";
 import { travarViagem } from "@/server/trava-viagem";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
@@ -280,31 +280,26 @@ function slugDaForma(rotulo: string): FormaFinanceiroSlug {
   return par[0];
 }
 
-const SEM_CARTAO = { cartaoId: null, faturaCartaoId: null };
+const SEM_CARTAO: SemCartao = { cartaoId: null, faturaCartaoId: null };
 
-/** Vínculo da compra no cartão (ou a recusa, desfazendo a transação). */
-async function vincular(tx: Transacao, usuarioId: string, cartaoId: string, dataCompra: string, exigeAtivo = true): Promise<Vinculo> {
-  const r = await vincularCompraNa(tx, usuarioId, cartaoId, dataCompra, exigeAtivo);
+/**
+ * Trava todas as faturas que a transação mexe, numa passada só e em ordem única (`travarFaturasNa`), antes de
+ * qualquer escrita nas compras; recusa desfazendo a transação. Devolve o vínculo de cada entrada, na ordem.
+ */
+async function travarFaturas(tx: Transacao, usuarioId: string, sair: (string | null)[], entrar: EntradaFatura[]): Promise<Vinculo[]> {
+  const r = await travarFaturasNa(tx, usuarioId, sair, entrar);
   if (ehFalha(r)) throw new Desfazer(r);
   return r;
 }
 
-/** A compra sai da fatura `faturaCartaoId` (recusa, desfazendo a transação, se a fatura já foi paga). */
-async function desvincular(tx: Transacao, faturaCartaoId: string | null): Promise<void> {
-  if (!faturaCartaoId) return;
-  const r = await desvincularCompraNa(tx, faturaCartaoId);
-  if (ehFalha(r)) throw new Desfazer(r);
-}
-
 /**
- * Cartão e fatura da linha `l` depois da edição (compra na data `dataCompra`): sem cartão, nenhum; mesma compra (mesmo
- * cartão, mesma data, já vinculada) fica na fatura em que está; senão sai da fatura atual e vai para a do ciclo da
- * data (cartão desativado só é aceito se já era o da compra).
+ * O que muda no cartão da linha `l` editada (compra na data `dataCompra`): mesma compra (mesmo cartão, mesma data, já
+ * vinculada) fica na fatura em que está (`fica`); senão sai da fatura atual (se houver) e, com cartão, entra na do
+ * ciclo da data (cartão desativado só é aceito se já era o da compra).
  */
-async function revincular(tx: Transacao, usuarioId: string, l: LancamentoLinha, cartaoId: string | null, dataCompra: string) {
-  if (cartaoId === l.cartaoId && l.faturaCartaoId && dataCompra === l.vencimento) return { cartaoId, faturaCartaoId: l.faturaCartaoId };
-  await desvincular(tx, l.faturaCartaoId);
-  return cartaoId ? vincular(tx, usuarioId, cartaoId, dataCompra, cartaoId !== l.cartaoId) : SEM_CARTAO;
+function planoDoCartao(l: LancamentoLinha, cartaoId: string | null, dataCompra: string): { fica: Vinculo } | { sai: string | null; entra: EntradaFatura | null } {
+  if (cartaoId && cartaoId === l.cartaoId && l.faturaCartaoId && dataCompra === l.vencimento) return { fica: { cartaoId, faturaCartaoId: l.faturaCartaoId } };
+  return { sai: l.faturaCartaoId, entra: cartaoId ? { cartaoId, dataCompra, exigeAtivo: cartaoId !== l.cartaoId } : null };
 }
 
 /** Campos editáveis comuns (sem as datas, que cada linha mantém nas "próximas"). */
@@ -341,8 +336,10 @@ export async function criarLancamento(dados: unknown) {
             : datasRecorrentes(v.vencimento, rep.frequencia, rep.quantidade).map((d, i) => ({ vencimento: d, valor: v.valor, numero: i + 1, total: rep.quantidade }));
       const base = camposComuns(v);
       // Compra no cartão: cada linha na fatura do ciclo da sua data (as datas crescem: faturas travadas em ordem).
-      const vinculos: (Vinculo | typeof SEM_CARTAO)[] = [];
-      for (const x of itens) vinculos.push(v.cartaoId ? await vincular(tx, u.id, v.cartaoId, x.vencimento) : SEM_CARTAO);
+      const cartaoId = v.cartaoId;
+      const vinculos: (Vinculo | SemCartao)[] = cartaoId
+        ? await travarFaturas(tx, u.id, [], itens.map((x) => ({ cartaoId, dataCompra: x.vencimento, exigeAtivo: true })))
+        : itens.map(() => SEM_CARTAO);
       const linhas = await tx
         .insert(lancamentos)
         .values(
@@ -400,9 +397,6 @@ async function travarAlcance(tx: Transacao, id: string, alcance: Alcance): Promi
   return { alvo, afetadas: todos.filter((l) => l.id === id || l.status === "em_aberto") };
 }
 
-/** Linhas por vencimento (e id): as faturas do cartão são travadas em ordem de data, como na criação. */
-const porData = (ls: LancamentoLinha[]) => [...ls].sort((a, b) => (a.vencimento + a.id < b.vencimento + b.id ? -1 : 1));
-
 export async function editarLancamento(id: string, dados: unknown, alcance: Alcance) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
     const p = lancamentoSchema.safeParse(dados);
@@ -419,11 +413,17 @@ export async function editarLancamento(id: string, dados: unknown, alcance: Alca
       // "repeticao" não se aplica à edição. As datas só mudam na linha escolhida: cada parcela mantém as suas. O
       // valor só vai às próximas quando foi mudado na escolhida (senão a última parcela perderia o resto da divisão).
       const nasOutras = valor === t.alvo.valor ? semValor : { ...semValor, valor };
-      for (const l of porData(t.afetadas)) {
+      // Compra no cartão: cada linha pela sua data (a da escolhida pode ter mudado). Todas as faturas de saída e de
+      // entrada são travadas juntas, em ordem única, antes das escritas.
+      const planos = t.afetadas.map((l) => planoDoCartao(l, v.cartaoId, l.id === id ? v.vencimento : l.vencimento));
+      const entradas = planos.flatMap((x) => ("entra" in x && x.entra ? [x.entra] : []));
+      const novos = await travarFaturas(tx, u.id, planos.map((x) => ("sai" in x ? x.sai : null)), entradas);
+      let n = 0;
+      const cartaoDe = planos.map((x) => ("fica" in x ? x.fica : x.entra ? novos[n++] : SEM_CARTAO));
+      for (const [i, l] of t.afetadas.entries()) {
         const depois: Record<string, unknown> = {
           ...(l.id === id ? { ...semValor, valor, competencia: v.competencia, emissao: v.emissao, vencimento: v.vencimento } : { ...nasOutras }),
-          // Compra no cartão: cada linha pela sua data (a da escolhida pode ter mudado).
-          ...(await revincular(tx, u.id, l, v.cartaoId, l.id === id ? v.vencimento : l.vencimento)),
+          ...cartaoDe[i],
         };
         const mudou = Object.keys(depois).filter((k) => l[k as keyof LancamentoLinha] !== depois[k]);
         if (mudou.length === 0) continue;
@@ -505,9 +505,9 @@ export async function cancelarLancamento(id: string, motivo: unknown, alcance: A
       if (!t) return LANCAMENTO_NAO_ENCONTRADO;
       if (t.alvo.status === "baixado") return falha("Desfaça a baixa para cancelar");
       if (t.alvo.status === "cancelado") return falha("Lançamento já cancelado");
-      for (const l of porData(t.afetadas)) {
-        // Compra no cartão sai da fatura (o cartão fica registrado na linha).
-        await desvincular(tx, l.faturaCartaoId);
+      // Compra no cartão sai da fatura (o cartão fica registrado na linha); as faturas travadas juntas, em ordem única.
+      await travarFaturas(tx, u.id, t.afetadas.map((l) => l.faturaCartaoId), []);
+      for (const l of t.afetadas) {
         const depois = { status: "cancelado" as const, motivoCancelamento: m.data, ...(l.faturaCartaoId ? { faturaCartaoId: null } : {}) };
         await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, l.id));
         await auditarAlteracao(tx, u.id, "lancamentos", l, depois);

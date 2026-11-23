@@ -3,7 +3,7 @@ import { and, asc, eq } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { ErroAcesso } from "@/server/auth";
-import { db } from "@/server/db/client";
+import { db, sql } from "@/server/db/client";
 import { auditoria, cartoesCorporativos, categoriasFinanceiras, contasBancarias, faturasCartao, lancamentos, pagamentosFornecedor } from "@/server/db/schema";
 import { criarCartao, desativarCartao, editarCartao } from "@/server/actions/cartoes";
 import { alternarCategoria, cancelarLancamento, criarLancamento, editarLancamento, salvarCategoria } from "@/server/actions/financeiro";
@@ -230,6 +230,42 @@ describe("cartões corporativos", () => {
       expect(await lancamento(id)).toMatchObject({ cartaoId: k, descricao: "Passagem do diretor" });
     });
 
+    it("duas edições ao mesmo tempo movendo compras em sentidos opostos (dez→jan e jan→dez): as duas terminam, sem impasse", async () => {
+      const k = await novoCartao();
+      const [a] = await comprar(k, { vencimento: "2026-12-10", emissao: "2026-12-10", competencia: "2026-12" });
+      const [b] = await comprar(k, { vencimento: "2027-01-10" });
+      const [dez, jan] = await faturas(k);
+      expect([dez.fechamento, jan.fechamento]).toEqual(["2026-12-15", "2027-01-15"]);
+      // Uma transação de fora segura a fatura de dezembro: as duas edições começam e param nas travas das faturas;
+      // ao soltar, cada uma precisa das duas faturas. Com travas em ordem diferente por caminho, o Postgres abortaria
+      // uma delas (40P01); com a ordem única (cartao_id, fechamento), elas se enfileiram.
+      let soltar!: () => void;
+      const segurando = new Promise<void>((r) => (soltar = r));
+      let travou!: () => void;
+      const travada = new Promise<void>((r) => (travou = r));
+      const bloqueio = sql.begin(async (t) => {
+        await t`select id from faturas_cartao where id = ${dez.id} for update`;
+        travou();
+        await segurando;
+      });
+      await travada;
+      const edicoes = Promise.all([
+        comSessao(c.fin, () => editarLancamento(a, compra(k, { vencimento: "2027-01-12", emissao: "2026-12-10", competencia: "2026-12" }), "esta")),
+        comSessao(c.fin, () => editarLancamento(b, compra(k, { vencimento: "2026-12-12" }), "esta")),
+      ]);
+      // Espera as duas edições pararem numa trava antes de soltar.
+      for (let i = 0; i < 100; i++) {
+        const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()`;
+        if (n >= 2) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      soltar();
+      await bloqueio;
+      expect(await edicoes).toEqual([{ ok: true, ids: [a] }, { ok: true, ids: [b] }]);
+      expect(await lancamento(a)).toMatchObject({ faturaCartaoId: jan.id, vencimento: "2027-01-12" });
+      expect(await lancamento(b)).toMatchObject({ faturaCartaoId: dez.id, vencimento: "2026-12-12" });
+    });
+
     it("editar 'próximas' revincula cada parcela pela sua data", async () => {
       const k = await novoCartao();
       const k2 = await novoCartao({ nome: "Master", final: "5678", diaFechamento: "5", diaVencimento: "12" });
@@ -323,6 +359,18 @@ describe("cartões corporativos", () => {
       expect(await f({ tipo: "a_vista" })).toMatchObject({ ok: false, erro: MSG_DESFACA_FATURA });
       [p] = await pagamentos();
       expect(p).toMatchObject({ cartaoId: k, faturaCartaoId: fs[0].id });
+    });
+
+    it("cartão desativado já usado na conta continua aceito nela; numa conta nova, recusado", async () => {
+      const x = await vendida();
+      const k = await novoCartao();
+      const f = (contaId: string, forma: Parameters<typeof definirFormaFornecedor>[1]) => comSessao(x.fin.id, () => definirFormaFornecedor(contaId, forma));
+      expect(await f(x.passeio.id, { tipo: "cartao_corporativo", vencimento: "2027-07-10", cartaoId: k })).toEqual({ ok: true });
+      await comSessao(c.fin, () => desativarCartao(k));
+      expect(await f(x.passeio.id, { tipo: "cartao_corporativo", vencimento: "2027-07-20", cartaoId: k })).toEqual({ ok: true });
+      const [p] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.passeio.id));
+      expect(p).toMatchObject({ cartaoId: k, vencimento: "2027-07-20" });
+      expect(await f(x.hotel.id, { tipo: "cartao_corporativo", vencimento: "2027-07-10", cartaoId: k })).toMatchObject({ ok: false, campos: { cartaoId: expect.any(String) } });
     });
 
     it("conta em moeda estrangeira também vai para a fatura", async () => {

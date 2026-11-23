@@ -366,7 +366,10 @@ function FormForma({ conta, cartoes, onFechar }: { conta: ContaVendida; cartoes:
   const alvoConhecido = !(conta.forma === "a_vista" && conta.descontoAVistaPct && Number(conta.descontoAVistaPct) > 0);
   const [tipo, setTipo] = useState<FormaPagamentoFornecedorTipo>(conta.forma ?? "a_vista");
   const [vencimento, setVencimento] = useState(primeira);
-  const [cartaoId, setCartaoId] = useState(conta.pagamentos[0]?.cartaoId ?? (cartoes.length === 1 ? cartoes[0].id : ""));
+  const cartaoAtual = conta.pagamentos[0]?.cartaoId ?? null;
+  const [cartaoId, setCartaoId] = useState(cartaoAtual ?? (cartoes.length === 1 ? cartoes[0].id : ""));
+  // O cartão já usado na conta pode ter sido desativado: continua na lista, como no formulário de lançamento.
+  const opcoesCartao = cartaoAtual && !cartoes.some((k) => k.id === cartaoAtual) ? [...cartoes, { id: cartaoAtual, nome: "Cartão desativado", final: "" }] : cartoes;
   const metade = alvoConhecido ? alvo / 2n : 0n;
   const [linhas, setLinhas] = useState<{ vencimento: string; valor: string }[]>([
     { vencimento: primeira, valor: alvoConhecido ? reaisParaCampo(metade) : "" },
@@ -402,9 +405,9 @@ function FormForma({ conta, cartoes, onFechar }: { conta: ContaVendida; cartoes:
       {tipo === "cartao_corporativo" && (
         <Campo label="Cartão corporativo">
           <Select value={cartaoId} onChange={setCartaoId} className={`w-full ${marca(acao, "cartaoId")}`}>
-            <option value="">{cartoes.length === 0 ? "Nenhum cartão ativo" : "Escolha o cartão"}</option>
-            {cartoes.map((k) => (
-              <option key={k.id} value={k.id}>{`${k.nome} (final ${k.final})`}</option>
+            <option value="">{opcoesCartao.length === 0 ? "Nenhum cartão ativo" : "Escolha o cartão"}</option>
+            {opcoesCartao.map((k) => (
+              <option key={k.id} value={k.id}>{k.final ? `${k.nome} (final ${k.final})` : k.nome}</option>
             ))}
           </Select>
         </Campo>
