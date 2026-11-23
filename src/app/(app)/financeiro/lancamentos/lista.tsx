@@ -3,16 +3,18 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Plus, Search } from "lucide-react";
+import { Paperclip, Plus, Search } from "lucide-react";
+import { Anexos } from "@/components/anexos";
 import { Badge, Botao, Card, Eyebrow, Select, Tabs, cx, inputCls } from "@/components/ui";
 import { desfazerDaParcela, rotuloForma, rotuloSituacao, type Lado, type Origem, type Situacao } from "@/domain/financeiro";
 import { motivoForaDoLote, type FiltroLancamentos } from "@/domain/financeiro-entrada";
 import { formatarReais } from "@/domain/dinheiro";
 import { baixarEmLote, desfazerBaixaLinha, desfazerRepasse } from "@/server/actions/financeiro";
+import type { AnexoItem } from "@/server/queries/anexos";
 import type { GrupoCategorias, LinhaLancamento, TotaisLancamentos } from "@/server/queries/financeiro";
 import { MSG_FALHA } from "../../viagens/[id]/acao";
 import { dataBr, reaisParaCampo } from "../../viagens/formatos";
-import { CampoConta, DialogoBaixa, contaPadrao, type ContaOpcao } from "./baixa";
+import { CampoConta, Dialogo, DialogoBaixa, contaPadrao, type ContaOpcao } from "./baixa";
 import { FormularioLancamento, type LancamentoForm, type Opcao } from "./formulario";
 
 type Aba = FiltroLancamentos["lado"];
@@ -72,6 +74,9 @@ type Props = {
   clientes: Opcao[];
   edicao: LancamentoForm | null;
   novo: Lado | null;
+  /** Linha com os anexos abertos (`?anexos=origem:id`) e os anexos dela (ou os do manual em edição). */
+  anexosDe: { origem: Origem; id: string } | null;
+  anexos: AnexoItem[];
 };
 
 export function ListaLancamentos(p: Props) {
@@ -94,7 +99,7 @@ export function ListaLancamentos(p: Props) {
     setRecusadas(new Map());
   };
   const ir = (mudar: Record<string, string | number | undefined>) => {
-    if (!("novo" in mudar) && !("editar" in mudar)) limparSelecao();
+    if (!("novo" in mudar) && !("editar" in mudar) && !("anexos" in mudar)) limparSelecao();
     router.push(urlDe(f, mudar));
   };
   const nomeCategoria = new Map(p.categorias.flatMap((g) => g.categorias.map((c) => [c.id, c.nome] as const)));
@@ -350,7 +355,21 @@ export function ListaLancamentos(p: Props) {
                         onChange={() => alternar(l)}
                       />
                     </td>
-                    <td className="num whitespace-nowrap px-3 py-3 text-[12.5px] text-cinza">{l.id.slice(0, 8)}</td>
+                    <td className="num whitespace-nowrap px-3 py-3 text-[12.5px] text-cinza">
+                      {l.id.slice(0, 8)}
+                      <button
+                        onClick={() => ir({ pagina: f.pagina, anexos: k })}
+                        aria-label={l.anexos > 0 ? `${l.anexos} ${l.anexos === 1 ? "anexo" : "anexos"}` : "Anexar arquivo"}
+                        title={l.anexos > 0 ? `${l.anexos} ${l.anexos === 1 ? "anexo" : "anexos"}` : "Anexar arquivo"}
+                        className={cx(
+                          "-ml-1 mt-0.5 flex cursor-pointer items-center gap-1 rounded-[4px] px-1 py-0.5 text-[12.5px] font-semibold hover:bg-verde/8",
+                          l.anexos > 0 ? "text-verde" : "text-[#A7A9AC] hover:text-verde",
+                        )}
+                      >
+                        <Paperclip size={14} aria-hidden />
+                        {l.anexos > 0 && <span>{l.anexos}</span>}
+                      </button>
+                    </td>
                     <td className="num whitespace-nowrap px-3 py-3">{dataBr(l.vencimento)}</td>
                     <td className="min-w-[260px] px-3 py-3">
                       <b className="block font-semibold">{l.pessoa || l.descricao}</b>
@@ -439,6 +458,14 @@ export function ListaLancamentos(p: Props) {
         </div>
       </Card>
 
+      {p.anexosDe && !p.edicao && (
+        <DialogoAnexos
+          linha={linhas.find((l) => l.origem === p.anexosDe!.origem && l.id === p.anexosDe!.id) ?? null}
+          dono={p.anexosDe}
+          anexos={p.anexos}
+          onFechar={() => router.push(urlDe(f, { pagina: f.pagina }))}
+        />
+      )}
       {baixando && <DialogoBaixa linha={baixando} hoje={hoje} contas={ativas} onFechar={() => setBaixando(null)} />}
       {(p.edicao || p.novo) && (
         <FormularioLancamento
@@ -450,9 +477,34 @@ export function ListaLancamentos(p: Props) {
           contas={ativas}
           fornecedores={p.fornecedores}
           clientes={p.clientes}
+          anexos={p.anexos}
           onFechar={() => router.push(urlDe(f, { pagina: f.pagina }))}
         />
       )}
     </div>
+  );
+}
+
+const ROTULO_ORIGEM: Record<Origem, string> = { manual: "Lançado à mão", parcela: "Parcela do cliente", pagamento: "Pagamento a fornecedor", comissao: "Comissão" };
+
+/** Anexos de qualquer linha da lista (abre pelo clipe da linha). */
+function DialogoAnexos({ linha, dono, anexos, onFechar }: { linha: LinhaLancamento | null; dono: { origem: Origem; id: string }; anexos: AnexoItem[]; onFechar: () => void }) {
+  const lado = linha ? (linha.lado === "pagar" ? "A pagar" : "A receber") : null;
+  return (
+    <Dialogo
+      eyebrow={[lado, ROTULO_ORIGEM[dono.origem], linha?.viagemCodigo ? `Viagem ${linha.viagemCodigo}` : null].filter(Boolean).join(" · ")}
+      titulo={linha ? linha.pessoa || linha.descricao : "Anexos"}
+      onFechar={onFechar}
+      rodape={<Botao variante="secundario" onClick={onFechar}>Fechar</Botao>}
+    >
+      <div className="px-6 py-5">
+        {linha && (
+          <p className="mb-4 text-[13px] text-cinza">
+            {linha.pessoa ? `${linha.descricao} · ` : ""}vence em {dataBr(linha.vencimento)} · <span className="num">{formatarReais(linha.valorPrevisto)}</span>
+          </p>
+        )}
+        <Anexos donoTipo={dono.origem} donoId={dono.id} anexos={anexos} />
+      </div>
+    </Dialogo>
   );
 }

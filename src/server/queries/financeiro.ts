@@ -7,6 +7,7 @@ import { filtroLancamentosSchema, type FiltroLancamentos } from "@/domain/financ
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
+import { contarAnexosDe } from "@/server/queries/anexos";
 import { saldoAtualSql } from "@/server/queries/caixa";
 import { db } from "@/server/db/client";
 import { categoriasFinanceiras, contasBancarias, contasPagar, lancamentos, lancamentosFinanceiros as lf, pagamentosFornecedor } from "@/server/db/schema";
@@ -100,6 +101,8 @@ export type LinhaLancamento = {
   contaBancaria: string | null;
   moeda: Moeda | null;
   valorOriginal: bigint | null;
+  /** Anexos não removidos da linha. */
+  anexos: number;
 };
 
 export type ListaLancamentos = { linhas: LinhaLancamento[]; totalLinhas: number; totais: TotaisLancamentos };
@@ -235,8 +238,14 @@ export async function listarLancamentos(filtro: FiltroLancamentos): Promise<List
   for (const t of totais) {
     porLado[t.lado] = { vencidos: BigInt(t.vencidos), venceHoje: BigInt(t.venceHoje), aVencer: BigInt(t.aVencer), baixados: BigInt(t.baixados) };
   }
+  // Anexos da página: uma consulta agrupada para as linhas mostradas.
+  const anexosPorLinha = await contarAnexosDe(linhas.map((l) => ({ donoTipo: l.origem, donoId: l.id })));
   return {
-    linhas: linhas.map(({ grupo, categoriaNome, ...l }) => ({ ...l, categoria: { grupo, nome: categoriaNome } })),
+    linhas: linhas.map(({ grupo, categoriaNome, ...l }) => ({
+      ...l,
+      categoria: { grupo, nome: categoriaNome },
+      anexos: anexosPorLinha.get(`${l.origem}:${l.id}`) ?? 0,
+    })),
     totalLinhas: contagem?.n ?? 0,
     totais: porLado,
   };

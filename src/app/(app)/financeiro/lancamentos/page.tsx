@@ -1,6 +1,9 @@
 import { PageHeader } from "@/components/ui";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { filtroDaUrl } from "@/domain/financeiro-entrada";
+import { ORIGENS, type Origem } from "@/domain/financeiro";
+import { ehUuid } from "@/server/acesso";
+import { listarAnexos } from "@/server/queries/anexos";
 import { listarClientes } from "@/server/queries/clientes";
 import { listarCategorias, listarContasBancarias, listarLancamentos, obterLancamento } from "@/server/queries/financeiro";
 import { listarFornecedores } from "@/server/queries/fornecedores";
@@ -11,6 +14,12 @@ type Params = Record<string, string | string[] | undefined>;
 
 const primeiro = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) || undefined;
 
+/** `?anexos=origem:id` abre os anexos de uma linha da lista. */
+function linhaDosAnexos(v: string | undefined): { origem: Origem; id: string } | null {
+  const [origem, id] = (v ?? "").split(":");
+  return (ORIGENS as readonly string[]).includes(origem) && id && ehUuid(id) ? { origem: origem as Origem, id } : null;
+}
+
 export default async function Pagina({ searchParams }: { searchParams: Promise<Params> }) {
   const sp = await searchParams;
   const hoje = hojeEmCuiaba();
@@ -18,13 +27,15 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
   const editar = primeiro(sp.editar);
   const novo = primeiro(sp.novo);
   const formularioAberto = Boolean(editar || novo);
-  const [lista, categorias, contas, edicao, fornecedores, clientes] = await Promise.all([
+  const anexosDe = editar ? null : linhaDosAnexos(primeiro(sp.anexos));
+  const [lista, categorias, contas, edicao, fornecedores, clientes, anexos] = await Promise.all([
     listarLancamentos(filtro),
     listarCategorias(),
     listarContasBancarias(),
     editar ? obterLancamento(editar) : Promise.resolve(null),
     formularioAberto ? listarFornecedores() : Promise.resolve([]),
     formularioAberto ? listarClientes() : Promise.resolve([]),
+    editar ? listarAnexos("manual", editar) : anexosDe ? listarAnexos(anexosDe.origem, anexosDe.id) : Promise.resolve([]),
   ]);
   const lancamento: LancamentoForm | null =
     edicao && edicao.status === "em_aberto"
@@ -68,6 +79,8 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
         clientes={clientes.map((x) => ({ id: x.id, nome: `${x.grupo} (${x.codigo})` }))}
         edicao={lancamento}
         novo={!lancamento && (novo === "pagar" || novo === "receber") ? novo : null}
+        anexosDe={anexosDe}
+        anexos={anexos}
       />
     </div>
   );

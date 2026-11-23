@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { Anexos } from "@/components/anexos";
 import { Botao, Campo, Tabs, inputCls } from "@/components/ui";
 import { FORMAS_FINANCEIRO, FREQUENCIAS, ROTULO_FORMA_FINANCEIRO, competenciaDe, type Frequencia, type Lado } from "@/domain/financeiro";
 import { cancelarLancamento, criarLancamento, editarLancamento } from "@/server/actions/financeiro";
+import type { AnexoItem } from "@/server/queries/anexos";
 import type { GrupoCategorias } from "@/server/queries/financeiro";
 import { useAcao } from "../../viagens/[id]/acao";
 import { reaisParaCampo } from "../../viagens/formatos";
@@ -49,6 +51,7 @@ export function FormularioLancamento({
   contas,
   fornecedores,
   clientes,
+  anexos = [],
   onFechar,
 }: {
   lancamento: LancamentoForm | null;
@@ -58,6 +61,8 @@ export function FormularioLancamento({
   contas: ContaOpcao[];
   fornecedores: Opcao[];
   clientes: Opcao[];
+  /** Anexos do lançamento em edição. */
+  anexos?: AnexoItem[];
   onFechar: () => void;
 }) {
   const acao = useAcao();
@@ -302,6 +307,7 @@ export function FormularioLancamento({
             <Campo label="Observação" className="col-span-6">
               <textarea rows={3} className={`${inputCls} ${marca(acao, "observacao")}`} value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Fica registrada com o seu nome e a data" />
             </Campo>
+            {l && <Anexos className="col-span-6" donoTipo="manual" donoId={l.id} anexos={anexos} />}
           </div>
         )}
         <ErroAcao acao={acao} />
