@@ -59,4 +59,11 @@ describe("perfis", () => {
     expect(podeAcessar("operacional", "/financeiro")).toBe(false);
     expect(PERFIS_FINANCEIRO).toEqual(["diretor", "fin_operacional", "fin_estrategico"]);
   });
+  it("tarefas, roteiros e dailies: todos os perfis acessam", () => {
+    for (const p of PERFIS_VALORES) {
+      expect(podeAcessar(p, "/tarefas")).toBe(true);
+      expect(podeAcessar(p, "/roteiros")).toBe(true);
+      expect(podeAcessar(p, "/dailies/x")).toBe(true);
+    }
+  });
 });
