@@ -141,6 +141,8 @@ export const MSG_REPASSE_MAIOR = "O repasse é maior que o esperado: atualize o 
 export const MSG_REPASSE_ESTRANGEIRA = "Dê baixa no pagamento em moeda estrangeira na viagem antes do repasse";
 export const MSG_NAO_CARTAO_FORNECEDOR = "Esta parcela não é de cartão direto no fornecedor";
 export const MSG_DESFACA_REPASSE = "Desfaça o repasse para trocar o fornecedor";
+export const MSG_ESCOLHA_FORNECEDOR_ANTES = "Escolha o fornecedor que recebeu no cartão antes de dar baixa";
+export const MSG_FORNECEDOR_JA_PAGO = "Este fornecedor já tem pagamento feito pela ECLAK: desfaça a baixa antes";
 
 /** Conta bancária da baixa: obrigatória (ativa: conferido no núcleo, na transação). Select vazio chega como "". */
 export const contaBancariaId = z.string({ error: MSG_CONTA_BANCARIA }).uuid(MSG_CONTA_BANCARIA);

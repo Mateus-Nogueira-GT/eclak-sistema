@@ -869,6 +869,16 @@ describe("conta bancária nas baixas da viagem (4a)", () => {
     expect(await obs(q.id)).toBe("Cliente pediu\nB");
   });
 
+  it("achado 5: o motivo do cancelamento é anexado à observação que havia (não a sobrescreve)", async () => {
+    const x = await vendida();
+    const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);
+    const p = x.parcelas[0];
+    expect(await fin(() => baixarParcela(p.id, { recebidaEm: "2026-11-21", valorRecebido: reais(p.valor), contaBancariaId: cb, observacao: "Pago em duas transferências" }))).toEqual({ ok: true });
+    expect(await fin(() => desfazerBaixaParcela(p.id))).toEqual({ ok: true });
+    expect(await fin(() => cancelarParcela(p.id, "Cliente pediu o cancelamento"))).toEqual({ ok: true });
+    expect((await db.select().from(parcelasReceber).where(eq(parcelasReceber.id, p.id)))[0].observacao).toBe("Pago em duas transferências\nCliente pediu o cancelamento");
+  });
+
   it("margem real idêntica à da 3b para o mesmo cenário (núcleo com conta × colunas gravadas à mão, sem conta)", async () => {
     const x = await vendida();
     const fin = (acao: () => Promise<unknown>) => comSessao(x.fin.id, acao);

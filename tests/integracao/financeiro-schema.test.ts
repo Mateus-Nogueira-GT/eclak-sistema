@@ -121,6 +121,15 @@ describe("esquema do financeiro: restrições de lançamentos", () => {
     await inserir({ status: "baixado", baixado_em: "2026-11-10", valor_pago: 420000, baixa_conta_bancaria_id: contaBancariaId });
   });
 
+  it("achado 6: parcela número e total vêm juntos (par meio-nulo recusado)", async () => {
+    await expect(inserir({ parcela_numero: 1 })).rejects.toThrow(/lancamentos_parcela/);
+    await expect(inserir({ parcela_total: 3 })).rejects.toThrow(/lancamentos_parcela/);
+    await expect(inserir({ parcela_numero: 0, parcela_total: 3 })).rejects.toThrow(/lancamentos_parcela/);
+    await expect(inserir({ parcela_numero: 4, parcela_total: 3 })).rejects.toThrow(/lancamentos_parcela/);
+    await inserir({ parcela_numero: 3, parcela_total: 3 });
+    await inserir({});
+  });
+
   it("forma é um dos nove slugs", async () => {
     await expect(inserir({ forma: "Boleto bancário" })).rejects.toThrow(/forma_financeiro/);
   });

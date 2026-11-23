@@ -121,7 +121,8 @@ export const lancamentos = pgTable(
     ),
     check(
       "lancamentos_parcela",
-      sql`(${t.parcelaNumero} IS NULL AND ${t.parcelaTotal} IS NULL) OR (${t.parcelaNumero} >= 1 AND ${t.parcelaTotal} >= ${t.parcelaNumero})`,
+      // num_nonnulls: o par meio-nulo (só número ou só total) é recusado (num CHECK, NULL passaria).
+      sql`num_nonnulls(${t.parcelaNumero}, ${t.parcelaTotal}) IN (0, 2) AND (${t.parcelaNumero} IS NULL OR (${t.parcelaNumero} >= 1 AND ${t.parcelaTotal} >= ${t.parcelaNumero}))`,
     ),
     index("lancamentos_em_aberto_vencimento_idx").on(t.vencimento).where(sql`${t.status} = 'em_aberto'`),
     index("lancamentos_grupo_idx").on(t.grupoId),

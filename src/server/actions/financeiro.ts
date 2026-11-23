@@ -42,6 +42,7 @@ import {
   baixarPagamentoNa,
   baixarParcelaNa,
   baixarRepasseNa,
+  contaBancariaAtiva,
   definirFornecedorCartaoNa,
   Desfazer as DesfazerNaViagem,
   desfazerBaixaPagamentoNa,
@@ -265,12 +266,9 @@ async function conferirReferencias(tx: Transacao, v: Entrada): Promise<void> {
   }
 }
 
+/** Conta bancária ativa (`for share`, a mesma leitura das baixas da viagem); senão recusa no `campo`. */
 async function contaAtiva(tx: Transacao, id: string, campo: string): Promise<void> {
-  const [conta] = await tx
-    .select({ id: contasBancarias.id })
-    .from(contasBancarias)
-    .where(and(eq(contasBancarias.id, id), eq(contasBancarias.ativa, true), isNull(contasBancarias.excluidoEm)));
-  if (!conta) throw new Desfazer(falha("Conta bancária não encontrada ou desativada", campo));
+  if (!(await contaBancariaAtiva(tx, id))) throw new Desfazer(falha("Conta bancária não encontrada ou desativada", campo));
 }
 
 /** O slug do enum a partir do rótulo da forma (o schema entrega o rótulo). */
@@ -381,11 +379,13 @@ export async function editarLancamento(id: string, dados: unknown, alcance: Alca
       if (t.alvo.status === "baixado") return falha(MSG_DESFACA_BAIXA);
       if (t.alvo.status === "cancelado") return falha("Lançamento cancelado não pode ser editado");
       await conferirReferencias(tx, v);
-      const comuns = camposComuns(v);
-      // "repeticao" não se aplica à edição. As datas só mudam na linha escolhida: cada parcela mantém as suas.
+      const { valor, ...semValor } = camposComuns(v);
+      // "repeticao" não se aplica à edição. As datas só mudam na linha escolhida: cada parcela mantém as suas. O
+      // valor só vai às próximas quando foi mudado na escolhida (senão a última parcela perderia o resto da divisão).
+      const nasOutras = valor === t.alvo.valor ? semValor : { ...semValor, valor };
       for (const l of t.afetadas) {
         const depois: Record<string, unknown> =
-          l.id === id ? { ...comuns, competencia: v.competencia, emissao: v.emissao, vencimento: v.vencimento } : { ...comuns };
+          l.id === id ? { ...semValor, valor, competencia: v.competencia, emissao: v.emissao, vencimento: v.vencimento } : { ...nasOutras };
         const mudou = Object.keys(depois).filter((k) => l[k as keyof LancamentoLinha] !== depois[k]);
         if (mudou.length === 0) continue;
         const parcial = Object.fromEntries(mudou.map((k) => [k, depois[k]]));

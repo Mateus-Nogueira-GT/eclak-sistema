@@ -4,7 +4,7 @@ vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { ErroAcesso } from "@/server/auth";
-import { db } from "@/server/db/client";
+import { db, sql } from "@/server/db/client";
 import {
   auditoria,
   categoriasFinanceiras,
@@ -31,8 +31,8 @@ import {
   salvarCategoria,
   salvarContaBancaria,
 } from "@/server/actions/financeiro";
-import { baixarPagamento, baixarParcela, desfazerBaixaPagamento, desfazerBaixaParcela } from "@/server/actions/financeiro-viagem";
-import { listarCategorias, listarContasBancarias } from "@/server/queries/financeiro";
+import { baixarPagamento, baixarParcela, cancelarParcela, desfazerBaixaPagamento, desfazerBaixaParcela } from "@/server/actions/financeiro-viagem";
+import { listarCategorias, listarContasBancarias, listarLancamentos } from "@/server/queries/financeiro";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
 import { contaBancaria, vendida, type Fixture } from "../helpers/venda";
@@ -162,6 +162,20 @@ describe("financeiro: categorias, contas e lançamentos manuais", () => {
       expect((await linhas(ids)).map((l) => l.valor)).toEqual([40000n, 33333n, 33334n]);
     });
 
+    it("achado 2: 'proximas' mudando só a categoria não reescreve o valor das seguintes (1.000,00 em 3)", async () => {
+      const ids = await criar({ repeticao: { tipo: "parcelado", parcelas: 3 } });
+      const ls = await linhas(ids);
+      expect(ls.map((l) => l.valor)).toEqual([33333n, 33333n, 33334n]);
+      const [outra] = await db.select().from(categoriasFinanceiras).where(eq(categoriasFinanceiras.nome, "Telefone"));
+      const r = await comSessao(c.fin, () =>
+        editarLancamento(ls[0].id, dados({ valor: "333,33", categoriaId: outra.id, vencimento: ls[0].vencimento, competencia: ls[0].competencia }), "proximas"),
+      );
+      expect(r.ok).toBe(true);
+      const depois = await linhas(ids);
+      expect(depois.map((l) => l.valor)).toEqual([33333n, 33333n, 33334n]);
+      expect(depois.every((l) => l.categoriaId === outra.id)).toBe(true);
+    });
+
     it("recusa lançamento baixado ou cancelado e audita antes/depois só do alterado", async () => {
       const [a, b] = await criar({ repeticao: { tipo: "parcelado", parcelas: 2 } }).then((i) => linhas(i));
       await comSessao(c.fin, () => baixarLancamento(a.id, { ...B(), valorPago: "500,00" }));
@@ -221,6 +235,30 @@ describe("financeiro: categorias, contas e lançamentos manuais", () => {
       await db.update(contasBancarias).set({ ativa: true }).where(eq(contasBancarias.id, c.conta));
       expect((await comSessao(c.fin, () => baixarLancamento(id, ok))).ok).toBe(true);
       expect((await comSessao(c.fin, () => baixarLancamento(id, ok))).ok).toBe(false);
+    });
+
+    it("achado 9: conta bancária desativada por outra transação ao mesmo tempo → a baixa espera e é recusada", async () => {
+      const [id] = await criar();
+      const outra = await sql.reserve();
+      let aberta = true;
+      try {
+        await outra`begin`;
+        await outra`update contas_bancarias set ativa = false where id = ${c.conta}`;
+        let pronto = false;
+        const baixa = comSessao(c.fin, () => baixarLancamento(id, { ...B(), valorPago: "1.000,00" })).finally(() => {
+          pronto = true;
+        });
+        await new Promise((r) => setTimeout(r, 400));
+        // Com `for share` na conta, a baixa espera a desativação terminar.
+        expect(pronto).toBe(false);
+        await outra`commit`;
+        aberta = false;
+        expect(await baixa).toMatchObject({ ok: false, erro: "Conta bancária não encontrada ou desativada" });
+      } finally {
+        if (aberta) await outra`rollback`;
+        outra.release();
+      }
+      expect((await db.select().from(lancamentos).where(eq(lancamentos.id, id)))[0].status).toBe("em_aberto");
     });
 
     it("desfazer volta a em_aberto, zera a baixa e audita antes/depois", async () => {
@@ -538,6 +576,69 @@ describe("repasse do cartão direto no fornecedor", () => {
       ok: false,
       erro: "Esta parcela não é de cartão direto no fornecedor",
     });
+  });
+
+  it("achado 1: repasse a menos → a linha e o card Recebidos mostram o valor repassado (o que entrou no banco)", async () => {
+    const x = await cartao();
+    const esperado = (await linhaDaView(x.parcelas[0].id)).valorPrevisto;
+    expect(await repasse(x, reais(esperado - 10000n))).toEqual({ ok: true });
+    expect(await linhaDaView(x.parcelas[0].id)).toMatchObject({ statusBase: "baixado", valorPrevisto: esperado, valorBaixado: esperado - 10000n, taxa: 10000n });
+    const lista = await comSessao(x.fin.id, () => listarLancamentos({ lado: "todos", de: "2000-01-01", ate: "2099-12-31", base: "vencimento", pagina: 1 }));
+    expect(lista.linhas.find((l) => l.origem === "parcela")).toMatchObject({ valorBaixado: esperado - 10000n, situacao: "baixada" });
+    expect(lista.totais.receber.baixados).toBe(esperado - 10000n);
+    // parcela comum recebida continua pelo valor recebido
+    const y = await vendida();
+    const q = y.parcelas[0];
+    expect(await comSessao(y.fin.id, () => baixarParcela(q.id, { recebidaEm: HOJE, valorRecebido: reais(q.valor), contaBancariaId: cb }))).toEqual({ ok: true });
+    expect((await linhaDaView(q.id)).valorBaixado).toBe(q.valor);
+  });
+
+  it("achado 4: parcela de cartão direto cancelada → a view e a baixa (pagoNoCartao) concordam: o fornecedor volta ao caixa", async () => {
+    const x = await cartao();
+    const pagamentoNaView = async () =>
+      (await db.select().from(lancamentosFinanceiros).where(and(eq(lancamentosFinanceiros.origem, "pagamento"), eq(lancamentosFinanceiros.id, x.pagHotel.id))))[0];
+    const baixa = () => comSessao(x.fin.id, () => baixarPagamento(x.pagHotel.id, { pagoEm: HOJE, valorOriginalPago: reais(x.pagHotel.valorOriginal), contaBancariaId: cb }));
+    // Ativa: fora do caixa na view e baixa direta recusada (as duas regras dizem "pago no cartão").
+    expect((await pagamentoNaView()).transitaCaixa).toBe(false);
+    expect(await baixa()).toEqual({ ok: false, erro: "Pago pelo cliente no cartão do fornecedor: use o repasse" });
+    // Cancelada: as duas regras dizem "não foi pago no cartão".
+    expect(await comSessao(x.fin.id, () => cancelarParcela(x.parcelas[0].id, "Cliente pagou à parte"))).toEqual({ ok: true });
+    expect((await pagamentoNaView()).transitaCaixa).toBe(true);
+    expect(await linhaDaView(x.parcelas[0].id)).toMatchObject({ repasse: false, statusBase: "cancelado", valorPrevisto: x.parcelas[0].valor });
+    expect(await baixa()).toEqual({ ok: true });
+  });
+
+  it("achado 8: venda antiga sem fornecedor do cartão → baixa de pagamento recusada até escolher", async () => {
+    const x = await cartao();
+    await db.update(vendas).set({ fornecedorCartaoId: null }).where(eq(vendas.viagemId, x.viagemId));
+    const ANTES = "Escolha o fornecedor que recebeu no cartão antes de dar baixa";
+    const antes = await estado(x);
+    for (const pg of [x.pagPasseio, x.pagHotel, x.pagAereo]) {
+      expect(await comSessao(x.fin.id, () => baixarPagamento(pg.id, { pagoEm: HOJE, valorOriginalPago: reais(pg.valorOriginal), contaBancariaId: cb }))).toEqual({ ok: false, erro: ANTES });
+    }
+    // em moeda estrangeira também (a regra vale para qualquer pagamento da viagem)
+    expect(
+      await comSessao(x.fin.id, () => baixarPagamento(x.pagTransfer.id, { pagoEm: HOJE, valorOriginalPago: reais(x.pagTransfer.valorOriginal), cambioEfetivo: "6,5000", contaBancariaId: cb })),
+    ).toEqual({ ok: false, erro: ANTES });
+    expect(await estado(x)).toBe(antes);
+    expect(await comSessao(x.fin.id, () => definirFornecedorCartao(x.viagemId, x.fornecedores.palazzo))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagPasseio.id, { pagoEm: HOJE, valorOriginalPago: reais(x.pagPasseio.valorOriginal), contaBancariaId: cb }))).toEqual({ ok: true });
+    // parcela cancelada: a venda deixa de ser cartão direto e a baixa segue sem fornecedor
+    const y = await vendida({ cartao: "hotel" });
+    await db.update(vendas).set({ fornecedorCartaoId: null }).where(eq(vendas.viagemId, y.viagemId));
+    expect(await comSessao(y.fin.id, () => cancelarParcela(y.parcelas[0].id, "Cliente desistiu do cartão"))).toEqual({ ok: true });
+    expect(await comSessao(y.fin.id, () => baixarPagamento(y.pagPasseio.id, { pagoEm: HOJE, valorOriginalPago: reais(y.pagPasseio.valorOriginal), contaBancariaId: cb }))).toEqual({ ok: true });
+  });
+
+  it("achado 8: definirFornecedorCartao recusa fornecedor com pagamento em reais já pago com conta bancária", async () => {
+    const x = await cartao();
+    const JA_PAGO = "Este fornecedor já tem pagamento feito pela ECLAK: desfaça a baixa antes";
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagPasseio.id, { pagoEm: HOJE, valorOriginalPago: reais(x.pagPasseio.valorOriginal), contaBancariaId: cb }))).toEqual({ ok: true });
+    const antes = await estado(x);
+    expect(await comSessao(x.fin.id, () => definirFornecedorCartao(x.viagemId, x.fornecedores.roma))).toEqual({ ok: false, erro: JA_PAGO, campos: { fornecedorCartaoId: JA_PAGO } });
+    expect(await estado(x)).toBe(antes);
+    expect(await comSessao(x.fin.id, () => desfazerBaixaPagamento(x.pagPasseio.id))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => definirFornecedorCartao(x.viagemId, x.fornecedores.roma))).toEqual({ ok: true });
   });
 
   it("perfis: consultor e operacional não fazem repasse nem escolhem o fornecedor", async () => {

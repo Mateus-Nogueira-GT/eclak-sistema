@@ -10,7 +10,9 @@ import {
   MSG_CONTA_BANCARIA,
   MSG_DESFACA_REPASSE,
   MSG_DIFERENCA_RECEBIDA,
+  MSG_ESCOLHA_FORNECEDOR_ANTES,
   MSG_FORNECEDOR_CARTAO,
+  MSG_FORNECEDOR_JA_PAGO,
   MSG_NAO_CARTAO_FORNECEDOR,
   MSG_NAO_VENDIDA,
   MSG_PAGO_NO_CARTAO,
@@ -168,12 +170,20 @@ export async function linhasDaConta(tx: Transacao, contaId: string): Promise<Pag
  * ser desativada no meio). Senão, "Escolha a conta bancária" no campo `contaBancariaId`.
  */
 async function recusaContaBancaria(tx: Transacao, contaBancariaId: string): Promise<Falha | null> {
+  return (await contaBancariaAtiva(tx, contaBancariaId)) ? null : falha(MSG_CONTA_BANCARIA, "contaBancariaId");
+}
+
+/**
+ * A conta bancária existe e está ativa? Trava a linha `for share` até o fim da transação (uma desativação ao mesmo
+ * tempo espera, ou esta espera por ela e relê). Usada por toda baixa: da viagem e do lançamento manual.
+ */
+export async function contaBancariaAtiva(tx: Transacao, contaBancariaId: string): Promise<boolean> {
   const [c] = await tx
     .select({ id: contasBancarias.id })
     .from(contasBancarias)
     .where(and(eq(contasBancarias.id, contaBancariaId), eq(contasBancarias.ativa, true), isNull(contasBancarias.excluidoEm)))
     .for("share");
-  return c ? null : falha(MSG_CONTA_BANCARIA, "contaBancariaId");
+  return c !== undefined;
 }
 
 /** A observação nova entra em linha nova no fim da que havia; sem nova, fica a que havia. */
@@ -255,9 +265,9 @@ export function desfazerBaixaParcelaNa(tx: Transacao, usuarioId: string, parcela
   );
 }
 
-/** Cancela a parcela em aberto, com motivo (fica na observação). `motivo` já validado. */
+/** Cancela a parcela em aberto, com motivo (acrescentado à observação, como na baixa). `motivo` já validado. */
 export function cancelarParcelaNa(tx: Transacao, usuarioId: string, parcelaId: string, motivo: string): Promise<Feito | Falha> {
-  return naParcela(tx, usuarioId, parcelaId, async (_t, p) => recusaParcelaFechada(p) ?? { status: "cancelada", observacao: motivo });
+  return naParcela(tx, usuarioId, parcelaId, async (_t, p) => recusaParcelaFechada(p) ?? { status: "cancelada", observacao: juntarObservacao(p.observacao, motivo) });
 }
 
 // ---------------------------------------------------------------------------
@@ -302,19 +312,30 @@ function noPagamento(
 }
 
 /**
+ * Venda de cartão direto no fornecedor da viagem: tem parcela `cartao_fornecedor` não cancelada (a mesma condição do
+ * `cartao_direto` da view `lancamentos_financeiros`, drizzle/0022). Devolve o fornecedor do cartão (nulo em venda
+ * antiga, sem ele) ou `null` se a venda não é de cartão direto (ou a parcela foi cancelada).
+ */
+async function vendaCartaoDireto(tx: Transacao, viagemId: string): Promise<{ fornecedorCartaoId: string | null } | null> {
+  const [v] = await tx
+    .select({ fornecedorCartaoId: vendas.fornecedorCartaoId })
+    .from(vendas)
+    .innerJoin(
+      parcelasReceber,
+      and(eq(parcelasReceber.vendaId, vendas.id), eq(parcelasReceber.meio, "cartao_fornecedor"), ne(parcelasReceber.status, "cancelada")),
+    )
+    .where(eq(vendas.viagemId, viagemId))
+    .limit(1);
+  return v ?? null;
+}
+
+/**
  * A conta é do fornecedor que recebeu no cartão numa venda de cartão direto da viagem (a mesma condição do
  * `no_cartao` da view): o cliente pagou esse fornecedor e a conta em reais é quitada só pelo repasse (que não
  * passa por `baixarPagamentoNa`). A em moeda estrangeira é baixada antes, na viagem, com o câmbio efetivo.
  */
-async function pagoNoCartao(tx: Transacao, conta: ContaLinha): Promise<boolean> {
-  if (!conta.fornecedorId) return false;
-  const [v] = await tx
-    .select({ id: vendas.id })
-    .from(vendas)
-    .innerJoin(parcelasReceber, and(eq(parcelasReceber.vendaId, vendas.id), eq(parcelasReceber.meio, "cartao_fornecedor")))
-    .where(and(eq(vendas.viagemId, conta.viagemId), eq(vendas.fornecedorCartaoId, conta.fornecedorId)))
-    .limit(1);
-  return v !== undefined;
+function pagoNoCartao(cartao: { fornecedorCartaoId: string | null } | null, conta: ContaLinha): boolean {
+  return cartao !== null && conta.fornecedorId !== null && cartao.fornecedorCartaoId === conta.fornecedorId;
 }
 
 /**
@@ -327,8 +348,12 @@ export function baixarPagamentoNa(tx: Transacao, usuarioId: string, pagamentoId:
   return noPagamento(tx, usuarioId, pagamentoId, async (t, p, conta) => {
     if (p.repasseParcelaId) return PAGO_PELO_REPASSE;
     if (p.status === "pago") return falha(MSG_PAGAMENTO_PAGO);
+    const cartao = await vendaCartaoDireto(t, conta.viagemId);
+    // Venda antiga de cartão direto sem o fornecedor do cartão: qualquer baixa espera a escolha (senão o pagamento
+    // feito pela ECLAK a esse fornecedor reduziria o repasse esperado depois).
+    if (cartao && !cartao.fornecedorCartaoId) return falha(MSG_ESCOLHA_FORNECEDOR_ANTES);
     // Em moeda estrangeira a baixa direta continua (com o câmbio): o repasse exige que ela venha antes.
-    if (conta.moeda === "BRL" && (await pagoNoCartao(t, conta))) return falha(MSG_PAGO_NO_CARTAO);
+    if (conta.moeda === "BRL" && pagoNoCartao(cartao, conta)) return falha(MSG_PAGO_NO_CARTAO);
     const cambio = conta.moeda === "BRL" ? null : cambioEfetivo;
     if (conta.moeda !== "BRL" && !cambio) return falha(MSG_CAMBIO_EFETIVO, "cambioEfetivo");
     const semConta = await recusaContaBancaria(t, contaBancariaId);
@@ -512,8 +537,16 @@ export function definirFornecedorCartaoNa(tx: Transacao, usuarioId: string, viag
         .for("update");
       if (parcelas.length === 0) return NAO_CARTAO_FORNECEDOR;
       if (parcelas.some((p) => p.status === "recebida")) return falha(MSG_DESFACA_REPASSE);
-      if ((await contasDoFornecedor(t, v.id, fornecedorId)).length === 0) return falha(MSG_FORNECEDOR_CARTAO, "fornecedorCartaoId");
+      const contas = await contasDoFornecedor(t, v.id, fornecedorId);
+      if (contas.length === 0) return falha(MSG_FORNECEDOR_CARTAO, "fornecedorCartaoId");
       if (venda.fornecedorCartaoId === fornecedorId) return OK;
+      // Pagamento em reais já feito pela ECLAK (com conta bancária) a esse fornecedor reduziria o repasse esperado.
+      for (const conta of contas) {
+        if (conta.moeda !== "BRL") continue;
+        if ((await linhasDaConta(t, conta.id)).some((l) => l.status === "pago" && l.contaBancariaId !== null)) {
+          return falha(MSG_FORNECEDOR_JA_PAGO, "fornecedorCartaoId");
+        }
+      }
       const depois = { fornecedorCartaoId: fornecedorId };
       await t.update(vendas).set(depois).where(eq(vendas.id, venda.id));
       await auditarAlteracao(t, usuarioId, "vendas", venda, depois);
