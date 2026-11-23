@@ -12,6 +12,7 @@ import {
   atualizarPrevisto,
   baixarPagamento,
   baixarParcela,
+  cancelarParcela,
   comissaoNaoRecebida,
   conciliar,
   contestar,
@@ -31,8 +32,12 @@ import { Vendas } from "./vendas";
 
 type Aba = "entradas" | "saidas" | "conciliacao" | "precificacao";
 
+/** Conta bancária ativa para as baixas (do servidor, só para quem age). */
+export type ContaBancariaOpcao = { id: string; nome: string };
+
 type Painel =
   | { tipo: "baixaParcela"; parcela: ParcelaVendida }
+  | { tipo: "cancelarParcela"; parcela: ParcelaVendida }
   | { tipo: "baixaPagamento"; conta: ContaVendida; pag: PagamentoVendido }
   | { tipo: "forma"; conta: ContaVendida }
   | { tipo: "comissaoTipo"; conta: ContaVendida }
@@ -43,6 +48,7 @@ type Painel =
 
 const ABA_DO_PAINEL: Record<Painel["tipo"], Aba> = {
   baixaParcela: "entradas",
+  cancelarParcela: "entradas",
   baixaPagamento: "saidas",
   forma: "saidas",
   comissaoTipo: "saidas",
@@ -139,9 +145,27 @@ const marca = (acao: ReturnType<typeof useAcao>, k: string) => (acao.campos[k] ?
 // Formulários (painéis em linha)
 // ---------------------------------------------------------------------------
 
-function FormBaixaParcela({ parcela, hoje, onFechar }: { parcela: ParcelaVendida; hoje: string; onFechar: () => void }) {
+/** Conta bancária escolhida por padrão: a única ativa, se só houver uma; senão nenhuma (escolha obrigatória). */
+const contaPadrao = (contas: ContaBancariaOpcao[]) => (contas.length === 1 ? contas[0].id : "");
+
+function CampoContaBancaria({ contas, valor, onChange, acao }: { contas: ContaBancariaOpcao[]; valor: string; onChange: (v: string) => void; acao: ReturnType<typeof useAcao> }) {
+  return (
+    <Campo label="Conta bancária">
+      <Select value={valor} onChange={onChange} className={`w-full ${marca(acao, "contaBancariaId")}`}>
+        <option value="">{contas.length === 0 ? "Nenhuma conta ativa" : "Escolha a conta"}</option>
+        {contas.map((c) => (
+          <option key={c.id} value={c.id}>{c.nome}</option>
+        ))}
+      </Select>
+      {contas.length === 0 && <span className="mt-1 block text-[12px] text-cinza">Cadastre em Financeiro › Contas bancárias.</span>}
+    </Campo>
+  );
+}
+
+function FormBaixaParcela({ parcela, hoje, contas, onFechar }: { parcela: ParcelaVendida; hoje: string; contas: ContaBancariaOpcao[]; onFechar: () => void }) {
   const acao = useAcao();
   const [data, setData] = useState(hoje);
+  const [conta, setConta] = useState(contaPadrao(contas));
   const [valor, setValor] = useState(reaisParaCampo(parcela.valor));
   const [taxa, setTaxa] = useState("");
   const [observacao, setObservacao] = useState("");
@@ -158,7 +182,10 @@ function FormBaixaParcela({ parcela, hoje, onFechar }: { parcela: ParcelaVendida
       rotuloEnviar="Confirmar baixa"
       onFechar={onFechar}
       onEnviar={() =>
-        acao.executar(() => baixarParcela(parcela.id, { recebidaEm: data, valorRecebido: valor, taxaEfetiva: taxa || null, observacao: observacao || null }), onFechar)
+        acao.executar(
+          () => baixarParcela(parcela.id, { recebidaEm: data, valorRecebido: valor, taxaEfetiva: taxa || null, observacao: observacao || null, contaBancariaId: conta }),
+          onFechar,
+        )
       }
     >
       <Campo label="Data do recebimento">
@@ -170,6 +197,7 @@ function FormBaixaParcela({ parcela, hoje, onFechar }: { parcela: ParcelaVendida
       <Campo label="Taxa efetiva (opcional)">
         <input className={`${inputCls} num ${marca(acao, "taxaEfetiva")}`} inputMode="decimal" placeholder="Deixe vazio para usar a prevista" value={taxa} onChange={(e) => setTaxa(e.target.value)} />
       </Campo>
+      <CampoContaBancaria contas={contas} valor={conta} onChange={setConta} acao={acao} />
       <Campo label={diferente ? "Observação (obrigatória: valor diferente da parcela)" : "Observação (opcional)"} className="sm:col-span-2 lg:col-span-4">
         <input
           className={`${inputCls} ${marca(acao, "observacao")}`}
@@ -182,9 +210,28 @@ function FormBaixaParcela({ parcela, hoje, onFechar }: { parcela: ParcelaVendida
   );
 }
 
-function FormBaixaPagamento({ conta, pag, hoje, onFechar }: { conta: ContaVendida; pag: PagamentoVendido; hoje: string; onFechar: () => void }) {
+function FormCancelarParcela({ parcela, onFechar }: { parcela: ParcelaVendida; onFechar: () => void }) {
+  const acao = useAcao();
+  const [motivo, setMotivo] = useState("");
+  return (
+    <Formulario
+      titulo={`Cancelar a parcela ${parcela.numero}/${parcela.totalParcelas}`}
+      acao={acao}
+      rotuloEnviar="Cancelar parcela"
+      onFechar={onFechar}
+      onEnviar={() => acao.executar(() => cancelarParcela(parcela.id, motivo), onFechar)}
+    >
+      <Campo label="Motivo" className="sm:col-span-2 lg:col-span-4">
+        <input className={`${inputCls} ${marca(acao, "motivo")}`} placeholder="Ex.: cliente pagou à parte" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+      </Campo>
+    </Formulario>
+  );
+}
+
+function FormBaixaPagamento({ conta, pag, hoje, contas, onFechar }: { conta: ContaVendida; pag: PagamentoVendido; hoje: string; contas: ContaBancariaOpcao[]; onFechar: () => void }) {
   const acao = useAcao();
   const [data, setData] = useState(hoje);
+  const [contaBancaria, setContaBancaria] = useState(contaPadrao(contas));
   const [valor, setValor] = useState(reaisParaCampo(pag.valorOriginal));
   const [cambio, setCambio] = useState("");
   const estrangeira = conta.moeda !== "BRL";
@@ -195,7 +242,10 @@ function FormBaixaPagamento({ conta, pag, hoje, onFechar }: { conta: ContaVendid
       rotuloEnviar="Confirmar baixa"
       onFechar={onFechar}
       onEnviar={() =>
-        acao.executar(() => baixarPagamento(pag.id, { pagoEm: data, valorOriginalPago: valor, cambioEfetivo: estrangeira ? cambio || null : null }), onFechar)
+        acao.executar(
+          () => baixarPagamento(pag.id, { pagoEm: data, valorOriginalPago: valor, cambioEfetivo: estrangeira ? cambio || null : null, contaBancariaId: contaBancaria }),
+          onFechar,
+        )
       }
     >
       <Campo label="Data do pagamento">
@@ -215,6 +265,7 @@ function FormBaixaPagamento({ conta, pag, hoje, onFechar }: { conta: ContaVendid
           />
         </Campo>
       )}
+      <CampoContaBancaria contas={contas} valor={contaBancaria} onChange={setContaBancaria} acao={acao} />
     </Formulario>
   );
 }
@@ -375,9 +426,10 @@ function FormContestar({ conta, onFechar }: { conta: ContaVendida; onFechar: () 
   );
 }
 
-function FormComissaoRecebida({ c, hoje, onFechar }: { c: ComissaoVendida; hoje: string; onFechar: () => void }) {
+function FormComissaoRecebida({ c, hoje, contas, onFechar }: { c: ComissaoVendida; hoje: string; contas: ContaBancariaOpcao[]; onFechar: () => void }) {
   const acao = useAcao();
   const [data, setData] = useState(hoje);
+  const [conta, setConta] = useState(contaPadrao(contas));
   const [valor, setValor] = useState(reaisParaCampo(c.valorPrevisto));
   return (
     <Formulario
@@ -385,7 +437,7 @@ function FormComissaoRecebida({ c, hoje, onFechar }: { c: ComissaoVendida; hoje:
       acao={acao}
       rotuloEnviar="Marcar recebida"
       onFechar={onFechar}
-      onEnviar={() => acao.executar(() => registrarComissao(c.id, { recebidaEm: data, valorRecebido: valor }), onFechar)}
+      onEnviar={() => acao.executar(() => registrarComissao(c.id, { recebidaEm: data, valorRecebido: valor, contaBancariaId: conta }), onFechar)}
     >
       <Campo label="Data do recebimento">
         <input type="date" max={hoje} className={`${inputCls} ${marca(acao, "recebidaEm")}`} value={data} onChange={(e) => setData(e.target.value)} />
@@ -393,6 +445,7 @@ function FormComissaoRecebida({ c, hoje, onFechar }: { c: ComissaoVendida; hoje:
       <Campo label="Valor recebido">
         <input className={`${inputCls} num ${marca(acao, "valorRecebido")}`} inputMode="decimal" value={valor} onChange={(e) => setValor(e.target.value)} />
       </Campo>
+      <CampoContaBancaria contas={contas} valor={conta} onChange={setConta} acao={acao} />
     </Formulario>
   );
 }
@@ -439,6 +492,7 @@ export function ViagemVendidaView({
   ehDiretor,
   margem,
   hoje,
+  contasBancarias,
 }: {
   v: ViagemVendida;
   ficha: FichaPrecificacao | null;
@@ -449,6 +503,8 @@ export function ViagemVendidaView({
   margem: { alvoPct: string; referenciaPct: string } | null;
   /** Hoje em Cuiabá, do servidor (limite das datas de baixa; a renderização do cliente não recalcula). */
   hoje: string;
+  /** Contas bancárias ativas para as baixas (vazio para quem não age). */
+  contasBancarias: ContaBancariaOpcao[];
 }) {
   const [aba, setAba] = useState<Aba>("entradas");
   const [painel, setPainel] = useState<Painel | null>(null);
@@ -546,13 +602,14 @@ export function ViagemVendidaView({
 
       {painelDaAba && (
         <div key={chave}>
-          {painelDaAba.tipo === "baixaParcela" && <FormBaixaParcela parcela={painelDaAba.parcela} hoje={hoje} onFechar={fechar} />}
-          {painelDaAba.tipo === "baixaPagamento" && <FormBaixaPagamento conta={painelDaAba.conta} pag={painelDaAba.pag} hoje={hoje} onFechar={fechar} />}
+          {painelDaAba.tipo === "baixaParcela" && <FormBaixaParcela parcela={painelDaAba.parcela} hoje={hoje} contas={contasBancarias} onFechar={fechar} />}
+          {painelDaAba.tipo === "cancelarParcela" && <FormCancelarParcela parcela={painelDaAba.parcela} onFechar={fechar} />}
+          {painelDaAba.tipo === "baixaPagamento" && <FormBaixaPagamento conta={painelDaAba.conta} pag={painelDaAba.pag} hoje={hoje} contas={contasBancarias} onFechar={fechar} />}
           {painelDaAba.tipo === "forma" && <FormForma conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "comissaoTipo" && <FormComissaoTipo conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "previsto" && <FormPrevisto conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "contestar" && <FormContestar conta={painelDaAba.conta} onFechar={fechar} />}
-          {painelDaAba.tipo === "comissaoRecebida" && <FormComissaoRecebida c={painelDaAba.c} hoje={hoje} onFechar={fechar} />}
+          {painelDaAba.tipo === "comissaoRecebida" && <FormComissaoRecebida c={painelDaAba.c} hoje={hoje} contas={contasBancarias} onFechar={fechar} />}
           {painelDaAba.tipo === "comissaoNao" && <FormComissaoNao c={painelDaAba.c} onFechar={fechar} />}
         </div>
       )}
@@ -583,18 +640,21 @@ function Entradas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: 
     p.status === "recebida" ? (
       <span key="s" className="flex flex-col items-start gap-1">
         <Badge tom="agua">Recebida em {dataBr(p.recebidaEm)}{p.valorRecebido !== null && p.valorRecebido !== p.valor ? ` (${formatarReais(p.valorRecebido)})` : ""}</Badge>
-        {p.observacao && <span className="text-[12px] text-cinza">{p.observacao}</span>}
+        {p.observacao && <span className="whitespace-pre-line text-[12px] text-cinza">{p.observacao}</span>}
       </span>
     ) : p.status === "cancelada" ? (
       <span key="s" className="flex flex-col items-start gap-1">
         <Badge tom="cinza">Cancelada</Badge>
-        {p.observacao && <span className="text-[12px] text-cinza">{p.observacao}</span>}
+        {p.observacao && <span className="whitespace-pre-line text-[12px] text-cinza">{p.observacao}</span>}
       </span>
     ) : (
       <Badge key="s" tom="cinza">A receber</Badge>
     ),
     agir && p.status === "a_receber" ? (
-      <BotaoMini key="a" onClick={() => abrir({ tipo: "baixaParcela", parcela: p })}>Dar baixa</BotaoMini>
+      <span key="a" className="inline-flex gap-1.5">
+        <BotaoMini onClick={() => abrir({ tipo: "baixaParcela", parcela: p })}>Dar baixa</BotaoMini>
+        <BotaoMini variante="fantasma" onClick={() => abrir({ tipo: "cancelarParcela", parcela: p })}>Cancelar parcela</BotaoMini>
+      </span>
     ) : agir && p.status === "recebida" ? (
       <AcaoDireta key="a" rotulo="Desfazer baixa" mini variante="fantasma" executar={() => desfazerBaixaParcela(p.id)} />
     ) : null,

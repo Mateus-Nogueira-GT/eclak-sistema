@@ -11,6 +11,7 @@ import { regrasVigentes } from "@/server/queries/regras";
 import { aprovar, enviarParaAprovacao } from "@/server/actions/aprovacoes";
 import { criarOrcamento, salvarCotacao, salvarItem, type ItemEntrada } from "@/server/actions/viagens";
 import { fecharVenda } from "@/server/actions/vendas";
+import { salvarContaBancaria } from "@/server/actions/financeiro";
 import { obterCliente } from "@/server/queries/clientes";
 import { comSessao, criarUsuarioTeste } from "./db";
 
@@ -23,6 +24,13 @@ export const souza: ClienteEntrada = {
 };
 
 const BOLETO2: FormaPagamento = { tipo: "boleto", parcelas: 2 };
+
+/** Conta bancária ativa criada pelo financeiro `uid` (nome único entre as ativas); devolve o id. */
+export async function contaBancaria(uid: string, nome = "Banco do Brasil"): Promise<string> {
+  const r = await comSessao(uid, () => salvarContaBancaria({ nome, banco: "001", saldoInicial: "0,00", saldoInicialEm: "2026-01-01" }));
+  if (!r.ok || !r.id) throw new Error(r.ok ? "Conta bancária sem id" : r.erro);
+  return r.id;
+}
 
 export async function fornecedor(uid: string, nome: string, modalidade: "net" | "comissionado", tipos: string[]) {
   const r = await comSessao(uid, () => salvarFornecedor({ nome, tipos, modalidade } as Parameters<typeof salvarFornecedor>[0]));

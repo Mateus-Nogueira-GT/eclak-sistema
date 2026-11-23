@@ -124,6 +124,10 @@ export const MSG_COMISSAO_REGISTRADA = "Comissão já registrada";
 export const MSG_COMISSAO_CANCELADA = "Comissão cancelada";
 export const MSG_COMISSAO_EM_ABERTO = "Esta comissão não foi registrada";
 export const MSG_SEM_FORNECEDOR = "Conta sem fornecedor: a comissão só pode ser descontada";
+export const MSG_CONTA_BANCARIA = "Escolha a conta bancária";
+
+/** Conta bancária da baixa: obrigatória (ativa: conferido no núcleo, na transação). Select vazio chega como "". */
+const contaBancariaId = z.string({ error: MSG_CONTA_BANCARIA }).uuid(MSG_CONTA_BANCARIA);
 
 const MAX_CENTAVOS = 999_999_999_999n;
 
@@ -167,8 +171,9 @@ export function baixaParcelaSchema(hoje: string = hojeEmCuiaba()) {
     valorRecebido: reais(false),
     /** Taxa cobrada de fato (maquininha, boleto); vazia = a prevista. */
     taxaEfetiva: reais(true),
-    /** Obrigatória (na action) quando o valor recebido é diferente do valor da parcela. */
+    /** Obrigatória (no núcleo) quando o valor recebido é diferente do valor da parcela; entra em linha nova. */
     observacao: texto(2000),
+    contaBancariaId,
   });
 }
 
@@ -190,12 +195,17 @@ export function baixaPagamentoSchema(hoje: string = hojeEmCuiaba()) {
           return z.NEVER;
         }
       }),
+    contaBancariaId,
   });
 }
 
 export function comissaoRecebidaSchema(hoje: string = hojeEmCuiaba()) {
-  return z.strictObject({ recebidaEm: dataBaixa(hoje), valorRecebido: reais(false) });
+  return z.strictObject({ recebidaEm: dataBaixa(hoje), valorRecebido: reais(false), contaBancariaId });
 }
+
+export type BaixaParcelaValidada = z.output<ReturnType<typeof baixaParcelaSchema>>;
+export type BaixaPagamentoValidada = z.output<ReturnType<typeof baixaPagamentoSchema>>;
+export type ComissaoRecebidaValidada = z.output<ReturnType<typeof comissaoRecebidaSchema>>;
 
 /** Forma de pagamento ao fornecedor. Parcelas na moeda da conta, somando o previsto (conferido na action). */
 export const formaFornecedorSchema = z.discriminatedUnion(
