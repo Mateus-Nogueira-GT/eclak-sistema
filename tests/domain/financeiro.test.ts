@@ -13,7 +13,9 @@ import {
   datasRecorrentes,
   dividirEmParcelas,
   rotuloSituacao,
+  rotuloForma,
 } from "@/domain/financeiro";
+import { motivoForaDoLote } from "@/domain/financeiro-entrada";
 
 describe("listas do financeiro", () => {
   it("formas na ordem e com o texto exato", () => {
@@ -104,5 +106,43 @@ describe("formas no banco (slug) e na tela (texto)", () => {
   });
   it("status do lançamento", () => {
     expect(STATUS_LANCAMENTO).toEqual(["em_aberto", "baixado", "cancelado"]);
+  });
+});
+
+describe("rotuloForma (slug da view → texto, por origem)", () => {
+  it("manual usa as formas do financeiro", () => {
+    expect(rotuloForma("manual", "boleto")).toBe("Boleto bancário");
+    expect(rotuloForma("manual", "pix")).toBe("PIX");
+    expect(rotuloForma("manual", "transferencia")).toBe("Transferência");
+  });
+  it("parcela usa o meio de recebimento", () => {
+    expect(rotuloForma("parcela", "boleto")).toBe("Boleto");
+    expect(rotuloForma("parcela", "pix")).toBe("Pix");
+    expect(rotuloForma("parcela", "cartao_credito")).toBe("Cartão de crédito");
+    expect(rotuloForma("parcela", "cartao_fornecedor")).toBe("Cartão direto no fornecedor");
+  });
+  it("pagamento usa a forma ao fornecedor", () => {
+    expect(rotuloForma("pagamento", "a_vista")).toBe("À vista");
+    expect(rotuloForma("pagamento", "parcelado")).toBe("Parcelado");
+    expect(rotuloForma("pagamento", "cartao_corporativo")).toBe("Cartão corporativo");
+  });
+  it("comissão é transferência", () => {
+    expect(rotuloForma("comissao", "transferencia")).toBe("Transferência");
+  });
+  it("slug desconhecido volta como veio", () => {
+    expect(rotuloForma("pagamento", "boleto")).toBe("boleto");
+  });
+});
+
+describe("motivoForaDoLote", () => {
+  const base = { origem: "manual", statusBase: "em_aberto", exigeIndividual: false, repasse: false, transitaCaixa: true } as const;
+  it("aceita a linha em aberto comum", () => expect(motivoForaDoLote(base)).toBeNull());
+  it("recusa baixada, cancelada, repasse, fora do caixa e moeda estrangeira", () => {
+    expect(motivoForaDoLote({ ...base, statusBase: "baixado" })).toBe("Já baixada");
+    expect(motivoForaDoLote({ ...base, statusBase: "cancelado" })).toBe("Cancelada");
+    expect(motivoForaDoLote({ ...base, origem: "parcela", repasse: true })).toMatch(/^Repasse do cartão/);
+    expect(motivoForaDoLote({ ...base, origem: "parcela", repasse: true, exigeIndividual: true })).toMatch(/escolha o fornecedor/);
+    expect(motivoForaDoLote({ ...base, origem: "pagamento", transitaCaixa: false })).toMatch(/Não passa pelo caixa/);
+    expect(motivoForaDoLote({ ...base, origem: "pagamento", exigeIndividual: true })).toMatch(/moeda estrangeira/);
   });
 });

@@ -156,6 +156,12 @@ export type ComissaoTipo = (typeof COMISSAO_TIPOS)[number];
 export const FORMAS_PAGAMENTO_FORNECEDOR = ["a_vista", "parcelado", "cartao_corporativo"] as const;
 export type FormaPagamentoFornecedorTipo = (typeof FORMAS_PAGAMENTO_FORNECEDOR)[number];
 
+export const ROTULO_FORMA_FORNECEDOR: Record<FormaPagamentoFornecedorTipo, string> = {
+  a_vista: "À vista",
+  parcelado: "Parcelado",
+  cartao_corporativo: "Cartão corporativo",
+};
+
 export const STATUS_PARCELA = ["a_receber", "recebida", "cancelada"] as const;
 export type StatusParcela = (typeof STATUS_PARCELA)[number];
 

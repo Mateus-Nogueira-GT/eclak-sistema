@@ -7,6 +7,7 @@ import {
   lancamentoSchema,
   loteSchema,
   repasseSchema,
+  filtroDaUrl,
 } from "@/domain/financeiro-entrada";
 
 const HOJE = "2026-11-22";
@@ -144,5 +145,26 @@ describe("categoria, conta bancária e filtro", () => {
     expect(filtroLancamentosSchema.safeParse({ ...f, pagina: 0 }).success).toBe(false);
     expect(filtroLancamentosSchema.safeParse({ ...f, busca: "x".repeat(101) }).success).toBe(false);
     expect(filtroLancamentosSchema.safeParse({ ...f, origem: "viagem", situacao: "vencida" }).success).toBe(true);
+  });
+});
+
+describe("filtroDaUrl", () => {
+  const HOJE = "2026-11-22";
+  it("sem parâmetros: A pagar, vencimento no mês corrente, página 1", () => {
+    expect(filtroDaUrl({}, HOJE)).toEqual({ lado: "pagar", base: "vencimento", de: "2026-11-01", ate: "2026-11-30", pagina: 1 });
+  });
+  it("lê os filtros, descarta vazios, desconhecidos e inválidos", () => {
+    const id = "6f1c1a52-0f43-4b8e-9a43-9b3f1d6e2a11";
+    expect(
+      filtroDaUrl(
+        { lado: "todos", de: "2026-01-01", ate: "2026-12-31", base: "competencia", situacao: "vencida", categoriaId: id, contaBancariaId: "", centro: "XX", origem: "viagem", busca: " Souza ", pagina: "3", outro: "x" },
+        HOJE,
+      ),
+    ).toEqual({ lado: "todos", de: "2026-01-01", ate: "2026-12-31", base: "competencia", situacao: "vencida", categoriaId: id, origem: "viagem", busca: "Souza", pagina: 3 });
+    expect(filtroDaUrl({ pagina: "0", lado: ["receber", "pagar"], de: "31/12/2026", grupo: "" }, HOJE)).toEqual({ lado: "receber", base: "vencimento", de: "2026-11-01", ate: "2026-11-30", pagina: 1 });
+  });
+  it("fevereiro e dezembro", () => {
+    expect(filtroDaUrl({}, "2028-02-10")).toMatchObject({ de: "2028-02-01", ate: "2028-02-29" });
+    expect(filtroDaUrl({}, "2026-12-31")).toMatchObject({ de: "2026-12-01", ate: "2026-12-31" });
   });
 });

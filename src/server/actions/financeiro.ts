@@ -1,25 +1,58 @@
 "use server";
 
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { ZodError } from "zod";
 import { hojeEmCuiaba } from "@/domain/clientes";
-import { dividirEmParcelas, datasRecorrentes, ROTULO_FORMA_FINANCEIRO, type FormaFinanceiroSlug } from "@/domain/financeiro";
-import { MSG_FORMA, baixaLancamentoSchema, categoriaSchema, contaBancariaSchema, lancamentoSchema, repasseSchema } from "@/domain/financeiro-entrada";
+import { dividirEmParcelas, datasRecorrentes, ORIGENS, ROTULO_FORMA_FINANCEIRO, type FormaFinanceiroSlug, type Origem } from "@/domain/financeiro";
+import {
+  MSG_FORMA,
+  MSG_LOTE_LADOS,
+  MSG_LOTE_RECUSADO,
+  baixaLancamentoSchema,
+  categoriaSchema,
+  contaBancariaSchema,
+  lancamentoSchema,
+  loteSchema,
+  motivoForaDoLote,
+  repasseSchema,
+} from "@/domain/financeiro-entrada";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
-import { MSG_FORNECEDOR_CARTAO, MSG_MOTIVO, obrigatorio } from "@/domain/venda-entrada";
+import {
+  MSG_FORNECEDOR_CARTAO,
+  MSG_MOTIVO,
+  baixaPagamentoSchema,
+  baixaParcelaSchema,
+  comissaoRecebidaSchema,
+  obrigatorio,
+} from "@/domain/venda-entrada";
 import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { revalidatePath } from "next/cache";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
-import { categoriasFinanceiras, clientes, contasBancarias, fornecedores, lancamentos } from "@/server/db/schema";
 import {
+  categoriasFinanceiras,
+  clientes,
+  contasBancarias,
+  fornecedores,
+  lancamentos,
+  lancamentosFinanceiros,
+  pagamentosFornecedor,
+} from "@/server/db/schema";
+import {
+  baixarPagamentoNa,
+  baixarParcelaNa,
   baixarRepasseNa,
   definirFornecedorCartaoNa,
   Desfazer as DesfazerNaViagem,
+  desfazerBaixaPagamentoNa,
+  desfazerBaixaParcelaNa,
+  desfazerComissaoNa,
   desfazerRepasseNa,
   ehFalha,
+  registrarComissaoNa,
   type Feito,
 } from "@/server/financeiro/baixas-viagem";
+import { travarViagem } from "@/server/trava-viagem";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -366,34 +399,49 @@ export async function editarLancamento(id: string, dados: unknown, alcance: Alca
   });
 }
 
+type BaixaLancamentoValidada = ReturnType<ReturnType<typeof baixaLancamentoSchema>["parse"]>;
+
+/** Baixa do lançamento manual na transação `tx` (a mesma da baixa individual e do lote). */
+async function baixarLancamentoNa(tx: Transacao, usuarioId: string, id: string, v: BaixaLancamentoValidada): Promise<Ok | Falha> {
+  const [l] = await tx.select().from(lancamentos).where(eq(lancamentos.id, id)).for("update");
+  if (!l) return LANCAMENTO_NAO_ENCONTRADO;
+  if (l.status === "baixado") return falha(l.lado === "pagar" ? "Lançamento já pago" : "Lançamento já recebido");
+  if (l.status === "cancelado") return falha("Lançamento cancelado");
+  if (v.valorPago !== l.valor + v.juros - v.desconto && !v.observacao) return falha(MSG_DIFERENCA_PAGO, "observacao");
+  await contaAtiva(tx, v.contaBancariaId, "contaBancariaId");
+  const depois = {
+    status: "baixado" as const,
+    baixadoEm: v.data,
+    valorPago: v.valorPago,
+    juros: v.juros,
+    desconto: v.desconto,
+    baixaContaBancariaId: v.contaBancariaId,
+    // A observação da baixa entra em nova linha no fim da observação do lançamento; desfazer a baixa não a remove.
+    observacao: v.observacao ? (l.observacao ? `${l.observacao}\n${v.observacao}` : v.observacao) : l.observacao,
+  };
+  await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, id));
+  const antes = Object.fromEntries(Object.keys(depois).map((k) => [k, l[k as keyof LancamentoLinha]]));
+  await registrarAuditoria(tx, { usuarioId, tabela: "lancamentos", registroId: id, acao: "alterar", antes, depois });
+  return { ok: true, id };
+}
+
+/** Desfaz a baixa do lançamento manual na transação `tx`. */
+async function desfazerBaixaLancamentoNa(tx: Transacao, usuarioId: string, id: string): Promise<Ok | Falha> {
+  const [l] = await tx.select().from(lancamentos).where(eq(lancamentos.id, id)).for("update");
+  if (!l) return LANCAMENTO_NAO_ENCONTRADO;
+  if (l.status !== "baixado") return falha("Este lançamento não foi baixado");
+  const depois = { status: "em_aberto" as const, baixadoEm: null, valorPago: null, juros: null, desconto: null, baixaContaBancariaId: null };
+  await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, id));
+  await auditarAlteracao(tx, usuarioId, "lancamentos", l, depois);
+  return { ok: true, id };
+}
+
 export async function baixarLancamento(id: string, dados: unknown) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
     const p = baixaLancamentoSchema(hojeEmCuiaba()).safeParse(dados);
     if (!p.success) return falhaDeValidacao(p.error);
-    const v = p.data;
     if (!ehUuid(id)) return LANCAMENTO_NAO_ENCONTRADO;
-    const r = await transacao("Falha ao baixar o lançamento", async (tx) => {
-      const [l] = await tx.select().from(lancamentos).where(eq(lancamentos.id, id)).for("update");
-      if (!l) return LANCAMENTO_NAO_ENCONTRADO;
-      if (l.status === "baixado") return falha(l.lado === "pagar" ? "Lançamento já pago" : "Lançamento já recebido");
-      if (l.status === "cancelado") return falha("Lançamento cancelado");
-      if (v.valorPago !== l.valor + v.juros - v.desconto && !v.observacao) return falha(MSG_DIFERENCA_PAGO, "observacao");
-      await contaAtiva(tx, v.contaBancariaId, "contaBancariaId");
-      const depois = {
-        status: "baixado" as const,
-        baixadoEm: v.data,
-        valorPago: v.valorPago,
-        juros: v.juros,
-        desconto: v.desconto,
-        baixaContaBancariaId: v.contaBancariaId,
-        // A observação da baixa entra em nova linha no fim da observação do lançamento; desfazer a baixa não a remove.
-        observacao: v.observacao ? (l.observacao ? `${l.observacao}\n${v.observacao}` : v.observacao) : l.observacao,
-      };
-      await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, id));
-      const antes = Object.fromEntries(Object.keys(depois).map((k) => [k, l[k as keyof LancamentoLinha]]));
-      await registrarAuditoria(tx, { usuarioId: u.id, tabela: "lancamentos", registroId: id, acao: "alterar", antes, depois });
-      return { ok: true, id };
-    });
+    const r = await transacao("Falha ao baixar o lançamento", (tx) => baixarLancamentoNa(tx, u.id, id, p.data));
     if (r.ok) revalidar();
     return r;
   });
@@ -402,15 +450,7 @@ export async function baixarLancamento(id: string, dados: unknown) {
 export async function desfazerBaixaLancamento(id: string) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
     if (!ehUuid(id)) return LANCAMENTO_NAO_ENCONTRADO;
-    const r = await transacao("Falha ao desfazer a baixa", async (tx) => {
-      const [l] = await tx.select().from(lancamentos).where(eq(lancamentos.id, id)).for("update");
-      if (!l) return LANCAMENTO_NAO_ENCONTRADO;
-      if (l.status !== "baixado") return falha("Este lançamento não foi baixado");
-      const depois = { status: "em_aberto" as const, baixadoEm: null, valorPago: null, juros: null, desconto: null, baixaContaBancariaId: null };
-      await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, id));
-      await auditarAlteracao(tx, u.id, "lancamentos", l, depois);
-      return { ok: true, id };
-    });
+    const r = await transacao("Falha ao desfazer a baixa", (tx) => desfazerBaixaLancamentoNa(tx, u.id, id));
     if (r.ok) revalidar();
     return r;
   });
@@ -491,5 +531,192 @@ export async function definirFornecedorCartao(viagemId: string, fornecedorId: st
     if (!ehUuid(viagemId)) return VIAGEM_NAO_ENCONTRADA;
     if (!ehUuid(fornecedorId)) return falha(MSG_FORNECEDOR_CARTAO, "fornecedorCartaoId");
     return naViagem("Erro ao escolher o fornecedor do cartão", (tx) => definirFornecedorCartaoNa(tx, u.id, viagemId, fornecedorId));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Lista única: baixa por linha (o mesmo núcleo da tela da viagem) e em lote
+// ---------------------------------------------------------------------------
+
+const ehOrigem = (o: unknown): o is Origem => typeof o === "string" && (ORIGENS as readonly string[]).includes(o);
+const ORIGEM_INVALIDA = falha("Origem inválida");
+const NAO_ENCONTRADO: Record<Origem, Falha> = {
+  manual: LANCAMENTO_NAO_ENCONTRADO,
+  parcela: PARCELA_NAO_ENCONTRADA,
+  pagamento: falha("Pagamento não encontrado"),
+  comissao: falha("Comissão não encontrada"),
+};
+
+/** Resultado do lançamento manual como a lista responde (sem ids), revalidando o financeiro. */
+async function noManual(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok | Falha>): Promise<{ ok: true } | Falha> {
+  const r = await transacao(mensagemErro, fn);
+  if (!r.ok) return r;
+  revalidar();
+  return { ok: true };
+}
+
+/**
+ * Baixa de uma linha da lista, pela origem: manual → baixa do lançamento; parcela, pagamento e comissão → o
+ * núcleo da viagem (`@/server/financeiro/baixas-viagem`), o mesmo da tela da viagem. `dados` tem os campos da
+ * baixa daquela origem (os mesmos da viagem). A parcela de repasse do cartão é recusada pelo núcleo ("Use o
+ * repasse do fornecedor"): a tela chama `baixarRepasse`.
+ */
+export async function baixarLinha(origem: Origem, id: string, dados: unknown) {
+  return comPerfil(FINANCEIRO, async (u): Promise<{ ok: true } | Falha> => {
+    if (!ehOrigem(origem)) return ORIGEM_INVALIDA;
+    if (!ehUuid(id)) return NAO_ENCONTRADO[origem];
+    switch (origem) {
+      case "manual": {
+        const p = baixaLancamentoSchema().safeParse(dados);
+        if (!p.success) return falhaDeValidacao(p.error);
+        return noManual("Falha ao baixar o lançamento", (tx) => baixarLancamentoNa(tx, u.id, id, p.data));
+      }
+      case "parcela": {
+        const p = baixaParcelaSchema().safeParse(dados);
+        if (!p.success) return falhaDeValidacao(p.error);
+        return naViagem("Erro ao baixar a parcela", (tx) => baixarParcelaNa(tx, u.id, id, p.data));
+      }
+      case "pagamento": {
+        const p = baixaPagamentoSchema().safeParse(dados);
+        if (!p.success) return falhaDeValidacao(p.error);
+        return naViagem("Erro ao baixar o pagamento", (tx) => baixarPagamentoNa(tx, u.id, id, p.data));
+      }
+      case "comissao": {
+        const p = comissaoRecebidaSchema().safeParse(dados);
+        if (!p.success) return falhaDeValidacao(p.error);
+        return naViagem("Erro ao registrar a comissão", (tx) => registrarComissaoNa(tx, u.id, id, p.data));
+      }
+    }
+  });
+}
+
+/** Desfaz a baixa de uma linha da lista, pela origem (o repasse do cartão volta por `desfazerRepasse`). */
+export async function desfazerBaixaLinha(origem: Origem, id: string) {
+  return comPerfil(FINANCEIRO, async (u): Promise<{ ok: true } | Falha> => {
+    if (!ehOrigem(origem)) return ORIGEM_INVALIDA;
+    if (!ehUuid(id)) return NAO_ENCONTRADO[origem];
+    switch (origem) {
+      case "manual":
+        return noManual("Falha ao desfazer a baixa", (tx) => desfazerBaixaLancamentoNa(tx, u.id, id));
+      case "parcela":
+        return naViagem("Erro ao desfazer a baixa da parcela", (tx) => desfazerBaixaParcelaNa(tx, u.id, id));
+      case "pagamento":
+        return naViagem("Erro ao desfazer a baixa do pagamento", (tx) => desfazerBaixaPagamentoNa(tx, u.id, id));
+      case "comissao":
+        return naViagem("Erro ao desfazer a comissão", (tx) => desfazerComissaoNa(tx, u.id, id));
+    }
+  });
+}
+
+type ItemLote = { origem: Origem; id: string };
+type LinhaRecusada = ItemLote & { motivo: string };
+type FalhaLote = Falha & { linhas?: LinhaRecusada[] };
+
+/** Recusa do lote dentro da transação: desfaz tudo o que já foi gravado e vira a falha fora dela. */
+class RecusaLote extends Error {
+  constructor(readonly falha: FalhaLote) {
+    super(falha.erro);
+  }
+}
+
+/** As linhas do lote na view, no estado atual (relidas depois das travas). */
+function linhasDoLote(tx: Transacao, itens: ItemLote[]) {
+  return tx
+    .select({
+      origem: lancamentosFinanceiros.origem,
+      id: lancamentosFinanceiros.id,
+      lado: lancamentosFinanceiros.lado,
+      statusBase: lancamentosFinanceiros.statusBase,
+      exigeIndividual: lancamentosFinanceiros.exigeIndividual,
+      repasse: lancamentosFinanceiros.repasse,
+      transitaCaixa: lancamentosFinanceiros.transitaCaixa,
+      viagemId: lancamentosFinanceiros.viagemId,
+      valorPrevisto: lancamentosFinanceiros.valorPrevisto,
+      taxa: lancamentosFinanceiros.taxa,
+    })
+    .from(lancamentosFinanceiros)
+    .where(or(...itens.map((i) => and(eq(lancamentosFinanceiros.origem, i.origem), eq(lancamentosFinanceiros.id, i.id)))));
+}
+type LinhaLote = Awaited<ReturnType<typeof linhasDoLote>>[number];
+
+/**
+ * Confere o lote inteiro: toda linha existe, está em aberto e não exige dado individual (moeda estrangeira,
+ * repasse do cartão, fora do caixa), e todas são do mesmo lado. Devolve a recusa com as linhas a tirar, ou `null`.
+ */
+function recusaDoLote(itens: ItemLote[], linhas: LinhaLote[]): FalhaLote | null {
+  const achar = (i: ItemLote) => linhas.find((l) => l.origem === i.origem && l.id === i.id);
+  const recusadas: LinhaRecusada[] = [];
+  for (const i of itens) {
+    const l = achar(i);
+    const motivo = l ? motivoForaDoLote(l) : "Linha não encontrada";
+    if (motivo) recusadas.push({ ...i, motivo });
+  }
+  if (recusadas.length > 0) return { ok: false, erro: MSG_LOTE_RECUSADO, linhas: recusadas };
+  const lado = achar(itens[0])!.lado;
+  const outroLado = itens.filter((i) => achar(i)!.lado !== lado).map((i) => ({ ...i, motivo: MSG_LOTE_LADOS }));
+  return outroLado.length > 0 ? { ok: false, erro: MSG_LOTE_LADOS, linhas: outroLado } : null;
+}
+
+/** Baixa uma linha do lote pelo valor previsto, com a data e a conta do lote (o mesmo código da baixa individual). */
+async function baixarPeloPrevisto(tx: Transacao, usuarioId: string, l: LinhaLote, data: string, contaBancariaId: string): Promise<{ ok: true } | Falha> {
+  switch (l.origem) {
+    case "manual":
+      return baixarLancamentoNa(tx, usuarioId, l.id, { data, valorPago: l.valorPrevisto, juros: 0n, desconto: 0n, contaBancariaId, observacao: null });
+    case "parcela":
+      // Taxa prevista como efetiva (cartão e boleto); valor recebido = o da parcela.
+      return baixarParcelaNa(tx, usuarioId, l.id, { recebidaEm: data, valorRecebido: l.valorPrevisto, taxaEfetiva: l.taxa, observacao: null, contaBancariaId });
+    case "pagamento": {
+      // Só BRL chega aqui (moeda estrangeira exige baixa individual): o valor pago é o valor original da linha.
+      const [p] = await tx.select({ valorOriginal: pagamentosFornecedor.valorOriginal }).from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, l.id));
+      if (!p) return NAO_ENCONTRADO.pagamento;
+      return baixarPagamentoNa(tx, usuarioId, l.id, { pagoEm: data, valorOriginalPago: p.valorOriginal, cambioEfetivo: null, contaBancariaId });
+    }
+    case "comissao":
+      return registrarComissaoNa(tx, usuarioId, l.id, { recebidaEm: data, valorRecebido: l.valorPrevisto, contaBancariaId });
+  }
+}
+
+/**
+ * Baixa em lote: as linhas marcadas (em aberto, do mesmo lado) baixadas pelo valor previsto, com a data e a conta
+ * do lote, numa transação só. Recusa o lote inteiro, dizendo as linhas a tirar, se alguma exige dado individual,
+ * não está em aberto ou é do outro lado. Trava as viagens envolvidas em ordem crescente de id antes de qualquer
+ * escrita, relê as linhas depois das travas e grava (manuais por id, depois as de viagem por viagem e id);
+ * qualquer recusa no meio desfaz tudo.
+ */
+export async function baixarEmLote(dados: unknown) {
+  return comPerfil(FINANCEIRO, async (u): Promise<{ ok: true } | FalhaLote> => {
+    const p = loteSchema().safeParse(dados);
+    if (!p.success) return falhaDeValidacao(p.error);
+    const { itens, data, contaBancariaId } = p.data;
+    let viagensAlteradas: string[];
+    try {
+      viagensAlteradas = await db.transaction(async (tx) => {
+        const lidas = await linhasDoLote(tx, itens);
+        const recusaAntes = recusaDoLote(itens, lidas);
+        if (recusaAntes) throw new RecusaLote(recusaAntes);
+        const ids = [...new Set(lidas.map((l) => l.viagemId).filter((v): v is string => v !== null))].sort();
+        for (const v of ids) await travarViagem(tx, v);
+        // Depois das travas: o estado pode ter mudado entre a leitura e a escrita.
+        const linhas = await linhasDoLote(tx, itens);
+        const recusa = recusaDoLote(itens, linhas);
+        if (recusa) throw new RecusaLote(recusa);
+        const ordem = (l: LinhaLote) => `${l.viagemId ?? ""}|${l.origem}|${l.id}`;
+        for (const l of [...linhas].sort((a, b) => (ordem(a) < ordem(b) ? -1 : ordem(a) > ordem(b) ? 1 : 0))) {
+          const r = await baixarPeloPrevisto(tx, u.id, l, data, contaBancariaId);
+          if (ehFalha(r)) throw new RecusaLote({ ...r, linhas: [{ origem: l.origem, id: l.id, motivo: r.erro }] });
+        }
+        return ids;
+      });
+    } catch (x) {
+      if (x instanceof RecusaLote || x instanceof Desfazer || x instanceof DesfazerNaViagem) return x.falha;
+      throw erroDeBanco("Falha ao baixar o lote", x);
+    }
+    revalidar();
+    if (viagensAlteradas.length > 0) {
+      revalidatePath("/viagens");
+      revalidatePath("/vendas");
+      for (const v of viagensAlteradas) revalidatePath(`/viagens/${v}`);
+    }
+    return { ok: true };
   });
 }

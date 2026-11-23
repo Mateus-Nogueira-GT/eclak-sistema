@@ -10,6 +10,8 @@ export const MSG_VALOR_ZERO = "Informe um valor maior que zero";
 export const MSG_FORMA = "Forma de pagamento inválida";
 export const MSG_DATA_FUTURA = "A data não pode ser futura";
 export const MSG_LINHA_REPETIDA = "Linha repetida no lote";
+export const MSG_LOTE_RECUSADO = "Tire do lote as linhas indicadas: elas pedem baixa individual";
+export const MSG_LOTE_LADOS = "Escolha linhas de um lado só (a pagar ou a receber)";
 const MSG_DATA = "Informe a data";
 const MSG_COMPETENCIA = "Competência inválida";
 const MSG_ID = "Identificador inválido";
@@ -106,6 +108,28 @@ export function loteSchema(hoje: string = hojeEmCuiaba()) {
   });
 }
 
+/** A linha da view, no que o lote confere. */
+export type LinhaDoLote = {
+  origem: (typeof ORIGENS)[number];
+  statusBase: "em_aberto" | "baixado" | "cancelado";
+  exigeIndividual: boolean;
+  repasse: boolean;
+  transitaCaixa: boolean;
+};
+
+/**
+ * Por que a linha não entra no lote (baixa pelo valor previsto, com data e conta do lote), ou `null` se entra.
+ * Ordem: estado da linha, depois o dado individual que ela exige.
+ */
+export function motivoForaDoLote(l: LinhaDoLote): string | null {
+  if (l.statusBase === "baixado") return "Já baixada";
+  if (l.statusBase === "cancelado") return "Cancelada";
+  if (l.repasse) return l.exigeIndividual ? "Repasse sem fornecedor do cartão: escolha o fornecedor na viagem" : "Repasse do cartão direto no fornecedor: dê baixa individual";
+  if (!l.transitaCaixa) return "Não passa pelo caixa: pago pelo cliente no cartão do fornecedor";
+  if (l.exigeIndividual) return "Pagamento em moeda estrangeira: dê baixa individual com o câmbio efetivo";
+  return null;
+}
+
 /** Repasse do cartão direto no fornecedor: o repasse pode ser zero (o fornecedor reteve tudo). */
 export function repasseSchema(hoje: string = hojeEmCuiaba()) {
   return z.strictObject({
@@ -161,3 +185,27 @@ export const filtroLancamentosSchema = z.strictObject({
   pagina: z.number({ error: "Página inválida" }).int("Página inválida").min(1, "Página inválida"),
 });
 export type FiltroLancamentos = z.infer<typeof filtroLancamentosSchema>;
+
+/** Último dia do mês de "AAAA-MM-DD". */
+function fimDoMes(data: string): string {
+  const [a, m] = data.split("-").map(Number);
+  return new Date(Date.UTC(a, m, 0)).toISOString().slice(0, 10);
+}
+
+/**
+ * Filtro da lista a partir dos parâmetros da URL: vazios, desconhecidos e inválidos são descartados (cada um vale
+ * o padrão); padrão = A pagar, por vencimento, no mês de `hoje`, página 1. Repetido na URL vale o primeiro.
+ */
+export function filtroDaUrl(params: Record<string, string | string[] | undefined>, hoje: string): FiltroLancamentos {
+  const forma = filtroLancamentosSchema.shape;
+  const filtro: Record<string, unknown> = { lado: "pagar", base: "vencimento", de: `${hoje.slice(0, 8)}01`, ate: fimDoMes(hoje), pagina: 1 };
+  for (const [k, bruto] of Object.entries(params)) {
+    if (!Object.hasOwn(forma, k)) continue;
+    const texto = (Array.isArray(bruto) ? bruto[0] : bruto)?.trim();
+    if (!texto) continue;
+    const valor = k === "pagina" ? Number(texto) : texto;
+    const r = forma[k as keyof typeof forma].safeParse(valor);
+    if (r.success && r.data !== undefined) filtro[k] = r.data;
+  }
+  return filtroLancamentosSchema.parse(filtro);
+}

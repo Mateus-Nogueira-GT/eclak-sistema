@@ -7,7 +7,7 @@ import { Grade, Semaforo, SoGestao } from "@/components/kit";
 import { Badge, Botao, Campo, Card, CardHeader, Eyebrow, Select, Tabs, inputCls } from "@/components/ui";
 import { formatarCambio } from "@/domain/cambio";
 import { formatarReais, lerReais } from "@/domain/dinheiro";
-import type { ComissaoTipo, FormaPagamentoFornecedorTipo, LinhaPonte } from "@/domain/venda";
+import { ROTULO_FORMA_FORNECEDOR, type ComissaoTipo, type FormaPagamentoFornecedorTipo, type LinhaPonte } from "@/domain/venda";
 import {
   atualizarPrevisto,
   baixarPagamento,
@@ -347,12 +347,6 @@ function FormBaixaPagamento({ conta, pag, hoje, contas, onFechar }: { conta: Con
     </Formulario>
   );
 }
-
-const ROTULO_FORMA_FORNECEDOR: Record<FormaPagamentoFornecedorTipo, string> = {
-  a_vista: "À vista",
-  parcelado: "Parcelado",
-  cartao_corporativo: "Cartão corporativo",
-};
 
 function somaCampos(valores: string[]): bigint | null {
   try {

@@ -1,5 +1,5 @@
 import type { Filial } from "./perfis";
-import { cronogramaRecebimento, somarMeses } from "./venda";
+import { cronogramaRecebimento, ROTULO_FORMA_FORNECEDOR, ROTULO_MEIO, somarMeses } from "./venda";
 
 // Domínio do financeiro (fatia 4a): listas, parcelamento e recorrência de lançamentos. Datas "AAAA-MM-DD".
 
@@ -63,6 +63,16 @@ export function centroDaFilial(filial: Filial): Centro {
 /** De onde vem a linha da view `lancamentos_financeiros`. */
 export const ORIGENS = ["manual", "parcela", "pagamento", "comissao"] as const;
 export type Origem = (typeof ORIGENS)[number];
+
+/**
+ * Rótulo da `forma` da view (slug) conforme a origem: manual = formas do financeiro; parcela = meio de
+ * recebimento; pagamento = forma ao fornecedor; comissão = transferência. Slug desconhecido volta como veio.
+ */
+export function rotuloForma(origem: Origem, slug: string): string {
+  const tabela: Record<string, string> =
+    origem === "manual" ? ROTULO_FORMA_FINANCEIRO : origem === "parcela" ? ROTULO_MEIO : origem === "pagamento" ? ROTULO_FORMA_FORNECEDOR : { transferencia: "Transferência" };
+  return Object.hasOwn(tabela, slug) ? tabela[slug] : slug;
+}
 
 export const SITUACOES = ["vencida", "vence_hoje", "a_vencer", "baixada", "cancelada"] as const;
 export type Situacao = (typeof SITUACOES)[number];
