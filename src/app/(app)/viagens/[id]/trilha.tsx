@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { dataBr } from "@/domain/tarefas";
 import type { CabecalhoViagem } from "@/server/queries/operacao";
-import { cx } from "@/components/ui";
 
 export type AbaTrilha = "viagem" | "roteiro" | "tarefas" | "dailies";
 
@@ -35,7 +34,7 @@ export function Trilha({ viagem, ativa }: { viagem: CabecalhoViagem; ativa: AbaT
             key={a.id}
             href={`/viagens/${viagem.id}${a.caminho}`}
             aria-current={a.id === ativa ? "page" : undefined}
-            className={cx("-mb-px border-b-2 pb-2 text-[14px] transition-colors", a.id === ativa ? "border-verde font-bold text-verde" : "border-transparent font-medium text-cinza hover:text-texto")}
+            className={`-mb-px border-b-2 pb-2 text-[14px] transition-colors ${a.id === ativa ? "border-verde font-bold text-verde" : "border-transparent font-medium text-cinza hover:text-texto"}`}
           >
             {a.rotulo}
           </Link>

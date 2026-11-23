@@ -27,6 +27,8 @@ import {
   novaFormaSchema,
   pedidoClienteSchema,
 } from "@/domain/venda-entrada";
+import { hojeEmCuiaba } from "@/domain/clientes";
+import { tarefasDaVenda } from "@/domain/tarefas";
 import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
@@ -40,6 +42,7 @@ import {
   versoesPrecificacao,
   viagens,
 } from "@/server/db/schema";
+import { criarTarefasAutomaticas } from "@/server/operacao/tarefas-automaticas";
 import { regrasDaVersao } from "@/server/queries/regras";
 import { travarViagem } from "@/server/trava-viagem";
 
@@ -159,6 +162,7 @@ function revalidar(viagemId: string) {
   revalidatePath("/viagens");
   revalidatePath(`/viagens/${viagemId}`);
   revalidatePath("/aprovacoes");
+  revalidatePath("/tarefas");
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +319,8 @@ export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): P
         }
 
         await mudarViagem(tx, usuario.id, v, { status: "vendida", vendidaEm: agora }, agora);
+        // As 5 tarefas da venda nascem na mesma transação (viagem travada); "venda" = o dia de `vendidaEm` em Cuiabá.
+        await criarTarefasAutomaticas(tx, usuario.id, v, tarefasDaVenda(hojeEmCuiaba(agora), v.inicio), "venda");
         return { id: venda.id };
       });
     } catch (x) {
