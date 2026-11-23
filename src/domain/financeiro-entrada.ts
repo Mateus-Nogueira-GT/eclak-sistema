@@ -15,11 +15,15 @@ const MSG_COMPETENCIA = "Competência inválida";
 const MSG_ID = "Identificador inválido";
 
 const uuid = z.string({ error: MSG_ID }).uuid(MSG_ID);
-const uuidOpcional = z
-  .string({ error: MSG_ID })
-  .uuid(MSG_ID)
-  .nullish()
-  .transform((v) => v ?? null);
+/** Select vazio de formulário chega como "" e vale null. */
+const uuidOpcional = z.preprocess(
+  (v) => (v === "" ? null : v),
+  z
+    .string({ error: MSG_ID })
+    .uuid(MSG_ID)
+    .nullish()
+    .transform((v) => v ?? null),
+);
 
 /** Valor em reais maior que zero. */
 const positivo = reais(false).refine((v) => v > 0n, MSG_VALOR_ZERO);
