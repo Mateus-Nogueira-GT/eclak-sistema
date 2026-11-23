@@ -55,9 +55,9 @@ export async function cotacao(uid: string, itemId: string, dados: Record<string,
  * Viagem vendida em boleto 2x: hotel em fornecedor comissionado (3.106,00, 4% a receber, 4% à vista), passeio net
  * (500,00), transfer em EUR net (1.000,00 EUR), aéreo (8.000,00) e a taxa de roteiro automática. Com `cartao`, a
  * venda é "Cartão direto no fornecedor" (1 parcela) recebida no cartão desse fornecedor (hotel = Palazzo Hotels,
- * passeio = Roma Tours, transfer = Euro Transfer).
+ * passeio = Roma Tours, transfer = Euro Transfer). `forma` troca a forma de pagamento (ex.: crédito com antecipação).
  */
-export async function vendida(o: { florenca?: boolean; cartao?: "hotel" | "passeio" | "transfer" } = {}) {
+export async function vendida(o: { florenca?: boolean; cartao?: "hotel" | "passeio" | "transfer"; forma?: FormaPagamento } = {}) {
   const u = await criarUsuarioTeste("consultor");
   const d = await criarUsuarioTeste("diretor");
   const fin = await criarUsuarioTeste("fin_operacional");
@@ -88,7 +88,7 @@ export async function vendida(o: { florenca?: boolean; cartao?: "hotel" | "passe
   // Opcional: o hotel de Florença do caso Ribeiro (4.100,00 net, sem desconto à vista).
   const florenca = o.florenca ? await item(u.id, viagemId, { tipo: "Hotelaria", servico: "Palazzo Lungarno Nove", cidade: "Florença", diarias: 3 }) : null;
   if (florenca) await cotacao(u.id, florenca, { valor: "4.100,00", fornecedorId: await fornecedor(u.id, "Lungarno Hotels", "net", ["Hotelaria"]) });
-  const forma = o.cartao ? CARTAO_FORNECEDOR : BOLETO2;
+  const forma = o.forma ?? (o.cartao ? CARTAO_FORNECEDOR : BOLETO2);
   const fornecedorCartaoId = o.cartao ? { hotel: palazzo, passeio: roma, transfer: euro }[o.cartao] : undefined;
   const e = await comSessao(u.id, () => enviarParaAprovacao(viagemId, { forma, alteracao: "Primeira versão" }));
   if (!e.ok) throw new Error(e.erro);

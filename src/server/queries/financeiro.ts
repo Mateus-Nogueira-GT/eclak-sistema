@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, gte, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, gte, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import type { Moeda } from "@/domain/cambio";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { LADOS, type Lado, type Origem, type Situacao } from "@/domain/financeiro";
@@ -7,6 +7,7 @@ import { filtroLancamentosSchema, type FiltroLancamentos } from "@/domain/financ
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
+import { saldoAtualSql } from "@/server/queries/caixa";
 import { db } from "@/server/db/client";
 import { categoriasFinanceiras, contasBancarias, contasPagar, lancamentos, lancamentosFinanceiros as lf, pagamentosFornecedor } from "@/server/db/schema";
 
@@ -45,14 +46,14 @@ export async function listarCategorias(lado?: Lado): Promise<GrupoCategorias[]> 
   return grupos;
 }
 
-export type ContaBancariaItem = typeof contasBancarias.$inferSelect;
+export type ContaBancariaItem = typeof contasBancarias.$inferSelect & { saldoAtual: bigint };
 
-/** Contas bancárias não excluídas, por nome; `ativas: true` só as ativas. */
+/** Contas bancárias não excluídas, por nome, com o saldo atual; `ativas: true` só as ativas. */
 export async function listarContasBancarias(filtro: { ativas?: boolean } = {}): Promise<ContaBancariaItem[]> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
   const sem = isNull(contasBancarias.excluidoEm);
   return db
-    .select()
+    .select({ ...getTableColumns(contasBancarias), saldoAtual: saldoAtualSql })
     .from(contasBancarias)
     .where(filtro.ativas ? sql`${sem} and ${contasBancarias.ativa}` : sem)
     .orderBy(asc(contasBancarias.nome));

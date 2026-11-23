@@ -1,9 +1,37 @@
 // Domínio do caixa e do cartão corporativo. Funções puras, sem I/O.
 // Dinheiro em bigint centavos; datas ISO 'AAAA-MM-DD'; semana começa na segunda-feira.
+import type { Origem } from "@/domain/financeiro";
 import { diasNoMes, lerData, somarMeses } from "@/domain/venda";
 
 export const TIPOS_CAIXA = ["clientes", "fornecedores", "comissoes", "empresa", "cartao"] as const;
 export type TipoCaixa = (typeof TIPOS_CAIXA)[number];
+
+export const ROTULO_TIPO_CAIXA: Record<TipoCaixa, string> = {
+  clientes: "Clientes",
+  fornecedores: "Fornecedores",
+  comissoes: "Comissões",
+  empresa: "Empresa",
+  cartao: "Cartão",
+};
+
+/**
+ * Tipo da linha da lista única no fluxo de caixa (ruling 3): parcelas = Clientes, pagamentos de viagem =
+ * Fornecedores, comissões = Comissões, manuais = Empresa (mesmo numa categoria das viagens; a categoria do sistema
+ * não muda o tipo). A fatura do cartão (Task 6) entra como Cartão.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- assinatura do plano; a fatura do cartão (Task 6) pode usar
+export function tipoCaixaDaLinha(origem: Origem, categoriaSistema: string | null): TipoCaixa {
+  switch (origem) {
+    case "parcela":
+      return "clientes";
+    case "pagamento":
+      return "fornecedores";
+    case "comissao":
+      return "comissoes";
+    case "manual":
+      return "empresa";
+  }
+}
 
 export type MovimentoCaixa = {
   data: string;

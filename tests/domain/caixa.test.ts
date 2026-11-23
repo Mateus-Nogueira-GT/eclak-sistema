@@ -6,6 +6,7 @@ import {
   projetarMeses,
   projetarSemanas,
   situacaoReserva,
+  tipoCaixaDaLinha,
   type MovimentoCaixa,
 } from "@/domain/caixa";
 
@@ -98,5 +99,20 @@ describe("cicloDoCartao", () => {
     expect(() => cicloDoCartao("2026-11-10", 0, 5)).toThrow(Error);
     expect(() => cicloDoCartao("2026-11-10", 15, 29)).toThrow(Error);
     expect(() => cicloDoCartao("2026-02-30", 15, 25)).toThrow(Error);
+  });
+});
+
+describe("tipoCaixaDaLinha", () => {
+  it("parcela → clientes, pagamento → fornecedores, comissão → comissões, manual → empresa", () => {
+    expect(tipoCaixaDaLinha("parcela", "vendas_viagem")).toBe("clientes");
+    expect(tipoCaixaDaLinha("pagamento", "fornecedores_viagem")).toBe("fornecedores");
+    expect(tipoCaixaDaLinha("comissao", "comissoes_hotel")).toBe("comissoes");
+    expect(tipoCaixaDaLinha("comissao", "comissoes_operadora")).toBe("comissoes");
+    expect(tipoCaixaDaLinha("manual", null)).toBe("empresa");
+  });
+
+  it("manual é sempre Empresa, mesmo numa categoria das viagens (ruling 3)", () => {
+    expect(tipoCaixaDaLinha("manual", "vendas_viagem")).toBe("empresa");
+    expect(tipoCaixaDaLinha("manual", "fornecedores_viagem")).toBe("empresa");
   });
 });

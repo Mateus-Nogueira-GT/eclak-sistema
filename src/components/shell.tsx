@@ -29,6 +29,7 @@ const areas: { titulo: string; itens: Item[] }[] = [
     titulo: "Financeiro",
     itens: [
       { href: "/financeiro/lancamentos", label: "Lançamentos" },
+      { href: "/financeiro/caixa", label: "Fluxo de caixa" },
       { href: "/financeiro/faturas", label: "Faturas" },
       { href: "/financeiro/categorias", label: "Categorias" },
       { href: "/financeiro/contas-bancarias", label: "Contas bancárias" },

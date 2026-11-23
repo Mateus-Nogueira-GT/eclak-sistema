@@ -218,4 +218,10 @@ export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
   forma: text("forma").notNull(),
   exigeIndividual: boolean("exige_individual").notNull(),
   repasse: boolean("repasse").notNull(),
+  /** Caixa (fatia 4b): o que entra/sai do banco. Crédito e boleto pelo líquido da taxa; repasse já é líquido. */
+  valorCaixaPrevisto: centavos("valor_caixa_previsto").notNull(),
+  /** Nulo se não baixado. */
+  valorCaixaBaixado: centavos("valor_caixa_baixado"),
+  /** Data em que entra/sai do caixa (crédito com antecipação: o primeiro vencimento em aberto do cartão da venda). */
+  dataCaixa: date("data_caixa").notNull(),
 }).existing();
