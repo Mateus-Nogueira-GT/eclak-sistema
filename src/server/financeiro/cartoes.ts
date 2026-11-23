@@ -18,9 +18,10 @@ import { falha, type Falha } from "@/server/financeiro/baixas-viagem";
 //   4. TODAS as faturas que a transação mexe (de saída e de entrada), numa passada só (`travarFaturasNa`), em ordem
 //      `(cartao_id, fechamento)`, criando as que faltam nessa mesma passada;
 //   5. só então as escritas nas compras.
-// Nenhuma fatura é travada fora de `travarFaturasNa`. A baixa da fatura (Task 7) segue a mesma ordem: descobrir as
-// compras e viagens da fatura sem trava, travar as viagens (crescente), as compras, e só então a(s) fatura(s), também
-// em ordem `(cartao_id, fechamento)`; conferir de novo depois das travas.
+// Nenhuma fatura é travada fora deste arquivo: o laço único é `travarEmOrdem`, usado por `travarFaturasNa` (compras)
+// e por `travarFaturasDaBaixaNa` (baixa e desfazer da fatura, em `fatura-cartao.ts`). A baixa segue a mesma ordem:
+// descobrir as compras e viagens da fatura sem trava, travar as viagens (crescente), as compras, os cartões e só
+// então a(s) fatura(s), em ordem `(cartao_id, fechamento)`; conferir de novo o conjunto depois das travas.
 
 export type Ciclo = { fechamento: string; vencimento: string };
 export type FaturaCartaoLinha = typeof faturasCartao.$inferSelect;
@@ -95,17 +96,50 @@ export async function travarFaturasNa(tx: Transacao, usuarioId: string, sair: (s
           .select({ cartaoId: faturasCartao.cartaoId, fechamento: faturasCartao.fechamento, vencimento: faturasCartao.vencimento })
           .from(faturasCartao)
           .where(inArray(faturasCartao.id, idsSair));
-  const alvos = new Map<string, { cartaoId: string; fechamento: string; vencimento: string }>();
-  for (const a of [...antigas, ...ciclos]) if (!alvos.has(chave(a.cartaoId, a.fechamento))) alvos.set(chave(a.cartaoId, a.fechamento), a);
-  const ordem = [...alvos.values()].sort((a, b) => (a.cartaoId !== b.cartaoId ? (a.cartaoId < b.cartaoId ? -1 : 1) : a.fechamento < b.fechamento ? -1 : a.fechamento > b.fechamento ? 1 : 0));
+  const travadas = await travarEmOrdem(tx, usuarioId, [...antigas, ...ciclos]);
+  if (antigas.some((a) => travadas.get(chave(a.cartaoId, a.fechamento))!.status === "baixado")) return DESFACA_FATURA;
+  const vinculos = ciclos.map((c) => travadas.get(chave(c.cartaoId, c.fechamento))!);
+  if (vinculos.some((f) => f.status === "baixado")) return FATURA_PAGA;
+  return vinculos.map((f) => ({ cartaoId: f.cartaoId, faturaCartaoId: f.id }));
+}
+
+type Alvo = { cartaoId: string; fechamento: string; vencimento: string };
+
+/**
+ * O único laço que trava faturas: os alvos (sem repetidos) em ordem `(cartao_id, fechamento)`, `for update`, criando
+ * (e auditando) as que faltam. Devolve as travadas por `chave(cartão, fechamento)`.
+ */
+async function travarEmOrdem(tx: Transacao, usuarioId: string, alvos: Alvo[]): Promise<Map<string, FaturaCartaoLinha>> {
+  const unicos = new Map<string, Alvo>();
+  for (const a of alvos) if (!unicos.has(chave(a.cartaoId, a.fechamento))) unicos.set(chave(a.cartaoId, a.fechamento), a);
+  const ordem = [...unicos.values()].sort((a, b) => (a.cartaoId !== b.cartaoId ? (a.cartaoId < b.cartaoId ? -1 : 1) : a.fechamento < b.fechamento ? -1 : a.fechamento > b.fechamento ? 1 : 0));
   const travadas = new Map<string, FaturaCartaoLinha>();
   for (const a of ordem) {
     const { fatura, criada } = await faturaDoCicloNa(tx, a.cartaoId, a);
     if (criada) await registrarAuditoria(tx, { usuarioId, tabela: "faturas_cartao", registroId: fatura.id, acao: "criar", depois: fatura });
     travadas.set(chave(a.cartaoId, a.fechamento), fatura);
   }
-  if (antigas.some((a) => travadas.get(chave(a.cartaoId, a.fechamento))!.status === "baixado")) return DESFACA_FATURA;
-  const vinculos = ciclos.map((c) => travadas.get(chave(c.cartaoId, c.fechamento))!);
-  if (vinculos.some((f) => f.status === "baixado")) return FATURA_PAGA;
-  return vinculos.map((f) => ({ cartaoId: f.cartaoId, faturaCartaoId: f.id }));
+  return travadas;
+}
+
+/**
+ * Para a baixa (e o desfazer) da fatura: trava os cartões das faturas (`for share`, por id) e as faturas `ids`, na
+ * mesma ordem única de `travarFaturasNa` (passos 3 e 4). Não confere status (quem chama decide: pagar ou desfazer).
+ * Devolve as faturas travadas, na ordem de `ids`; `null` na posição de id inexistente. O chamador já travou as
+ * viagens e as compras (passos 1 e 2).
+ */
+export async function travarFaturasDaBaixaNa(tx: Transacao, usuarioId: string, ids: string[]): Promise<(FaturaCartaoLinha | null)[]> {
+  const unicos = [...new Set(ids)];
+  const alvos =
+    unicos.length === 0
+      ? []
+      : await tx
+          .select({ id: faturasCartao.id, cartaoId: faturasCartao.cartaoId, fechamento: faturasCartao.fechamento, vencimento: faturasCartao.vencimento })
+          .from(faturasCartao)
+          .where(inArray(faturasCartao.id, unicos));
+  const idsCartao = [...new Set(alvos.map((a) => a.cartaoId))].sort();
+  if (idsCartao.length > 0) await tx.select({ id: cartoesCorporativos.id }).from(cartoesCorporativos).where(inArray(cartoesCorporativos.id, idsCartao)).orderBy(asc(cartoesCorporativos.id)).for("share");
+  const travadas = await travarEmOrdem(tx, usuarioId, alvos);
+  const porId = new Map(alvos.map((a) => [a.id, travadas.get(chave(a.cartaoId, a.fechamento))!]));
+  return ids.map((id) => porId.get(id) ?? null);
 }

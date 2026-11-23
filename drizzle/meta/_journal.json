@@ -239,6 +239,13 @@
       "when": 1795424774766,
       "tag": "0033_view_fatura_cartao",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795426021597,
+      "tag": "0034_view_fatura_cartao_baixada",
+      "breakpoints": true
     }
   ]
 }

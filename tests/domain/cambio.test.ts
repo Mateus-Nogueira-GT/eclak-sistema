@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MOEDAS, cambioAplicado, converter } from "@/domain/cambio";
+import { MOEDAS, cambioAplicado, cambioEfetivoDe, converter } from "@/domain/cambio";
 
 describe("câmbio", () => {
   it("lista as moedas aceitas", () => {
@@ -24,5 +24,17 @@ describe("câmbio", () => {
   it("recusa câmbio ou percentual mal formado", () => {
     expect(() => converter(100n, "6,1582")).toThrow();
     expect(() => cambioAplicado("abc", "4.500")).toThrow();
+  });
+
+  it("câmbio efetivo da compra no cartão = reais cobrados ÷ valor original, 4 casas, meio para cima", () => {
+    expect(cambioEfetivoDe(654321n, 100000n)).toBe("6.5432");
+    expect(cambioEfetivoDe(654325n, 100000n)).toBe("6.5433");
+    expect(cambioEfetivoDe(100n, 300n)).toBe("0.3333");
+    expect(cambioEfetivoDe(500000n, 100000n)).toBe("5.0000");
+  });
+
+  it("câmbio efetivo: sem valor original ou acima de 999.999,9999 → null", () => {
+    expect(cambioEfetivoDe(100n, 0n)).toBeNull();
+    expect(cambioEfetivoDe(100_000_000_000n, 1n)).toBeNull();
   });
 });

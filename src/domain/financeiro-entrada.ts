@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { hojeEmCuiaba } from "./clientes";
 import { CENTROS, FORMAS_FINANCEIRO, FREQUENCIAS, LADOS, ORIGENS, SITUACOES } from "./financeiro";
-import { contaBancariaId, data, MSG_CARTAO_CORPORATIVO, obrigatorio, reais, texto } from "./venda-entrada";
+import { contaBancariaId, data, MSG_CARTAO_CORPORATIVO, MSG_COMPRA_NO_CARTAO, obrigatorio, reais, texto } from "./venda-entrada";
 
 // Entradas das actions do financeiro (Zod). Datas "AAAA-MM-DD", competência "AAAA-MM".
 
@@ -10,8 +10,8 @@ export const MSG_VALOR_ZERO = "Informe um valor maior que zero";
 export const MSG_FORMA = "Forma de pagamento inválida";
 export const MSG_DATA_FUTURA = "A data não pode ser futura";
 export const MSG_LINHA_REPETIDA = "Linha repetida no lote";
-/** Até a baixa da fatura do cartão existir (Task 7), a linha da fatura não tem baixa pela lista. */
-export const MSG_BAIXA_FATURA_CARTAO = "Dê baixa na fatura do cartão pela tela de cartões";
+export const MSG_FATURA_ESTRANGEIRA = "Fatura do cartão com compra em moeda estrangeira: dê baixa individual com o valor em reais cobrado";
+export const MSG_VALOR_BRL_CARTAO = "Informe o valor em reais cobrado no cartão";
 export const MSG_LOTE_RECUSADO = "Tire do lote as linhas indicadas: elas pedem baixa individual";
 export const MSG_LOTE_LADOS = "Escolha linhas de um lado só (a pagar ou a receber)";
 const MSG_DATA = "Informe a data";
@@ -118,6 +118,41 @@ export function loteSchema(hoje: string = hojeEmCuiaba()) {
   });
 }
 
+/**
+ * Baixa da fatura do cartão corporativo: data, conta bancária e, para cada compra em moeda estrangeira, o valor em
+ * reais cobrado na fatura (com IOF). Erro de valor fica no campo `estrangeiras.<pagamentoId>`; a falta de uma
+ * compra estrangeira é conferida no núcleo (que sabe quais são).
+ */
+export function baixaFaturaCartaoSchema(hoje: string = hojeEmCuiaba()) {
+  return z.strictObject({
+    data: dataAteHoje(hoje),
+    contaBancariaId: uuid,
+    estrangeiras: z
+      .array(z.strictObject({ pagamentoId: uuid, valorBrl: z.string({ error: MSG_VALOR_BRL_CARTAO }).nullish() }), { error: "Compras estrangeiras inválidas" })
+      .max(200, "Compras demais")
+      .default([])
+      .transform((xs, ctx) => {
+        const vistos = new Set<string>();
+        const saida: { pagamentoId: string; valorBrl: bigint }[] = [];
+        for (const x of xs) {
+          if (vistos.has(x.pagamentoId)) {
+            ctx.addIssue({ code: "custom", message: "Compra repetida", path: [x.pagamentoId] });
+            continue;
+          }
+          vistos.add(x.pagamentoId);
+          const v = positivo.safeParse(x.valorBrl?.trim() ? x.valorBrl : null);
+          if (!v.success) {
+            ctx.addIssue({ code: "custom", message: x.valorBrl?.trim() ? v.error.issues[0].message : MSG_VALOR_BRL_CARTAO, path: [x.pagamentoId] });
+            continue;
+          }
+          saida.push({ pagamentoId: x.pagamentoId, valorBrl: v.data });
+        }
+        return saida;
+      }),
+  });
+}
+export type BaixaFaturaCartaoValidada = z.output<ReturnType<typeof baixaFaturaCartaoSchema>>;
+
 /** A linha da view, no que o lote confere. */
 export type LinhaDoLote = {
   origem: (typeof ORIGENS)[number];
@@ -125,6 +160,8 @@ export type LinhaDoLote = {
   exigeIndividual: boolean;
   repasse: boolean;
   transitaCaixa: boolean;
+  /** Compra numa fatura do cartão corporativo (sai pela fatura). */
+  faturaCartaoId?: string | null;
 };
 
 /**
@@ -134,7 +171,8 @@ export type LinhaDoLote = {
 export function motivoForaDoLote(l: LinhaDoLote): string | null {
   if (l.statusBase === "baixado") return "Já baixada";
   if (l.statusBase === "cancelado") return "Cancelada";
-  if (l.origem === "fatura_cartao") return MSG_BAIXA_FATURA_CARTAO;
+  if (l.faturaCartaoId) return MSG_COMPRA_NO_CARTAO;
+  if (l.origem === "fatura_cartao") return l.exigeIndividual ? MSG_FATURA_ESTRANGEIRA : null;
   if (l.repasse) return l.exigeIndividual ? "Repasse sem fornecedor do cartão: escolha o fornecedor na viagem" : "Repasse do cartão direto no fornecedor: dê baixa individual";
   if (!l.transitaCaixa) return "Não passa pelo caixa: pago pelo cliente no cartão do fornecedor";
   if (l.exigeIndividual) return "Pagamento em moeda estrangeira: dê baixa individual com o câmbio efetivo";

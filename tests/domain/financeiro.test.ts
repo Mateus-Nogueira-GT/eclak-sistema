@@ -149,9 +149,17 @@ describe("motivoForaDoLote", () => {
     expect(motivoForaDoLote({ ...base, origem: "pagamento", transitaCaixa: false })).toMatch(/Não passa pelo caixa/);
     expect(motivoForaDoLote({ ...base, origem: "pagamento", exigeIndividual: true })).toMatch(/moeda estrangeira/);
   });
-  it("fatura do cartão em aberto: baixa só pela tela de cartões", () => {
-    expect(motivoForaDoLote({ ...base, origem: "fatura_cartao" })).toBe("Dê baixa na fatura do cartão pela tela de cartões");
-    expect(motivoForaDoLote({ ...base, origem: "fatura_cartao", exigeIndividual: true })).toBe("Dê baixa na fatura do cartão pela tela de cartões");
+  it("fatura do cartão: entra no lote; com compra em moeda estrangeira, baixa individual", () => {
+    expect(motivoForaDoLote({ ...base, origem: "fatura_cartao" })).toBeNull();
+    expect(motivoForaDoLote({ ...base, origem: "fatura_cartao", exigeIndividual: true })).toBe(
+      "Fatura do cartão com compra em moeda estrangeira: dê baixa individual com o valor em reais cobrado",
+    );
+  });
+  it("compra no cartão corporativo: só pela fatura do cartão", () => {
+    expect(motivoForaDoLote({ ...base, transitaCaixa: false, faturaCartaoId: "f" })).toBe("Compra no cartão corporativo: dê baixa na fatura do cartão");
+    expect(motivoForaDoLote({ ...base, origem: "pagamento", transitaCaixa: false, exigeIndividual: true, faturaCartaoId: "f" })).toBe(
+      "Compra no cartão corporativo: dê baixa na fatura do cartão",
+    );
   });
 });
 

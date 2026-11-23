@@ -145,6 +145,8 @@ export const MSG_ESCOLHA_FORNECEDOR_ANTES = "Escolha o fornecedor que recebeu no
 export const MSG_CARTAO_CORPORATIVO = "Escolha o cartão corporativo";
 export const MSG_FATURA_CARTAO_PAGA = "A fatura do cartão deste período já foi paga";
 export const MSG_DESFACA_FATURA_CARTAO = "Desfaça a baixa da fatura do cartão antes";
+/** Compra no cartão corporativo (lançamento ou pagamento numa fatura): sem baixa direta, só pela fatura. */
+export const MSG_COMPRA_NO_CARTAO = "Compra no cartão corporativo: dê baixa na fatura do cartão";
 export const MSG_FORNECEDOR_JA_PAGO = "Este fornecedor já tem pagamento feito pela ECLAK: desfaça a baixa antes";
 
 /** Conta bancária da baixa: obrigatória (ativa: conferido no núcleo, na transação). Select vazio chega como "". */

@@ -5,10 +5,10 @@ import type { ZodError } from "zod";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { dividirEmParcelas, datasRecorrentes, ORIGENS, ROTULO_FORMA_FINANCEIRO, type FormaFinanceiroSlug, type Origem } from "@/domain/financeiro";
 import {
-  MSG_BAIXA_FATURA_CARTAO,
   MSG_FORMA,
   MSG_LOTE_LADOS,
   MSG_LOTE_RECUSADO,
+  baixaFaturaCartaoSchema,
   baixaLancamentoSchema,
   categoriaSchema,
   contaBancariaSchema,
@@ -19,6 +19,8 @@ import {
 } from "@/domain/financeiro-entrada";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import {
+  MSG_COMPRA_NO_CARTAO,
+  MSG_DESFACA_FATURA_CARTAO,
   MSG_FORNECEDOR_CARTAO,
   MSG_MOTIVO,
   baixaPagamentoSchema,
@@ -34,6 +36,7 @@ import {
   categoriasFinanceiras,
   clientes,
   contasBancarias,
+  faturasCartao,
   fornecedores,
   lancamentos,
   lancamentosFinanceiros,
@@ -55,6 +58,7 @@ import {
   type Feito,
 } from "@/server/financeiro/baixas-viagem";
 import { travarFaturasNa, type EntradaFatura, type SemCartao, type Vinculo } from "@/server/financeiro/cartoes";
+import { baixarFaturaCartaoNa, baixarFaturasCartaoNa, desfazerFaturaCartaoNa, viagensDasFaturas, type FeitoFatura } from "@/server/financeiro/fatura-cartao";
 import { travarViagem } from "@/server/trava-viagem";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
@@ -447,6 +451,8 @@ async function baixarLancamentoNa(tx: Transacao, usuarioId: string, id: string, 
   if (!l) return LANCAMENTO_NAO_ENCONTRADO;
   if (l.status === "baixado") return falha(l.lado === "pagar" ? "Lançamento já pago" : "Lançamento já recebido");
   if (l.status === "cancelado") return falha("Lançamento cancelado");
+  // Compra no cartão corporativo: sai do banco pela fatura (baixa da fatura do cartão), nunca direto.
+  if (l.faturaCartaoId) return falha(MSG_COMPRA_NO_CARTAO);
   if (v.valorPago !== l.valor + v.juros - v.desconto && !v.observacao) return falha(MSG_DIFERENCA_PAGO, "observacao");
   await contaAtiva(tx, v.contaBancariaId, "contaBancariaId");
   const depois = {
@@ -470,6 +476,12 @@ async function desfazerBaixaLancamentoNa(tx: Transacao, usuarioId: string, id: s
   const [l] = await tx.select().from(lancamentos).where(eq(lancamentos.id, id)).for("update");
   if (!l) return LANCAMENTO_NAO_ENCONTRADO;
   if (l.status !== "baixado") return falha("Este lançamento não foi baixado");
+  // Baixada pela fatura do cartão: volta só desfazendo a baixa da fatura (a fatura é lida depois da trava da compra,
+  // a mesma ordem da baixa da fatura).
+  if (l.faturaCartaoId) {
+    const [f] = await tx.select({ status: faturasCartao.status }).from(faturasCartao).where(eq(faturasCartao.id, l.faturaCartaoId));
+    if (f?.status === "baixado") return falha(MSG_DESFACA_FATURA_CARTAO);
+  }
   const depois = { status: "em_aberto" as const, baixadoEm: null, valorPago: null, juros: null, desconto: null, baixaContaBancariaId: null };
   await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, id));
   await auditarAlteracao(tx, usuarioId, "lancamentos", l, depois);
@@ -526,6 +538,29 @@ export async function cancelarLancamento(id: string, motivo: unknown, alcance: A
 
 const PARCELA_NAO_ENCONTRADA = falha("Parcela não encontrada");
 const VIAGEM_NAO_ENCONTRADA = falha("Viagem não encontrada");
+
+/** Revalida as telas das viagens mexidas (e a lista de viagens e vendas, se houver alguma). */
+function revalidarViagens(ids: string[]) {
+  if (ids.length === 0) return;
+  revalidatePath("/viagens");
+  revalidatePath("/vendas");
+  for (const v of ids) revalidatePath(`/viagens/${v}`);
+}
+
+/** Núcleo da fatura do cartão numa transação nova; no sucesso revalida o financeiro e as viagens das compras. */
+async function naFatura(mensagemErro: string, fn: (tx: Transacao) => Promise<FeitoFatura | Falha>): Promise<{ ok: true } | Falha> {
+  let r: FeitoFatura | Falha;
+  try {
+    r = await db.transaction(fn);
+  } catch (x) {
+    if (x instanceof DesfazerNaViagem || x instanceof Desfazer) return x.falha;
+    throw erroDeBanco(mensagemErro, x);
+  }
+  if (ehFalha(r)) return r;
+  revalidar();
+  revalidarViagens(r.viagens);
+  return { ok: true };
+}
 
 /** Núcleo da viagem numa transação nova; no sucesso revalida as telas da viagem e do financeiro. */
 async function naViagem(mensagemErro: string, fn: (tx: Transacao) => Promise<Feito | Falha>): Promise<{ ok: true } | Falha> {
@@ -589,8 +624,6 @@ const NAO_ENCONTRADO: Record<Origem, Falha> = {
   comissao: falha("Comissão não encontrada"),
   fatura_cartao: falha("Fatura do cartão não encontrada"),
 };
-// Até a baixa da fatura do cartão (Task 7): a linha da fatura não tem baixa nem desfazer pela lista.
-const BAIXA_FATURA_CARTAO = falha(MSG_BAIXA_FATURA_CARTAO);
 
 /** Resultado do lançamento manual como a lista responde (sem ids), revalidando o financeiro. */
 async function noManual(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok | Falha>): Promise<{ ok: true } | Falha> {
@@ -604,7 +637,9 @@ async function noManual(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok 
  * Baixa de uma linha da lista, pela origem: manual → baixa do lançamento; parcela, pagamento e comissão → o
  * núcleo da viagem (`@/server/financeiro/baixas-viagem`), o mesmo da tela da viagem. `dados` tem os campos da
  * baixa daquela origem (os mesmos da viagem). A parcela de repasse do cartão é recusada pelo núcleo ("Use o
- * repasse do fornecedor"): a tela chama `baixarRepasse`.
+ * repasse do fornecedor"): a tela chama `baixarRepasse`. Fatura do cartão → a baixa da fatura
+ * (`@/server/financeiro/fatura-cartao`, data, conta e o valor em reais das compras estrangeiras), a mesma da tela
+ * de cartões.
  */
 export async function baixarLinha(origem: Origem, id: string, dados: unknown) {
   return comPerfil(FINANCEIRO, async (u): Promise<{ ok: true } | Falha> => {
@@ -631,8 +666,11 @@ export async function baixarLinha(origem: Origem, id: string, dados: unknown) {
         if (!p.success) return falhaDeValidacao(p.error);
         return naViagem("Erro ao registrar a comissão", (tx) => registrarComissaoNa(tx, u.id, id, p.data));
       }
-      case "fatura_cartao":
-        return BAIXA_FATURA_CARTAO;
+      case "fatura_cartao": {
+        const p = baixaFaturaCartaoSchema().safeParse(dados);
+        if (!p.success) return falhaDeValidacao(p.error);
+        return naFatura("Erro ao baixar a fatura do cartão", (tx) => baixarFaturaCartaoNa(tx, u.id, id, p.data));
+      }
     }
   });
 }
@@ -652,7 +690,7 @@ export async function desfazerBaixaLinha(origem: Origem, id: string) {
       case "comissao":
         return naViagem("Erro ao desfazer a comissão", (tx) => desfazerComissaoNa(tx, u.id, id));
       case "fatura_cartao":
-        return BAIXA_FATURA_CARTAO;
+        return naFatura("Erro ao desfazer a baixa da fatura do cartão", (tx) => desfazerFaturaCartaoNa(tx, u.id, id));
     }
   });
 }
@@ -680,6 +718,7 @@ function linhasDoLote(tx: Transacao, itens: ItemLote[]) {
       repasse: lancamentosFinanceiros.repasse,
       transitaCaixa: lancamentosFinanceiros.transitaCaixa,
       viagemId: lancamentosFinanceiros.viagemId,
+      faturaCartaoId: lancamentosFinanceiros.faturaCartaoId,
       valorPrevisto: lancamentosFinanceiros.valorPrevisto,
       taxa: lancamentosFinanceiros.taxa,
     })
@@ -723,17 +762,18 @@ async function baixarPeloPrevisto(tx: Transacao, usuarioId: string, l: LinhaLote
     case "comissao":
       return registrarComissaoNa(tx, usuarioId, l.id, { recebidaEm: data, valorRecebido: l.valorPrevisto, contaBancariaId });
     case "fatura_cartao":
-      // Não chega aqui (`motivoForaDoLote` a recusa antes).
-      return BAIXA_FATURA_CARTAO;
+      // Não chega aqui: as faturas do lote são baixadas juntas, antes (`baixarFaturasCartaoNa`).
+      return NAO_ENCONTRADO.fatura_cartao;
   }
 }
 
 /**
  * Baixa em lote: as linhas marcadas (em aberto, do mesmo lado) baixadas pelo valor previsto, com a data e a conta
  * do lote, numa transação só. Recusa o lote inteiro, dizendo as linhas a tirar, se alguma exige dado individual,
- * não está em aberto ou é do outro lado. Trava as viagens envolvidas em ordem crescente de id antes de qualquer
- * escrita, relê as linhas depois das travas e grava (manuais por id, depois as de viagem por viagem e id);
- * qualquer recusa no meio desfaz tudo.
+ * não está em aberto ou é do outro lado. Trava as viagens envolvidas (as das linhas e as das compras das faturas do
+ * cartão) em ordem crescente de id antes de qualquer escrita, relê as linhas depois das travas e grava: manuais por
+ * id, depois as faturas do cartão (todas numa passada de travas, a ordem de `cartoes.ts`: compras antes das
+ * faturas), depois as de viagem por viagem e id; qualquer recusa no meio desfaz tudo.
  */
 export async function baixarEmLote(dados: unknown) {
   return comPerfil(FINANCEIRO, async (u): Promise<{ ok: true } | FalhaLote> => {
@@ -746,16 +786,31 @@ export async function baixarEmLote(dados: unknown) {
         const lidas = await linhasDoLote(tx, itens);
         const recusaAntes = recusaDoLote(itens, lidas);
         if (recusaAntes) throw new RecusaLote(recusaAntes);
-        const ids = [...new Set(lidas.map((l) => l.viagemId).filter((v): v is string => v !== null))].sort();
+        const idsFaturas = lidas.filter((l) => l.origem === "fatura_cartao").map((l) => l.id).sort();
+        const daLinha = lidas.map((l) => l.viagemId).filter((v): v is string => v !== null);
+        const ids = [...new Set([...daLinha, ...(await viagensDasFaturas(tx, idsFaturas))])].sort();
         for (const v of ids) await travarViagem(tx, v);
         // Depois das travas: o estado pode ter mudado entre a leitura e a escrita.
         const linhas = await linhasDoLote(tx, itens);
         const recusa = recusaDoLote(itens, linhas);
         if (recusa) throw new RecusaLote(recusa);
         const ordem = (l: LinhaLote) => `${l.viagemId ?? ""}|${l.origem}|${l.id}`;
-        for (const l of [...linhas].sort((a, b) => (ordem(a) < ordem(b) ? -1 : ordem(a) > ordem(b) ? 1 : 0))) {
+        const porOrdem = (a: LinhaLote, b: LinhaLote) => (ordem(a) < ordem(b) ? -1 : ordem(a) > ordem(b) ? 1 : 0);
+        const recusar = (l: LinhaLote, r: Falha) => new RecusaLote({ ...r, linhas: [{ origem: l.origem, id: l.id, motivo: r.erro }] });
+        for (const l of linhas.filter((x) => x.origem === "manual").sort(porOrdem)) {
           const r = await baixarPeloPrevisto(tx, u.id, l, data, contaBancariaId);
-          if (ehFalha(r)) throw new RecusaLote({ ...r, linhas: [{ origem: l.origem, id: l.id, motivo: r.erro }] });
+          if (ehFalha(r)) throw recusar(l, r);
+        }
+        if (idsFaturas.length > 0) {
+          const r = await baixarFaturasCartaoNa(tx, u.id, idsFaturas, { data, contaBancariaId, estrangeiras: [] }, new Set(ids));
+          if (ehFalha(r)) {
+            const faturas = linhas.filter((x) => x.origem === "fatura_cartao");
+            throw new RecusaLote({ ...r, linhas: faturas.map((l) => ({ origem: l.origem, id: l.id, motivo: r.erro })) });
+          }
+        }
+        for (const l of linhas.filter((x) => x.origem !== "manual" && x.origem !== "fatura_cartao").sort(porOrdem)) {
+          const r = await baixarPeloPrevisto(tx, u.id, l, data, contaBancariaId);
+          if (ehFalha(r)) throw recusar(l, r);
         }
         return ids;
       });
@@ -764,11 +819,7 @@ export async function baixarEmLote(dados: unknown) {
       throw erroDeBanco("Falha ao baixar o lote", x);
     }
     revalidar();
-    if (viagensAlteradas.length > 0) {
-      revalidatePath("/viagens");
-      revalidatePath("/vendas");
-      for (const v of viagensAlteradas) revalidatePath(`/viagens/${v}`);
-    }
+    revalidarViagens(viagensAlteradas);
     return { ok: true };
   });
 }

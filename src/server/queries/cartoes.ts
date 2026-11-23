@@ -1,5 +1,6 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import type { Moeda } from "@/domain/cambio";
 import type { Centro, StatusLancamento } from "@/domain/financeiro";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { exigirPerfil } from "@/server/auth";
@@ -29,6 +30,12 @@ export type CompraFatura = {
   valor: bigint;
   viagemId: string | null;
   viagemDestino: string | null;
+  /** Moeda da conta do pagamento (manual: BRL) e valor na moeda; estrangeira pede o valor em reais na baixa. */
+  moeda: Moeda;
+  valorOriginal: bigint;
+  /** Baixada (manual `baixado`, pagamento `pago`) e o valor pago em reais. */
+  paga: boolean;
+  valorPago: bigint | null;
 };
 export type FaturaDoCartao = {
   id: string;
@@ -50,13 +57,13 @@ export type CartaoItem = {
   contaBancaria: string;
   centro: Centro;
   ativo: boolean;
-  /** Só as faturas com compras, da mais recente para a mais antiga. */
+  /** Só as faturas com compras ou já pagas, da mais recente para a mais antiga. */
   faturas: FaturaDoCartao[];
 };
 
 /**
  * Cartões (ativos primeiro, por nome) com as faturas e as compras de cada uma: lançamentos manuais não cancelados e
- * pagamentos de viagem de contas ativas. Fatura sem compras não aparece.
+ * pagamentos de viagem de contas ativas. Fatura sem compras não aparece (a paga, sim: a saída no banco continua).
  */
 export async function listarCartoes(): Promise<CartaoItem[]> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
@@ -95,6 +102,8 @@ export async function listarCartoes(): Promise<CartaoItem[]> {
               fornecedor: fornecedores.nome,
               pessoaTexto: lancamentos.pessoaTexto,
               valor: lancamentos.valor,
+              status: lancamentos.status,
+              valorPago: lancamentos.valorPago,
             })
             .from(lancamentos)
             .leftJoin(fornecedores, eq(fornecedores.id, lancamentos.fornecedorId))
@@ -108,6 +117,10 @@ export async function listarCartoes(): Promise<CartaoItem[]> {
               descricao: contasPagar.descricao,
               fornecedor: fornecedores.nome,
               valor: pagamentosFornecedor.valorBrlPrevisto,
+              valorOriginal: pagamentosFornecedor.valorOriginal,
+              moeda: contasPagar.moeda,
+              status: pagamentosFornecedor.status,
+              valorBrlPago: pagamentosFornecedor.valorBrlPago,
               viagemId: contasPagar.viagemId,
               viagemDestino: viagens.destino,
             })
@@ -124,15 +137,41 @@ export async function listarCartoes(): Promise<CartaoItem[]> {
     compras.set(faturaId, [...(compras.get(faturaId) ?? []), c]);
   };
   for (const m of manuais)
-    juntar(m.faturaId, { origem: "manual", id: m.id, data: m.data, descricao: m.descricao, pessoa: m.fornecedor ?? m.pessoaTexto, valor: m.valor, viagemId: null, viagemDestino: null });
+    juntar(m.faturaId, {
+      origem: "manual",
+      id: m.id,
+      data: m.data,
+      descricao: m.descricao,
+      pessoa: m.fornecedor ?? m.pessoaTexto,
+      valor: m.valor,
+      viagemId: null,
+      viagemDestino: null,
+      moeda: "BRL",
+      valorOriginal: m.valor,
+      paga: m.status === "baixado",
+      valorPago: m.valorPago,
+    });
   for (const p of pagamentos)
-    juntar(p.faturaId, { origem: "pagamento", id: p.id, data: p.data, descricao: p.descricao, pessoa: p.fornecedor, valor: p.valor, viagemId: p.viagemId, viagemDestino: p.viagemDestino });
+    juntar(p.faturaId, {
+      origem: "pagamento",
+      id: p.id,
+      data: p.data,
+      descricao: p.descricao,
+      pessoa: p.fornecedor,
+      valor: p.valor,
+      viagemId: p.viagemId,
+      viagemDestino: p.viagemDestino,
+      moeda: p.moeda as Moeda,
+      valorOriginal: p.valorOriginal,
+      paga: p.status === "pago",
+      valorPago: p.valorBrlPago,
+    });
   return cartoes.map((k) => ({
     ...k,
     faturas: faturas
-      .filter((f) => f.cartaoId === k.id && compras.has(f.id))
+      .filter((f) => f.cartaoId === k.id && (compras.has(f.id) || f.status === "baixado"))
       .map((f) => {
-        const cs = [...compras.get(f.id)!].sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
+        const cs = [...(compras.get(f.id) ?? [])].sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0));
         return {
           id: f.id,
           fechamento: f.fechamento,
@@ -145,4 +184,47 @@ export async function listarCartoes(): Promise<CartaoItem[]> {
         };
       }),
   }));
+}
+
+export type CompraEstrangeiraDaFatura = {
+  id: string;
+  descricao: string;
+  pessoa: string | null;
+  moeda: Moeda;
+  valorOriginal: bigint;
+  valorPrevisto: bigint;
+};
+
+/**
+ * Compras em moeda estrangeira das faturas (pagamentos de viagem de contas ativas fora do real), por fatura: a baixa
+ * da fatura pede o valor em reais cobrado de cada uma. Só para as faturas em aberto da página da lista.
+ */
+export async function comprasEstrangeirasDasFaturas(faturaIds: string[]): Promise<Record<string, CompraEstrangeiraDaFatura[]>> {
+  await exigirPerfil(...PERFIS_FINANCEIRO);
+  if (faturaIds.length === 0) return {};
+  const linhas = await db
+    .select({
+      faturaId: pagamentosFornecedor.faturaCartaoId,
+      id: pagamentosFornecedor.id,
+      descricao: contasPagar.descricao,
+      pessoa: fornecedores.nome,
+      moeda: contasPagar.moeda,
+      valorOriginal: pagamentosFornecedor.valorOriginal,
+      valorPrevisto: pagamentosFornecedor.valorBrlPrevisto,
+    })
+    .from(pagamentosFornecedor)
+    .innerJoin(contasPagar, eq(contasPagar.id, pagamentosFornecedor.contaId))
+    .leftJoin(fornecedores, eq(fornecedores.id, contasPagar.fornecedorId))
+    .where(
+      and(
+        inArray(pagamentosFornecedor.faturaCartaoId, faturaIds),
+        isNull(contasPagar.excluidoEm),
+        ne(contasPagar.status, "cancelada"),
+        ne(contasPagar.moeda, "BRL"),
+      ),
+    )
+    .orderBy(asc(pagamentosFornecedor.vencimento), asc(pagamentosFornecedor.id));
+  const r: Record<string, CompraEstrangeiraDaFatura[]> = {};
+  for (const { faturaId, ...c } of linhas) if (faturaId) (r[faturaId] ??= []).push({ ...c, moeda: c.moeda as Moeda });
+  return r;
 }

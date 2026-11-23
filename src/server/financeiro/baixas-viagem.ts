@@ -7,7 +7,9 @@ import {
   MSG_COMISSAO_EM_ABERTO,
   MSG_COMISSAO_REGISTRADA,
   MSG_CONCILIADA,
+  MSG_COMPRA_NO_CARTAO,
   MSG_CONTA_BANCARIA,
+  MSG_DESFACA_FATURA_CARTAO,
   MSG_DESFACA_REPASSE,
   MSG_DIFERENCA_RECEBIDA,
   MSG_ESCOLHA_FORNECEDOR_ANTES,
@@ -73,11 +75,13 @@ export class Desfazer extends Error {
 export const PARCELA_NAO_ENCONTRADA = falha("Parcela não encontrada");
 export const PAGAMENTO_NAO_ENCONTRADO = falha("Pagamento não encontrado");
 export const COMISSAO_NAO_ENCONTRADA = falha("Comissão não encontrada");
-const NAO_VENDIDA = falha(MSG_NAO_VENDIDA);
+export const NAO_VENDIDA = falha(MSG_NAO_VENDIDA);
 const USE_REPASSE = falha(MSG_USE_REPASSE);
 const PAGO_PELO_REPASSE = falha(MSG_PAGO_PELO_REPASSE);
 const NAO_CARTAO_FORNECEDOR = falha(MSG_NAO_CARTAO_FORNECEDOR);
-const CONCILIADA = falha(MSG_CONCILIADA);
+export const CONCILIADA = falha(MSG_CONCILIADA);
+const COMPRA_NO_CARTAO = falha(MSG_COMPRA_NO_CARTAO);
+const DESFACA_FATURA_CARTAO = falha(MSG_DESFACA_FATURA_CARTAO);
 
 export type ViagemLinha = typeof viagens.$inferSelect;
 export type ContaLinha = typeof contasPagar.$inferSelect;
@@ -282,7 +286,7 @@ export function cancelarParcelaNa(tx: Transacao, usuarioId: string, parcelaId: s
 // ---------------------------------------------------------------------------
 
 /** A conta fica `paga` com todas as linhas pagas, senão `a_pagar` (a cancelada não muda). */
-async function acertarStatusConta(tx: Transacao, usuarioId: string, conta: ContaLinha, statusDasLinhas: PagamentoLinha["status"][]): Promise<void> {
+export async function acertarStatusConta(tx: Transacao, usuarioId: string, conta: ContaLinha, statusDasLinhas: PagamentoLinha["status"][]): Promise<void> {
   const status = statusDasLinhas.every((s) => s === "pago") ? "paga" : "a_pagar";
   if (conta.status !== status && conta.status !== "cancelada") {
     await tx.update(contasPagar).set({ status }).where(eq(contasPagar.id, conta.id));
@@ -354,6 +358,8 @@ export function baixarPagamentoNa(tx: Transacao, usuarioId: string, pagamentoId:
   const { pagoEm, valorOriginalPago, cambioEfetivo, contaBancariaId } = dados;
   return noPagamento(tx, usuarioId, pagamentoId, async (t, p, conta) => {
     if (p.repasseParcelaId) return PAGO_PELO_REPASSE;
+    // Compra no cartão corporativo: sai do banco pela fatura (baixa da fatura do cartão), nunca direto.
+    if (p.faturaCartaoId) return COMPRA_NO_CARTAO;
     if (p.status === "pago") return falha(MSG_PAGAMENTO_PAGO);
     const cartao = await vendaCartaoDireto(t, conta.viagemId);
     // Venda antiga de cartão direto sem o fornecedor do cartão: qualquer baixa espera a escolha (senão o pagamento
@@ -370,15 +376,24 @@ export function baixarPagamentoNa(tx: Transacao, usuarioId: string, pagamentoId:
   });
 }
 
-/** Desfaz a baixa do pagamento; a conta volta a `a_pagar`. */
+/** Desfaz a baixa do pagamento; a conta volta a `a_pagar`. O pago pela fatura do cartão volta só por ela. */
 export function desfazerBaixaPagamentoNa(tx: Transacao, usuarioId: string, pagamentoId: string): Promise<Feito | Falha> {
   return noPagamento(tx, usuarioId, pagamentoId, async (_t, p) =>
-    p.repasseParcelaId ? PAGO_PELO_REPASSE : p.status !== "pago" ? falha(MSG_PAGAMENTO_EM_ABERTO) : { ...PAGAMENTO_EM_ABERTO_DE_NOVO },
+    p.repasseParcelaId
+      ? PAGO_PELO_REPASSE
+      : p.status !== "pago"
+        ? falha(MSG_PAGAMENTO_EM_ABERTO)
+        : pagoPelaFatura(p)
+          ? DESFACA_FATURA_CARTAO
+          : { ...PAGAMENTO_EM_ABERTO_DE_NOVO },
   );
 }
 
+/** Pagamento quitado pela baixa da fatura do cartão: pago, na fatura e sem conta bancária (o banco viu só a fatura). */
+export const pagoPelaFatura = (p: PagamentoLinha): boolean => p.status === "pago" && p.faturaCartaoId !== null && p.contaBancariaId === null && p.repasseParcelaId === null;
+
 /** Pagamento de volta a `a_pagar`: limpa a baixa. */
-const PAGAMENTO_EM_ABERTO_DE_NOVO = {
+export const PAGAMENTO_EM_ABERTO_DE_NOVO = {
   status: "a_pagar",
   pagoEm: null,
   valorOriginalPago: null,

@@ -14,7 +14,7 @@ import type { AnexoItem } from "@/server/queries/anexos";
 import type { GrupoCategorias, LinhaLancamento, TotaisLancamentos } from "@/server/queries/financeiro";
 import { MSG_FALHA } from "../../viagens/[id]/acao";
 import { dataBr, reaisParaCampo } from "../../viagens/formatos";
-import { CampoConta, Dialogo, DialogoBaixa, contaPadrao, type ContaOpcao } from "./baixa";
+import { CampoConta, Dialogo, DialogoBaixa, DialogoBaixaFatura, contaPadrao, type CompraEstrangeira, type ContaOpcao } from "./baixa";
 import { FormularioLancamento, type CartaoOpcao, type LancamentoForm, type Opcao } from "./formulario";
 
 type Aba = FiltroLancamentos["lado"];
@@ -79,10 +79,12 @@ type Props = {
   /** Linha com os anexos abertos (`?anexos=origem:id`) e os anexos dela (ou os do manual em edição). */
   anexosDe: { origem: Origem; id: string } | null;
   anexos: AnexoItem[];
+  /** Compras em moeda estrangeira das faturas do cartão em aberto da página (a baixa pede o valor em reais). */
+  estrangeiras: Record<string, CompraEstrangeira[]>;
 };
 
 export function ListaLancamentos(p: Props) {
-  const { filtro: f, hoje, linhas, totais } = p;
+  const { filtro: f, hoje, linhas, totais, estrangeiras } = p;
   const router = useRouter();
   const [pendente, iniciar] = useTransition();
   const [busca, setBusca] = useState(f.busca ?? "");
@@ -405,7 +407,7 @@ export function ListaLancamentos(p: Props) {
                       {l.viagemId ? (
                         <Link href={`/viagens/${l.viagemId}`} className="font-semibold text-verde hover:underline">Viagem {l.viagemCodigo}</Link>
                       ) : l.origem === "fatura_cartao" ? (
-                        <Link href="/financeiro/cartoes" className="font-semibold text-verde hover:underline">Compras do cartão</Link>
+                        <Link href={`/financeiro/cartoes?fatura=${l.id}`} className="font-semibold text-verde hover:underline">Compras do cartão</Link>
                       ) : (
                         <span className="text-cinza">Lançado à mão</span>
                       )}
@@ -417,7 +419,7 @@ export function ListaLancamentos(p: Props) {
                             Editar
                           </button>
                         )}
-                        {l.statusBase === "em_aberto" && l.transitaCaixa && !semFornecedor && l.origem !== "fatura_cartao" && (
+                        {l.statusBase === "em_aberto" && l.transitaCaixa && !semFornecedor && (
                           <Botao variante="secundario" className="!px-3 !py-1.5 !text-[13px]" onClick={() => setBaixando(l)}>
                             {l.repasse ? "Registrar repasse" : "Dar baixa"}
                           </Botao>
@@ -425,7 +427,7 @@ export function ListaLancamentos(p: Props) {
                         {semFornecedor && l.statusBase === "em_aberto" && (
                           <Link href={`/viagens/${l.viagemId}`} className="text-[13px] font-semibold text-verde hover:underline">Escolher na viagem</Link>
                         )}
-                        {baixada && l.transitaCaixa && l.origem !== "fatura_cartao" && (
+                        {baixada && l.transitaCaixa && (
                           <Botao variante="fantasma" className="!px-3 !py-1.5 !text-[13px]" disabled={pendente} onClick={() => desfazer(l)}>
                             {l.repasse ? "Desfazer repasse" : "Desfazer baixa"}
                           </Botao>
@@ -470,7 +472,18 @@ export function ListaLancamentos(p: Props) {
           onFechar={() => router.push(urlDe(f, { pagina: f.pagina }))}
         />
       )}
-      {baixando && <DialogoBaixa linha={baixando} hoje={hoje} contas={ativas} onFechar={() => setBaixando(null)} />}
+      {baixando && baixando.origem === "fatura_cartao" ? (
+        <DialogoBaixaFatura
+          fatura={{ id: baixando.id, titulo: baixando.pessoa, descricao: baixando.descricao, vencimento: baixando.vencimento, total: baixando.valorPrevisto }}
+          estrangeiras={estrangeiras[baixando.id] ?? []}
+          hoje={hoje}
+          contas={ativas}
+          contaInicial={baixando.contaBancariaId}
+          onFechar={() => setBaixando(null)}
+        />
+      ) : (
+        baixando && <DialogoBaixa linha={baixando} hoje={hoje} contas={ativas} onFechar={() => setBaixando(null)} />
+      )}
       {(p.edicao || p.novo) && (
         <FormularioLancamento
           key={p.edicao?.id ?? `novo-${p.novo}`}

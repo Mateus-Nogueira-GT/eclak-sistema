@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { hojeEmCuiaba } from "@/domain/clientes";
+import { formatarReais } from "@/domain/dinheiro";
+import type { Origem } from "@/domain/financeiro";
+import { arredondar } from "@/domain/decimal";
 import { ErroAcesso } from "@/server/auth";
 import { db, sql } from "@/server/db/client";
-import { auditoria, cartoesCorporativos, categoriasFinanceiras, contasBancarias, faturasCartao, lancamentos, lancamentosFinanceiros as lf, pagamentosFornecedor } from "@/server/db/schema";
+import { auditoria, cartoesCorporativos, categoriasFinanceiras, contasBancarias, contasPagar, faturasCartao, lancamentos, lancamentosFinanceiros as lf, pagamentosFornecedor, viagens } from "@/server/db/schema";
 import { criarCartao, desativarCartao, editarCartao } from "@/server/actions/cartoes";
 import {
   alternarCategoria,
@@ -14,18 +17,20 @@ import {
   baixarLinha,
   cancelarLancamento,
   criarLancamento,
+  desfazerBaixaLancamento,
   desfazerBaixaLinha,
   editarLancamento,
   salvarCategoria,
   salvarContaBancaria,
 } from "@/server/actions/financeiro";
-import { definirFormaFornecedor } from "@/server/actions/financeiro-viagem";
+import { atualizarPrevisto, baixarPagamento, definirFormaFornecedor, desfazerBaixaPagamento } from "@/server/actions/financeiro-viagem";
 import { obterFluxoDeCaixa, saldosDasContas } from "@/server/queries/caixa";
 import { listarCartoes, listarCartoesAtivos } from "@/server/queries/cartoes";
 import { listarLancamentos } from "@/server/queries/financeiro";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
-import { vendida } from "../helpers/venda";
+import { chaveTrava } from "@/server/trava-viagem";
+import { vendida, type Fixture } from "../helpers/venda";
 
 const SEM_PERMISSAO = { ok: false, erro: "Sem permissão" };
 const MSG_FATURA_PAGA = "A fatura do cartão deste período já foi paga";
@@ -534,17 +539,309 @@ describe("cartões corporativos", () => {
       const [l] = await db.select().from(lf).where(and(eq(lf.origem, "fatura_cartao"), eq(lf.id, f.id)));
       expect(l).toMatchObject({ statusBase: "baixado", valorBaixado: 30000n, valorCaixaBaixado: 30000n, baixadoEm: "2027-01-25", contaBancariaId: c.conta });
     });
+  });
 
-    it("até a baixa da fatura existir: a linha da fatura não tem baixa na lista (individual, lote nem desfazer)", async () => {
+  describe("baixa da fatura do cartão", () => {
+    const HOJE = hojeEmCuiaba();
+    const COMPRA_NO_CARTAO = "Compra no cartão corporativo: dê baixa na fatura do cartão";
+    const CONCILIADA = "Viagem conciliada: desfaça a conciliação para alterar";
+    const campo = (v: bigint) => formatarReais(v).replace("R$ ", "");
+
+    /** Viagem vendida, conta com saldo de 10.000,00, cartão; compra manual de 300,00 e a conta da viagem no cartão, na fatura de jul/2027. */
+    async function cenario(o: { estrangeira?: boolean } = {}) {
+      const x = await vendida();
+      const r = await comSessao(x.fin.id, () => salvarContaBancaria({ nome: "Santander", banco: "033", saldoInicial: "10.000,00", saldoInicialEm: "2026-01-01" }));
+      if (!r.ok || !r.id) throw new Error("conta");
+      c = { ...c, fin: x.fin.id, conta: r.id };
       const k = await novoCartao();
-      await comprar(k);
-      const [f] = await faturas(k);
-      const MSG = { ok: false, erro: "Dê baixa na fatura do cartão pela tela de cartões" };
-      expect(await comSessao(c.fin, () => baixarLinha("fatura_cartao", f.id, { data: "2026-11-20", valorPago: "300,00", juros: "", desconto: "", contaBancariaId: c.conta, observacao: "" }))).toEqual(MSG);
-      expect(await comSessao(c.fin, () => desfazerBaixaLinha("fatura_cartao", f.id))).toEqual(MSG);
-      const lote = await comSessao(c.fin, () => baixarEmLote({ itens: [{ origem: "fatura_cartao", id: f.id }], data: "2026-11-20", contaBancariaId: c.conta }));
-      expect(lote).toMatchObject({ ok: false, linhas: [{ origem: "fatura_cartao", id: f.id, motivo: "Dê baixa na fatura do cartão pela tela de cartões" }] });
-      expect((await faturas(k))[0]).toMatchObject({ status: "em_aberto" });
+      const [manual] = await comprar(k, { vencimento: "2027-07-10", emissao: "2027-07-10", competencia: "2027-07" });
+      const contaViagem = o.estrangeira ? x.transfer : x.passeio;
+      expect(await comSessao(x.fin.id, () => definirFormaFornecedor(contaViagem.id, { tipo: "cartao_corporativo", vencimento: "2027-07-12", cartaoId: k }))).toEqual({ ok: true });
+      const [fatura] = await faturas(k);
+      const [pag] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, contaViagem.id));
+      expect(pag.faturaCartaoId).toBe(fatura.id);
+      return { x, k, manual, fatura, pag, contaViagem };
+    }
+    const baixar = (faturaId: string, extra: Record<string, unknown> = {}) =>
+      comSessao(c.fin, () => baixarLinha("fatura_cartao", faturaId, { data: HOJE, contaBancariaId: c.conta, ...extra }));
+    const desfazer = (faturaId: string) => comSessao(c.fin, () => desfazerBaixaLinha("fatura_cartao", faturaId));
+    const saldo = async () => (await comSessao(c.fin, () => saldosDasContas())).find((s) => s.contaId === c.conta)!.saldoAtual;
+    const margem = async (x: Fixture) => (await comSessao(x.d.id, () => obterViagemVendida(x.viagemId)))!.estrategico!.real;
+    const pagamento = async (id: string) => (await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, id)))[0];
+    const contaPagar = async (id: string) => (await db.select().from(contasPagar).where(eq(contasPagar.id, id)))[0];
+    const fatura = async (id: string) => (await db.select().from(faturasCartao).where(eq(faturasCartao.id, id)))[0];
+    const naView = async (origem: Origem, id: string) => (await db.select().from(lf).where(and(eq(lf.origem, origem), eq(lf.id, id))))[0];
+
+    it("baixa com compra manual e de viagem em reais: fatura paga pelo total, compras quitadas sem passar de novo pelo caixa; desfazer volta tudo", async () => {
+      const { x, manual, fatura: f, pag, contaViagem } = await cenario();
+      const total = 30000n + pag.valorBrlPrevisto;
+      const saldoAntes = await saldo();
+      const margemAntes = await margem(x);
+
+      expect(await baixar(f.id)).toEqual({ ok: true });
+      expect(await fatura(f.id)).toMatchObject({ status: "baixado", pagoEm: HOJE, valorPago: total, contaBancariaId: c.conta });
+      expect(await lancamento(manual)).toMatchObject({ status: "baixado", baixadoEm: HOJE, valorPago: 30000n, baixaContaBancariaId: c.conta, faturaCartaoId: f.id });
+      expect(await naView("manual", manual)).toMatchObject({ statusBase: "baixado", transitaCaixa: false });
+      expect(await pagamento(pag.id)).toMatchObject({
+        status: "pago",
+        pagoEm: HOJE,
+        valorOriginalPago: pag.valorOriginal,
+        cambioEfetivo: null,
+        valorBrlPago: pag.valorBrlPrevisto,
+        contaBancariaId: null,
+        faturaCartaoId: f.id,
+      });
+      expect((await contaPagar(contaViagem.id)).status).toBe("paga");
+      expect(await naView("fatura_cartao", f.id)).toMatchObject({ statusBase: "baixado", valorBaixado: total, valorCaixaBaixado: total, baixadoEm: HOJE });
+      // O banco vê uma saída só: a da fatura.
+      expect(await saldo()).toBe(saldoAntes - total);
+      const margemFatura = await margem(x);
+      const aud = await db.select().from(auditoria).where(and(eq(auditoria.acao, "alterar"), inArray(auditoria.registroId, [f.id, manual, pag.id, contaViagem.id])));
+      const status = (id: string) => aud.filter((a) => a.registroId === id).map((a) => (a.depois as { status?: string }).status);
+      expect(status(f.id)).toEqual(["baixado"]);
+      expect(status(manual)).toEqual(["baixado"]);
+      expect(status(pag.id)).toEqual(["pago"]);
+      expect(status(contaViagem.id)).toContain("paga");
+
+      // Já paga: recusa a segunda baixa.
+      expect(await baixar(f.id)).toMatchObject({ ok: false, erro: "Fatura do cartão já paga" });
+
+      // Desfazer volta tudo.
+      expect(await desfazer(f.id)).toEqual({ ok: true });
+      expect(await fatura(f.id)).toMatchObject({ status: "em_aberto", pagoEm: null, valorPago: null, contaBancariaId: null });
+      expect(await lancamento(manual)).toMatchObject({ status: "em_aberto", baixadoEm: null, valorPago: null, baixaContaBancariaId: null, faturaCartaoId: f.id });
+      expect(await pagamento(pag.id)).toMatchObject({ status: "a_pagar", pagoEm: null, valorOriginalPago: null, valorBrlPago: null, faturaCartaoId: f.id });
+      expect((await contaPagar(contaViagem.id)).status).toBe("a_pagar");
+      expect(await saldo()).toBe(saldoAntes);
+      expect(await margem(x)).toEqual(margemAntes);
+      expect(await desfazer(f.id)).toMatchObject({ ok: false, erro: "Esta fatura do cartão não foi paga" });
+
+      // Margem real = a de uma baixa direta pelo previsto (mesma data, mesmo valor).
+      expect(await comSessao(x.fin.id, () => definirFormaFornecedor(contaViagem.id, { tipo: "a_vista", vencimento: "2027-07-12" }))).toEqual({ ok: true });
+      const [direto] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, contaViagem.id));
+      expect(direto.valorBrlPrevisto).toBe(pag.valorBrlPrevisto);
+      expect(await comSessao(x.fin.id, () => baixarPagamento(direto.id, { pagoEm: HOJE, valorOriginalPago: campo(direto.valorOriginal), contaBancariaId: c.conta }))).toEqual({ ok: true });
+      expect(await margem(x)).toEqual(margemFatura);
+    });
+
+    it("compra em moeda estrangeira: sem o valor em reais recusa no campo; com ele, câmbio efetivo = reais ÷ original; lote recusa (baixa individual)", async () => {
+      const { manual, fatura: f, pag } = await cenario({ estrangeira: true });
+      expect(await naView("fatura_cartao", f.id)).toMatchObject({ exigeIndividual: true });
+
+      const lote = await comSessao(c.fin, () => baixarEmLote({ itens: [{ origem: "fatura_cartao", id: f.id }], data: HOJE, contaBancariaId: c.conta }));
+      expect(lote).toMatchObject({ ok: false, linhas: [{ origem: "fatura_cartao", id: f.id, motivo: expect.stringContaining("baixa individual") }] });
+
+      const sem = await baixar(f.id);
+      expect(sem).toMatchObject({ ok: false, campos: { [`estrangeiras.${pag.id}`]: "Informe o valor em reais cobrado no cartão" } });
+      // Compra que não é desta fatura (ou não é estrangeira): recusada.
+      expect(await baixar(f.id, { estrangeiras: [{ pagamentoId: pag.id, valorBrl: "6.543,21" }, { pagamentoId: crypto.randomUUID(), valorBrl: "1,00" }] })).toMatchObject({ ok: false });
+      expect(await fatura(f.id)).toMatchObject({ status: "em_aberto" });
+      expect(await lancamento(manual)).toMatchObject({ status: "em_aberto" });
+      expect(await pagamento(pag.id)).toMatchObject({ status: "a_pagar" });
+
+      expect(await baixar(f.id, { estrangeiras: [{ pagamentoId: pag.id, valorBrl: "6.543,21" }] })).toEqual({ ok: true });
+      const cambio = arredondar(654321n * 10_000n, pag.valorOriginal);
+      const p = await pagamento(pag.id);
+      expect(p).toMatchObject({ status: "pago", valorBrlPago: 654321n, valorOriginalPago: pag.valorOriginal, contaBancariaId: null });
+      expect(p.cambioEfetivo).toBe(`${cambio / 10_000n}.${String(cambio % 10_000n).padStart(4, "0")}`);
+      expect((await fatura(f.id)).valorPago).toBe(30000n + 654321n);
+    });
+
+    it("viagem conciliada: recusa a baixa e o desfazer, nada gravado", async () => {
+      const { x, manual, fatura: f, pag } = await cenario();
+      await db.update(viagens).set({ conciliadaEm: new Date() }).where(eq(viagens.id, x.viagemId));
+      const saldoAntes = await saldo();
+      expect(await baixar(f.id)).toEqual({ ok: false, erro: CONCILIADA });
+      expect(await fatura(f.id)).toMatchObject({ status: "em_aberto" });
+      expect(await lancamento(manual)).toMatchObject({ status: "em_aberto" });
+      expect(await pagamento(pag.id)).toMatchObject({ status: "a_pagar" });
+      expect(await saldo()).toBe(saldoAntes);
+
+      await db.update(viagens).set({ conciliadaEm: null }).where(eq(viagens.id, x.viagemId));
+      expect(await baixar(f.id)).toEqual({ ok: true });
+      await db.update(viagens).set({ conciliadaEm: new Date() }).where(eq(viagens.id, x.viagemId));
+      expect(await desfazer(f.id)).toEqual({ ok: false, erro: CONCILIADA });
+      expect(await fatura(f.id)).toMatchObject({ status: "baixado" });
+      expect(await pagamento(pag.id)).toMatchObject({ status: "pago" });
+    });
+
+    it("duas viagens em duas faturas, baixadas ao mesmo tempo: travas em ordem crescente, as duas terminam sem impasse", async () => {
+      const x = await vendida();
+      const y = await vendida();
+      c = { ...c, fin: x.fin.id };
+      const k1 = await novoCartao();
+      const k2 = await novoCartao({ nome: "Master", final: "5678" });
+      const forma = (contaId: string, cartaoId: string) =>
+        comSessao(x.fin.id, () => definirFormaFornecedor(contaId, { tipo: "cartao_corporativo", vencimento: "2027-07-10", cartaoId }));
+      for (const [conta, k] of [[x.passeio.id, k1], [y.passeio.id, k1], [x.hotel.id, k2], [y.hotel.id, k2]] as const) expect(await forma(conta, k)).toEqual({ ok: true });
+      const [f1] = await faturas(k1);
+      const [f2] = await faturas(k2);
+      // Uma transação de fora segura a viagem de id maior (a mesma trava de `travarViagem`): as duas baixas param nas
+      // travas; com ordem crescente nas duas, elas se enfileiram; com ordem diferente, o Postgres abortaria uma (40P01).
+      const maior = [x.viagemId, y.viagemId].sort()[1];
+      let soltar!: () => void;
+      const segurando = new Promise<void>((r) => (soltar = r));
+      let travou!: () => void;
+      const travada = new Promise<void>((r) => (travou = r));
+      const bloqueio = sql.begin(async (t) => {
+        await t`select pg_advisory_xact_lock(hashtext(${chaveTrava(maior)}))`;
+        await t`select id from viagens where id = ${maior} for update`;
+        travou();
+        await segurando;
+      });
+      await travada;
+      const baixas = Promise.all([baixar(f1.id), baixar(f2.id)]);
+      for (let i = 0; i < 100; i++) {
+        const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()`;
+        if (n >= 2) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      soltar();
+      await bloqueio;
+      expect(await baixas).toEqual([{ ok: true }, { ok: true }]);
+      expect((await fatura(f1.id)).status).toBe("baixado");
+      expect((await fatura(f2.id)).status).toBe("baixado");
+      const ps = await db.select().from(pagamentosFornecedor).where(inArray(pagamentosFornecedor.contaId, [x.passeio.id, y.passeio.id, x.hotel.id, y.hotel.id]));
+      expect(ps.every((p) => p.status === "pago" && p.contaBancariaId === null)).toBe(true);
+    });
+
+    it("baixa direta de compra no cartão recusada pela viagem e pela lista (individual e lote); desfazer direto de compra paga na fatura também", async () => {
+      const { x, manual, fatura: f, pag } = await cenario();
+      const dadosPag = { pagoEm: HOJE, valorOriginalPago: campo(pag.valorOriginal), contaBancariaId: c.conta };
+      expect(await comSessao(x.fin.id, () => baixarPagamento(pag.id, dadosPag))).toEqual({ ok: false, erro: COMPRA_NO_CARTAO });
+      expect(await comSessao(c.fin, () => baixarLinha("pagamento", pag.id, dadosPag))).toEqual({ ok: false, erro: COMPRA_NO_CARTAO });
+      const dadosManual = { data: HOJE, valorPago: "300,00", juros: "", desconto: "", contaBancariaId: c.conta, observacao: "" };
+      expect(await comSessao(c.fin, () => baixarLancamento(manual, dadosManual))).toEqual({ ok: false, erro: COMPRA_NO_CARTAO });
+      expect(await comSessao(c.fin, () => baixarLinha("manual", manual, dadosManual))).toEqual({ ok: false, erro: COMPRA_NO_CARTAO });
+      const lote = await comSessao(c.fin, () =>
+        baixarEmLote({ itens: [{ origem: "manual", id: manual }, { origem: "pagamento", id: pag.id }], data: HOJE, contaBancariaId: c.conta }),
+      );
+      expect(lote).toMatchObject({ ok: false, linhas: [{ id: manual, motivo: COMPRA_NO_CARTAO }, { id: pag.id, motivo: COMPRA_NO_CARTAO }] });
+      expect(await pagamento(pag.id)).toMatchObject({ status: "a_pagar" });
+      expect(await lancamento(manual)).toMatchObject({ status: "em_aberto" });
+
+      expect(await baixar(f.id)).toEqual({ ok: true });
+      expect(await comSessao(x.fin.id, () => desfazerBaixaPagamento(pag.id))).toEqual({ ok: false, erro: MSG_DESFACA_FATURA });
+      expect(await comSessao(c.fin, () => desfazerBaixaLinha("pagamento", pag.id))).toEqual({ ok: false, erro: MSG_DESFACA_FATURA });
+      expect(await comSessao(c.fin, () => desfazerBaixaLancamento(manual))).toEqual({ ok: false, erro: MSG_DESFACA_FATURA });
+      expect(await comSessao(c.fin, () => desfazerBaixaLinha("manual", manual))).toEqual({ ok: false, erro: MSG_DESFACA_FATURA });
+      expect(await pagamento(pag.id)).toMatchObject({ status: "pago" });
+      expect(await lancamento(manual)).toMatchObject({ status: "baixado" });
+    });
+
+    it("definirFormaFornecedor com a fatura paga pela baixa: 'Desfaça a baixa da fatura do cartão antes'", async () => {
+      const { x, fatura: f, contaViagem } = await cenario();
+      expect(await baixar(f.id)).toEqual({ ok: true });
+      expect(await comSessao(x.fin.id, () => definirFormaFornecedor(contaViagem.id, { tipo: "a_vista" }))).toEqual({ ok: false, erro: MSG_DESFACA_FATURA });
+    });
+
+    it("lote: fatura em reais entra junto com outra linha; as compras ficam quitadas", async () => {
+      const { manual, fatura: f, pag } = await cenario();
+      const [outra] = await comprar(f.cartaoId, { forma: "PIX", valor: "50,00", vencimento: HOJE, emissao: HOJE, competencia: HOJE.slice(0, 7) });
+      const saldoAntes = await saldo();
+      const lote = await comSessao(c.fin, () =>
+        baixarEmLote({ itens: [{ origem: "manual", id: outra }, { origem: "fatura_cartao", id: f.id }], data: HOJE, contaBancariaId: c.conta }),
+      );
+      expect(lote).toEqual({ ok: true });
+      expect(await fatura(f.id)).toMatchObject({ status: "baixado", valorPago: 30000n + pag.valorBrlPrevisto });
+      expect(await lancamento(manual)).toMatchObject({ status: "baixado" });
+      expect(await pagamento(pag.id)).toMatchObject({ status: "pago", contaBancariaId: null });
+      expect(await saldo()).toBe(saldoAntes - 5000n - 30000n - pag.valorBrlPrevisto);
+    });
+
+    it("lote com duas faturas de cartões diferentes e um manual: tudo baixado; uma viagem conciliada recusa o lote inteiro e nada fica gravado", async () => {
+      const x = await vendida();
+      const y = await vendida();
+      const r = await comSessao(x.fin.id, () => salvarContaBancaria({ nome: "Santander", banco: "033", saldoInicial: "10.000,00", saldoInicialEm: "2026-01-01" }));
+      if (!r.ok || !r.id) throw new Error("conta");
+      c = { ...c, fin: x.fin.id, conta: r.id };
+      const k1 = await novoCartao();
+      const k2 = await novoCartao({ nome: "Master", final: "5678" });
+      const forma = (contaId: string, cartaoId: string) =>
+        comSessao(x.fin.id, () => definirFormaFornecedor(contaId, { tipo: "cartao_corporativo", vencimento: "2027-07-10", cartaoId }));
+      expect(await forma(x.passeio.id, k1)).toEqual({ ok: true });
+      expect(await forma(y.passeio.id, k2)).toEqual({ ok: true });
+      const [m1] = await comprar(k1, { vencimento: "2027-07-11", emissao: "2027-07-11", competencia: "2027-07" });
+      const [f1] = await faturas(k1);
+      const [f2] = await faturas(k2);
+      const lote = (ids: string[]) =>
+        comSessao(c.fin, () =>
+          baixarEmLote({ itens: [{ origem: "manual", id: ids[0] }, { origem: "fatura_cartao", id: f1.id }, { origem: "fatura_cartao", id: f2.id }], data: HOJE, contaBancariaId: c.conta }),
+        );
+
+      // Viagem de uma das faturas conciliada: recusa inteira, o manual comum (gravado antes) também volta.
+      const [comum] = await comprar(k1, { forma: "PIX", valor: "50,00", vencimento: HOJE, emissao: HOJE, competencia: HOJE.slice(0, 7) });
+      await db.update(viagens).set({ conciliadaEm: new Date() }).where(eq(viagens.id, y.viagemId));
+      const saldoAntes = await saldo();
+      expect(await lote([comum])).toMatchObject({ ok: false, erro: CONCILIADA, linhas: [{ id: f1.id }, { id: f2.id }] });
+      expect(await lancamento(comum)).toMatchObject({ status: "em_aberto" });
+      expect(await lancamento(m1)).toMatchObject({ status: "em_aberto" });
+      expect((await fatura(f1.id)).status).toBe("em_aberto");
+      expect((await fatura(f2.id)).status).toBe("em_aberto");
+      const pags = () => db.select().from(pagamentosFornecedor).where(inArray(pagamentosFornecedor.contaId, [x.passeio.id, y.passeio.id]));
+      expect((await pags()).every((p) => p.status === "a_pagar")).toBe(true);
+      expect(await saldo()).toBe(saldoAntes);
+
+      await db.update(viagens).set({ conciliadaEm: null }).where(eq(viagens.id, y.viagemId));
+      expect(await lote([comum])).toEqual({ ok: true });
+      expect(await lancamento(comum)).toMatchObject({ status: "baixado" });
+      expect(await lancamento(m1)).toMatchObject({ status: "baixado", baixaContaBancariaId: c.conta });
+      expect((await fatura(f1.id)).status).toBe("baixado");
+      expect((await fatura(f2.id)).status).toBe("baixado");
+      const ps = await pags();
+      expect(ps.every((p) => p.status === "pago" && p.contaBancariaId === null)).toBe(true);
+      const total = 5000n + 30000n + ps.reduce((t, p) => t + p.valorBrlPrevisto, 0n);
+      expect(await saldo()).toBe(saldoAntes - total);
+    });
+
+    it("fatura paga continua na lista mesmo sem compras ativas; pagamento de conta cancelada aparece em Canceladas", async () => {
+      const { fatura: f, contaViagem, pag, manual } = await cenario();
+      expect(await baixar(f.id)).toEqual({ ok: true });
+      // Compras que deixam de contar depois da baixa (conta cancelada; o lançamento baixado não se cancela).
+      await db.update(contasPagar).set({ status: "cancelada" }).where(eq(contasPagar.id, contaViagem.id));
+      await db.update(lancamentos).set({ faturaCartaoId: null, cartaoId: null, status: "em_aberto", baixadoEm: null, valorPago: null, baixaContaBancariaId: null }).where(eq(lancamentos.id, manual));
+      await db.update(pagamentosFornecedor).set({ status: "a_pagar", pagoEm: null, valorOriginalPago: null, valorBrlPago: null }).where(eq(pagamentosFornecedor.id, pag.id));
+      expect(await naView("fatura_cartao", f.id)).toMatchObject({ statusBase: "baixado", valorPrevisto: 0n });
+      const [cartao] = await comSessao(c.fin, () => listarCartoes());
+      expect(cartao.faturas.map((y) => y.id)).toEqual([f.id]);
+      const canceladas = await comSessao(c.fin, () =>
+        listarLancamentos({ lado: "pagar", de: "2000-01-01", ate: "2099-12-31", base: "vencimento", situacao: "cancelada", pagina: 1 }),
+      );
+      expect(canceladas.linhas.map((l) => l.id)).toContain(pag.id);
+      const abertas = await comSessao(c.fin, () => listarLancamentos({ lado: "pagar", de: "2000-01-01", ate: "2099-12-31", base: "vencimento", pagina: 1 }));
+      expect(abertas.linhas.map((l) => l.id)).not.toContain(pag.id);
+      expect(abertas.linhas.find((l) => l.id === f.id)).toMatchObject({ origem: "fatura_cartao", situacao: "baixada" });
+    });
+
+    it("complemento do previsto em conta no cartão: entra na fatura do ciclo de hoje; se ela já foi paga, recusa", async () => {
+      const x = await vendida();
+      const r = await comSessao(x.fin.id, () => salvarContaBancaria({ nome: "Santander", banco: "033", saldoInicial: "10.000,00", saldoInicialEm: "2026-01-01" }));
+      if (!r.ok || !r.id) throw new Error("conta");
+      c = { ...c, fin: x.fin.id, conta: r.id };
+      const k = await novoCartao();
+      // Compra no ciclo de hoje: a fatura de hoje paga; o complemento (vence hoje) seria compra em fatura paga.
+      expect(await comSessao(x.fin.id, () => definirFormaFornecedor(x.passeio.id, { tipo: "cartao_corporativo", vencimento: HOJE, cartaoId: k }))).toEqual({ ok: true });
+      const [fHoje] = await faturas(k);
+      expect(await baixar(fHoje.id)).toEqual({ ok: true });
+      const conta = await contaPagar(x.passeio.id);
+      const maior = campo(conta.previstoBrl + 10000n);
+      expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.passeio.id, maior, "Fornecedor cobrou mais"))).toEqual({ ok: false, erro: MSG_FATURA_PAGA });
+      expect(await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.passeio.id))).toHaveLength(1);
+
+      // Compra num ciclo anterior (fatura paga): o complemento vai para a fatura do ciclo de hoje, no mesmo cartão.
+      expect(await desfazer(fHoje.id)).toEqual({ ok: true });
+      const antiga = (() => {
+        const [a, m] = HOJE.split("-").map(Number);
+        return new Date(Date.UTC(a, m - 3, 10)).toISOString().slice(0, 10);
+      })();
+      expect(await comSessao(x.fin.id, () => definirFormaFornecedor(x.passeio.id, { tipo: "cartao_corporativo", vencimento: antiga, cartaoId: k }))).toEqual({ ok: true });
+      const [p0] = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.passeio.id));
+      expect(p0.faturaCartaoId).not.toBe(fHoje.id);
+      expect(await baixar(p0.faturaCartaoId!)).toEqual({ ok: true });
+      expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.passeio.id, maior, "Fornecedor cobrou mais"))).toEqual({ ok: true });
+      const linhas = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.passeio.id)).orderBy(asc(pagamentosFornecedor.numero));
+      expect(linhas).toHaveLength(2);
+      expect(linhas[1]).toMatchObject({ status: "a_pagar", vencimento: HOJE, valorBrlPrevisto: 10000n, cartaoId: k, faturaCartaoId: fHoje.id });
     });
   });
 });

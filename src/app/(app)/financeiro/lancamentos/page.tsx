@@ -4,7 +4,7 @@ import { filtroDaUrl } from "@/domain/financeiro-entrada";
 import { ORIGENS, type Origem } from "@/domain/financeiro";
 import { ehUuid } from "@/server/acesso";
 import { listarAnexos } from "@/server/queries/anexos";
-import { listarCartoesAtivos } from "@/server/queries/cartoes";
+import { comprasEstrangeirasDasFaturas, listarCartoesAtivos } from "@/server/queries/cartoes";
 import { listarClientes } from "@/server/queries/clientes";
 import { listarCategorias, listarContasBancarias, listarLancamentos, obterLancamento } from "@/server/queries/financeiro";
 import { listarFornecedores } from "@/server/queries/fornecedores";
@@ -39,6 +39,10 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
     editar ? listarAnexos("manual", editar) : anexosDe ? listarAnexos(anexosDe.origem, anexosDe.id) : Promise.resolve([]),
     formularioAberto ? listarCartoesAtivos() : Promise.resolve([]),
   ]);
+  // Faturas do cartão em aberto com compra estrangeira na página: a baixa pede o valor em reais de cada compra.
+  const estrangeiras = await comprasEstrangeirasDasFaturas(
+    lista.linhas.filter((l) => l.origem === "fatura_cartao" && l.statusBase === "em_aberto" && l.exigeIndividual).map((l) => l.id),
+  );
   const lancamento: LancamentoForm | null =
     edicao && edicao.status === "em_aberto"
       ? {
@@ -85,6 +89,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
         novo={!lancamento && (novo === "pagar" || novo === "receber") ? novo : null}
         anexosDe={anexosDe}
         anexos={anexos}
+        estrangeiras={estrangeiras}
       />
     </div>
   );

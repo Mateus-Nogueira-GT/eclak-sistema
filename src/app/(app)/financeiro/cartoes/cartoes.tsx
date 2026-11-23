@@ -5,9 +5,13 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Grade } from "@/components/kit";
 import { Badge, Botao, Campo, Card, CardHeader, inputCls } from "@/components/ui";
+import type { Moeda } from "@/domain/cambio";
 import { formatarReais } from "@/domain/dinheiro";
 import { CENTROS, type Centro, type StatusLancamento } from "@/domain/financeiro";
 import { criarCartao, desativarCartao, editarCartao } from "@/server/actions/cartoes";
+import { desfazerBaixaLinha } from "@/server/actions/financeiro";
+import { DialogoBaixaFatura } from "../lancamentos/baixa";
+import { formatarMoeda } from "../../viagens/formatos";
 
 type CompraTela = {
   origem: "manual" | "pagamento";
@@ -18,6 +22,10 @@ type CompraTela = {
   valor: string;
   viagemId: string | null;
   viagemDestino: string | null;
+  moeda: Moeda;
+  valorOriginal: string;
+  paga: boolean;
+  valorPago: string | null;
 };
 type FaturaTela = { id: string; fechamento: string; vencimento: string; status: StatusLancamento; pagoEm: string | null; valorPago: string | null; total: string; compras: CompraTela[] };
 export type CartaoTela = {
@@ -44,8 +52,21 @@ function SituacaoFatura({ f }: { f: FaturaTela }) {
   return <Badge tom="cinza">Em aberto</Badge>;
 }
 
-/** Cadastro dos cartões corporativos e, por cartão, as faturas com o total e as compras de cada uma. */
-export function Cartoes({ cartoes, contas }: { cartoes: CartaoTela[]; contas: { id: string; nome: string }[] }) {
+/**
+ * Cadastro dos cartões corporativos e, por cartão, as faturas com o total e as compras de cada uma. `faturaAberta`
+ * (`?fatura=<id>`) mostra o detalhe da fatura no topo, com "Dar baixa" e "Desfazer baixa".
+ */
+export function Cartoes({
+  cartoes,
+  contas,
+  hoje,
+  faturaAberta,
+}: {
+  cartoes: CartaoTela[];
+  contas: { id: string; nome: string }[];
+  hoje: string;
+  faturaAberta: string | null;
+}) {
   const router = useRouter();
   const [editando, setEditando] = useState<string | null>(null);
   const [v, setV] = useState(VAZIO);
@@ -120,8 +141,11 @@ export function Cartoes({ cartoes, contas }: { cartoes: CartaoTela[]; contas: { 
     </Campo>
   );
 
+  const aberta = faturaAberta ? cartoes.flatMap((k) => k.faturas.map((f) => ({ k, f }))).find((x) => x.f.id === faturaAberta) : undefined;
+
   return (
     <div className="space-y-5">
+      {faturaAberta && <FaturaDetalhe aberta={aberta} contas={contas} hoje={hoje} />}
       <Card className="pb-6">
         <CardHeader title={editando ? "Editar cartão" : "Novo cartão"} />
         {msg && (
@@ -217,7 +241,10 @@ export function Cartoes({ cartoes, contas }: { cartoes: CartaoTela[]; contas: { 
                     <span className="text-cinza">
                       {f.compras.length} {f.compras.length === 1 ? "compra" : "compras"}
                     </span>
-                    <b className="num ml-auto font-bold">{reais(f.total)}</b>
+                    <b className="num ml-auto font-bold">{reais(f.status === "baixado" && f.valorPago !== null ? f.valorPago : f.total)}</b>
+                    <Link href={`/financeiro/cartoes?fatura=${f.id}`} className="text-[13px] font-semibold text-verde hover:underline">
+                      Abrir fatura
+                    </Link>
                     <span className="text-[13px] font-semibold text-verde group-open:hidden">Ver compras</span>
                     <span className="hidden text-[13px] font-semibold text-verde group-open:inline">Esconder</span>
                   </summary>
@@ -226,19 +253,7 @@ export function Cartoes({ cartoes, contas }: { cartoes: CartaoTela[]; contas: { 
                     className="mt-3"
                     right={[3]}
                     head={["Data da compra", "Descrição", "Fornecedor ou pessoa", "Valor", "Origem"]}
-                    rows={f.compras.map((c) => [
-                      <span key="d" className="num">{dataBr(c.data)}</span>,
-                      c.descricao,
-                      c.pessoa ?? "",
-                      <span key="v" className="num">{reais(c.valor)}</span>,
-                      c.viagemId ? (
-                        <Link key="o" href={`/viagens/${c.viagemId}`} className="font-semibold text-verde hover:underline">
-                          Viagem {c.viagemDestino}
-                        </Link>
-                      ) : (
-                        "Lançado à mão"
-                      ),
-                    ])}
+                    rows={f.compras.map((c) => linhaCompra(c))}
                   />
                 </details>
               ))}
@@ -247,5 +262,123 @@ export function Cartoes({ cartoes, contas }: { cartoes: CartaoTela[]; contas: { 
         </Card>
       ))}
     </div>
+  );
+}
+
+/** Uma compra da fatura numa linha da grade: data, descrição, pessoa, valor (com a moeda original) e a origem. */
+function linhaCompra(c: CompraTela, comPago = false) {
+  const estrangeira = c.moeda !== "BRL";
+  return [
+    <span key="d" className="num">{dataBr(c.data)}</span>,
+    c.descricao,
+    c.pessoa ?? "",
+    <span key="v" className="num">
+      {reais(comPago && c.paga && c.valorPago !== null ? c.valorPago : c.valor)}
+      {estrangeira && <span className="block text-[12px] text-cinza">{formatarMoeda(BigInt(c.valorOriginal), c.moeda)}</span>}
+      {comPago && c.paga && c.valorPago !== null && c.valorPago !== c.valor && <span className="block text-[12px] text-cinza">previsto {reais(c.valor)}</span>}
+    </span>,
+    c.viagemId ? (
+      <Link key="o" href={`/viagens/${c.viagemId}`} className="font-semibold text-verde hover:underline">
+        Viagem {c.viagemDestino}
+      </Link>
+    ) : (
+      "Lançado à mão"
+    ),
+  ];
+}
+
+const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const mesAno = (iso: string) => `${MESES[Number(iso.slice(5, 7)) - 1]}/${iso.slice(0, 4)}`;
+
+/** Detalhe da fatura (`?fatura=<id>`): compras, total e a baixa (ou o desfazer) da fatura inteira. */
+function FaturaDetalhe({ aberta, contas, hoje }: { aberta: { k: CartaoTela; f: FaturaTela } | undefined; contas: { id: string; nome: string }[]; hoje: string }) {
+  const router = useRouter();
+  const [baixando, setBaixando] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [pendente, iniciar] = useTransition();
+  if (!aberta) {
+    return (
+      <Card className="pb-5">
+        <CardHeader eyebrow="Fatura do cartão" title="Fatura não encontrada" />
+        <p className="px-6 pt-3 text-[14px] text-cinza">
+          Ela pode ter ficado sem compras. <Link href="/financeiro/cartoes" className="font-semibold text-verde hover:underline">Voltar aos cartões</Link>
+        </p>
+      </Card>
+    );
+  }
+  const { k, f } = aberta;
+  const paga = f.status === "baixado";
+  const titulo = `${k.nome} · final ${k.final}`;
+  const descricao = `Fatura do cartão · ${mesAno(f.fechamento)}`;
+  const estrangeiras = f.compras
+    .filter((c) => c.origem === "pagamento" && c.moeda !== "BRL")
+    .map((c) => ({ id: c.id, descricao: c.descricao, pessoa: c.pessoa, moeda: c.moeda, valorOriginal: BigInt(c.valorOriginal), valorPrevisto: BigInt(c.valor) }));
+
+  function desfazer() {
+    if (!window.confirm(`Desfazer a baixa da ${descricao.toLowerCase()} (${titulo})? A fatura e as compras dela voltam a ficar em aberto.`)) return;
+    setMsg(null);
+    iniciar(async () => {
+      try {
+        const r = await desfazerBaixaLinha("fatura_cartao", f.id);
+        if (r.ok) router.refresh();
+        else setMsg(r.erro);
+      } catch {
+        setMsg("Não foi possível concluir. Tente de novo.");
+      }
+    });
+  }
+
+  return (
+    <Card className="pb-2">
+      <CardHeader eyebrow={descricao} title={titulo} />
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-2 px-6 pt-3 text-[14px]">
+        <span>
+          <span className="text-cinza">Fecha </span>
+          <span className="num font-semibold">{dataBr(f.fechamento)}</span>
+        </span>
+        <span>
+          <span className="text-cinza">Vence </span>
+          <span className="num font-semibold">{dataBr(f.vencimento)}</span>
+        </span>
+        <SituacaoFatura f={f} />
+        <span className="ml-auto text-right">
+          <span className="text-cinza">{paga ? "Pago " : "Total "}</span>
+          <b className="num text-[18px] font-bold">{reais(paga && f.valorPago !== null ? f.valorPago : f.total)}</b>
+          {paga && f.valorPago !== null && f.valorPago !== f.total && <span className="block text-[12px] text-cinza">previsto {reais(f.total)}</span>}
+        </span>
+        {paga ? (
+          <Botao variante="fantasma" disabled={pendente} onClick={desfazer}>Desfazer baixa</Botao>
+        ) : (
+          <Botao disabled={f.compras.length === 0} onClick={() => setBaixando(true)}>Dar baixa</Botao>
+        )}
+        <Link href="/financeiro/cartoes" className="text-[13px] font-semibold text-verde hover:underline">Fechar</Link>
+      </div>
+      {msg && (
+        <p role="alert" className="mx-6 mt-3 rounded-[5px] border border-ouro bg-ouro/15 px-4 py-3 text-[14px] text-texto">
+          {msg}
+        </p>
+      )}
+      {f.compras.length === 0 ? (
+        <p className="px-6 pb-4 pt-4 text-[14px] text-cinza">Nenhuma compra ativa nesta fatura.</p>
+      ) : (
+        <Grade
+          compacta
+          className="mt-4"
+          right={[3]}
+          head={["Data da compra", "Descrição", "Fornecedor ou pessoa", "Valor", "Origem"]}
+          rows={f.compras.map((c) => linhaCompra(c, true))}
+        />
+      )}
+      {baixando && (
+        <DialogoBaixaFatura
+          fatura={{ id: f.id, titulo, descricao, vencimento: f.vencimento, total: BigInt(f.total) }}
+          estrangeiras={estrangeiras}
+          hoje={hoje}
+          contas={contas}
+          contaInicial={k.contaBancariaId}
+          onFechar={() => setBaixando(false)}
+        />
+      )}
+    </Card>
   );
 }

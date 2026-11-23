@@ -96,6 +96,8 @@ export type LinhaLancamento = {
   forma: string;
   exigeIndividual: boolean;
   repasse: boolean;
+  /** Compra numa fatura do cartão corporativo (só aparece cancelada: a ativa sai pela linha da fatura). */
+  faturaCartaoId: string | null;
   situacao: Situacao;
   categoria: { grupo: string; nome: string };
   contaBancaria: string | null;
@@ -131,11 +133,12 @@ const escaparLike = (t: string) => t.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /**
  * Filtros comuns à lista, à contagem e aos totais (sem lado, situação e período). As compras de uma fatura do
- * cartão corporativo (`fatura_cartao_id`) nunca aparecem: a lista mostra a linha da fatura no lugar delas.
+ * cartão corporativo (`fatura_cartao_id`) não aparecem: a lista mostra a linha da fatura no lugar delas. A cancelada
+ * (pagamento de conta cancelada, que não conta na fatura) continua visível no filtro Canceladas.
  * Origem "viagem" = parcelas, pagamentos e comissões; "manual" = o resto (lançamentos à mão e faturas do cartão).
  */
 function filtrosComuns(f: FiltroLancamentos): SQL[] {
-  const c: SQL[] = [isNull(lf.faturaCartaoId)];
+  const c: SQL[] = [or(isNull(lf.faturaCartaoId), eq(lf.statusBase, "cancelado"))!];
   if (f.categoriaId) c.push(eq(lf.categoriaId, f.categoriaId));
   if (f.grupo) c.push(eq(categoriasFinanceiras.grupo, f.grupo));
   if (f.centro) c.push(eq(lf.centro, f.centro));
@@ -205,6 +208,7 @@ export async function listarLancamentos(filtro: FiltroLancamentos): Promise<List
         forma: lf.forma,
         exigeIndividual: lf.exigeIndividual,
         repasse: lf.repasse,
+        faturaCartaoId: lf.faturaCartaoId,
         situacao,
         grupo: categoriasFinanceiras.grupo,
         categoriaNome: categoriasFinanceiras.nome,

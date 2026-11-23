@@ -408,7 +408,9 @@ export async function definirComissaoTipo(contaId: string, dados: ComissaoTipoEn
 /**
  * Atualiza o previsto atual da conta em reais (o fornecedor cobrou diferente do orçado), com motivo obrigatório.
  * As linhas em aberto absorvem a diferença (`reprevisarLinhas`); sem linha em aberto, o aumento acima do já pago
- * vira uma linha nova (vence hoje) e a conta volta a `a_pagar`. O previsto na venda não muda.
+ * vira uma linha nova (vence hoje) e a conta volta a `a_pagar`; na conta paga no cartão corporativo, essa linha é
+ * compra nova no mesmo cartão, na fatura do ciclo de hoje (recusada se essa fatura já foi paga). O previsto na venda
+ * não muda.
  */
 export async function atualizarPrevisto(contaId: string, valorBrl: string, motivo: string): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
@@ -442,6 +444,16 @@ export async function atualizarPrevisto(contaId: string, valorBrl: string, motiv
         // (vence hoje), sem passar do novo previsto; a conta volta a `a_pagar`.
         const complemento = linhas.some((l) => l.status !== "pago") ? 0n : minimo(novo - conta.previstoBrl, novo - jaPago);
         if (complemento > 0n) {
+          const hoje = hojeEmCuiaba();
+          // Conta paga no cartão corporativo: o complemento é compra nova no mesmo cartão, na fatura do ciclo de hoje
+          // (fatura já paga: recusa). Ordem das travas de `cartoes.ts`: viagem → conta e linhas (acima) → cartão e fatura.
+          const cartaoId = conta.forma === "cartao_corporativo" ? ([...linhas].reverse().find((l) => l.cartaoId)?.cartaoId ?? null) : null;
+          let vinculo: { cartaoId: string | null; faturaCartaoId: string | null } = { cartaoId: null, faturaCartaoId: null };
+          if (cartaoId) {
+            const travadas = await travarFaturasNa(tx, usuario.id, [], [{ cartaoId, dataCompra: hoje, exigeAtivo: false }]);
+            if (ehFalha(travadas)) throw new Desfazer(travadas);
+            vinculo = travadas[0];
+          }
           const valorOriginal =
             conta.moeda === "BRL" || !conta.cambioAplicado
               ? complemento
@@ -451,9 +463,10 @@ export async function atualizarPrevisto(contaId: string, valorBrl: string, motiv
             .values({
               contaId: conta.id,
               numero: linhas.reduce((n, l) => Math.max(n, l.numero), 0) + 1,
-              vencimento: hojeEmCuiaba(),
+              vencimento: hoje,
               valorOriginal,
               valorBrlPrevisto: complemento,
+              ...vinculo,
             })
             .returning();
           await registrarAuditoria(tx, { usuarioId: usuario.id, tabela: "pagamentos_fornecedor", registroId: linha.id, acao: "criar", depois: semId(linha) });
