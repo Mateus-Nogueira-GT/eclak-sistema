@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { Botao, Campo, Eyebrow, Select, inputCls } from "@/components/ui";
 import { lerReais } from "@/domain/dinheiro";
+import type { Moeda } from "@/domain/cambio";
 import { baixarLinha, baixarRepasse } from "@/server/actions/financeiro";
 import type { LinhaLancamento } from "@/server/queries/financeiro";
 import { useAcao } from "../../viagens/[id]/acao";
@@ -211,6 +212,117 @@ export function DialogoBaixa({ linha, hoje, contas, onFechar }: { linha: LinhaLa
           {linha.viagemCodigo && <> · Viagem {linha.viagemCodigo} (a mesma baixa da tela da viagem)</>}
         </p>
         <div className="grid grid-cols-2 gap-4">{corpo}</div>
+        <ErroAcao acao={acao} />
+      </div>
+    </Dialogo>
+  );
+}
+
+/** Compra em moeda estrangeira de uma fatura do cartão: na baixa, pede o valor em reais cobrado (com IOF). */
+export type CompraEstrangeira = { id: string; descricao: string; pessoa: string | null; moeda: Moeda; valorOriginal: bigint; valorPrevisto: bigint };
+
+/**
+ * Baixa da fatura do cartão corporativo (a mesma na lista e na tela de cartões): data, conta bancária (a de débito do
+ * cartão já vem escolhida, se ativa) e, para cada compra em moeda estrangeira, o valor em reais cobrado na fatura.
+ * Uma saída só no banco, pelo total; as compras ficam quitadas junto.
+ */
+export function DialogoBaixaFatura({
+  fatura,
+  estrangeiras,
+  hoje,
+  contas,
+  contaInicial,
+  onFechar,
+}: {
+  fatura: { id: string; titulo: string; descricao: string; vencimento: string; total: bigint };
+  estrangeiras: CompraEstrangeira[];
+  hoje: string;
+  contas: ContaOpcao[];
+  contaInicial: string | null;
+  onFechar: () => void;
+}) {
+  const acao = useAcao();
+  const [data, setData] = useState(hoje);
+  const [conta, setConta] = useState(contaInicial && contas.some((c) => c.id === contaInicial) ? contaInicial : contaPadrao(contas));
+  const [valores, setValores] = useState<Record<string, string>>({});
+  let total = fatura.total;
+  let legivel = true;
+  for (const e of estrangeiras) {
+    try {
+      total += (valores[e.id] ? lerReais(valores[e.id]) : e.valorPrevisto) - e.valorPrevisto;
+    } catch {
+      legivel = false;
+    }
+  }
+  const enviar = () =>
+    baixarLinha("fatura_cartao", fatura.id, {
+      data,
+      contaBancariaId: conta,
+      estrangeiras: estrangeiras.map((e) => ({ pagamentoId: e.id, valorBrl: valores[e.id] ?? "" })),
+    });
+  return (
+    <Dialogo
+      eyebrow="Dar baixa · fatura do cartão"
+      titulo={fatura.titulo}
+      onFechar={onFechar}
+      rodape={
+        <>
+          <Botao variante="secundario" onClick={onFechar}>Cancelar</Botao>
+          <Botao disabled={acao.pendente} onClick={() => acao.executar(enviar, onFechar)}>Confirmar baixa</Botao>
+        </>
+      }
+    >
+      <div className="px-6 py-5">
+        <p className="mb-4 text-[13.5px] text-cinza">
+          {fatura.descricao} · vence em {dataBr(fatura.vencimento)} · previsto <span className="num font-semibold text-texto">{formatarMoeda(fatura.total, "BRL")}</span>
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <Campo label="Data do pagamento">
+            <input type="date" max={hoje} className={`${inputCls} ${marca(acao, "data")}`} value={data} onChange={(e) => setData(e.target.value)} />
+          </Campo>
+          <CampoConta contas={contas} valor={conta} onChange={setConta} invalido={"contaBancariaId" in acao.campos} />
+        </div>
+        {estrangeiras.length > 0 && (
+          <div className="mt-5">
+            <Eyebrow>Compras em moeda estrangeira</Eyebrow>
+            <p className="mt-1 text-[13px] text-cinza">Informe o valor em reais cobrado na fatura (com IOF). O câmbio efetivo de cada compra sai dele.</p>
+            <div className="mt-3 space-y-3">
+              {estrangeiras.map((e) => {
+                const k = `estrangeiras.${e.id}`;
+                const invalido = k in acao.campos || "estrangeiras" in acao.campos;
+                return (
+                  <div key={e.id} className="grid grid-cols-[1fr_200px] items-end gap-4">
+                    <div className="text-[13.5px]">
+                      <b className="font-semibold">{e.pessoa || e.descricao}</b>
+                      <span className="block text-cinza">
+                        {e.descricao} · {formatarMoeda(e.valorOriginal, e.moeda)} · previsto {formatarMoeda(e.valorPrevisto, "BRL")}
+                      </span>
+                      {acao.campos[k] && <span className="block text-[12px] text-texto">{acao.campos[k]}</span>}
+                    </div>
+                    <Campo label="Valor em reais cobrado">
+                      <input
+                        className={`${inputCls} num text-right ${invalido ? "!border-ouro bg-ouro/15" : ""}`}
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        aria-invalid={invalido || undefined}
+                        value={valores[e.id] ?? ""}
+                        onChange={(ev) => {
+                          const v = ev.target.value;
+                          setValores((x) => ({ ...x, [e.id]: v }));
+                          acao.limparCampo(k);
+                        }}
+                      />
+                    </Campo>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        <p className="mt-5 flex items-baseline justify-between border-t border-linha pt-3 text-[14px]">
+          <span className="text-cinza">Sai da conta</span>
+          <b className="num text-[16px]">{legivel ? formatarMoeda(total, "BRL") : "—"}</b>
+        </p>
         <ErroAcao acao={acao} />
       </div>
     </Dialogo>

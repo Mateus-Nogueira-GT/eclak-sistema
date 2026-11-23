@@ -1,5 +1,5 @@
 /**
- * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores, os clientes fictícios do protótipo, três orçamentos (aguardando, aprovado e devolvido) e duas viagens vendidas (Ribeiro, em viagem; e uma conciliada), duas contas bancárias, lançamentos manuais do protótipo e a fatura da Ribeiro.
+ * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores, os clientes fictícios do protótipo, três orçamentos (aguardando, aprovado e devolvido) e duas viagens vendidas (Ribeiro, em viagem; e uma conciliada), duas contas bancárias, lançamentos manuais do protótipo, a fatura da Ribeiro, um cartão corporativo com três compras e uma nota fiscal.
  * Recusa rodar se DATABASE_URL ou NEXT_PUBLIC_SUPABASE_URL não forem locais. Idempotente: o que já existe é pulado.
  */
 import { config } from "dotenv";
@@ -257,7 +257,7 @@ async function main() {
     const orcamentosNovos = await semearOrcamentos(sql);
     const vendasNovas = await semearVendas(sql);
     const fin = await semearFinanceiro(sql);
-    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s), ${vendasNovas} viagem(ns) vendida(s), ${fin.lancamentos} lançamento(s) e ${fin.faturas} fatura(s) criados.`);
+    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s), ${vendasNovas} viagem(ns) vendida(s), ${fin.lancamentos} lançamento(s), ${fin.faturas} fatura(s), ${fin.cartoes} cartão(ões) com ${fin.compras} compra(s) e ${fin.notas} nota(s) fiscal(is) criados.`);
     console.log(`Logins: ${USUARIOS.map((u) => u.email).join(", ")} (senha ${SENHA})`);
   } finally {
     await sql.end();

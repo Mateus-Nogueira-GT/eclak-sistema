@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  baixaFaturaCartaoSchema,
   baixaLancamentoSchema,
+  cartaoSchema,
   categoriaSchema,
   contaBancariaSchema,
   filtroLancamentosSchema,
@@ -32,6 +34,15 @@ function erro(r: { success: boolean; error?: { issues: { path: PropertyKey[]; me
 }
 
 describe("lancamentoSchema", () => {
+  it("cartão corporativo: obrigatório a pagar no cartão de crédito; nulo fora disso", () => {
+    const credito = { ...lanc, forma: "Cartão de crédito" };
+    expect(erro(lancamentoSchema.safeParse(credito))).toEqual(["cartaoId: Escolha o cartão corporativo"]);
+    expect(erro(lancamentoSchema.safeParse({ ...credito, cartaoId: "" }))).toEqual(["cartaoId: Escolha o cartão corporativo"]);
+    expect(lancamentoSchema.parse({ ...credito, cartaoId: U2 }).cartaoId).toBe(U2);
+    expect(lancamentoSchema.parse({ ...lanc, cartaoId: U2 }).cartaoId).toBeNull();
+    expect(lancamentoSchema.parse({ ...credito, lado: "receber", cartaoId: U2 }).cartaoId).toBeNull();
+    expect(lancamentoSchema.parse(lanc).cartaoId).toBeNull();
+  });
   it("aceita um lançamento válido e lê o valor em centavos", () => {
     const r = lancamentoSchema.safeParse(lanc);
     expect(r.success).toBe(true);
@@ -166,5 +177,48 @@ describe("filtroDaUrl", () => {
   it("fevereiro e dezembro", () => {
     expect(filtroDaUrl({}, "2028-02-10")).toMatchObject({ de: "2028-02-01", ate: "2028-02-29" });
     expect(filtroDaUrl({}, "2026-12-31")).toMatchObject({ de: "2026-12-01", ate: "2026-12-31" });
+  });
+});
+
+describe("cartaoSchema", () => {
+  const cartao = { nome: "Visa", final: "1234", diaFechamento: "15", diaVencimento: 25, contaBancariaId: U1, centro: "MT" };
+  it("aceita e lê os dias como número", () => {
+    expect(cartaoSchema.parse(cartao)).toEqual({ ...cartao, diaFechamento: 15, diaVencimento: 25 });
+  });
+  it("final de 4 dígitos, dias de 1 a 28, conta e centro obrigatórios", () => {
+    expect(erro(cartaoSchema.safeParse({ ...cartao, final: "123" }))).toEqual(["final: Informe os 4 últimos dígitos do cartão"]);
+    expect(erro(cartaoSchema.safeParse({ ...cartao, final: "12a4" }))).toEqual(["final: Informe os 4 últimos dígitos do cartão"]);
+    expect(erro(cartaoSchema.safeParse({ ...cartao, diaFechamento: "29" }))).toEqual(["diaFechamento: Escolha um dia de 1 a 28"]);
+    expect(erro(cartaoSchema.safeParse({ ...cartao, diaVencimento: "0" }))).toEqual(["diaVencimento: Escolha um dia de 1 a 28"]);
+    expect(erro(cartaoSchema.safeParse({ ...cartao, diaVencimento: "" }))).toEqual(["diaVencimento: Escolha um dia de 1 a 28"]);
+    expect(erro(cartaoSchema.safeParse({ ...cartao, diaVencimento: "1.5" }))).toEqual(["diaVencimento: Escolha um dia de 1 a 28"]);
+    expect(erro(cartaoSchema.safeParse({ ...cartao, nome: " " }))).toEqual(["nome: Informe o nome do cartão"]);
+    expect(erro(cartaoSchema.safeParse({ ...cartao, contaBancariaId: "" }))).toEqual(["contaBancariaId: Escolha a conta bancária"]);
+    expect(erro(cartaoSchema.safeParse({ ...cartao, centro: "SP" }))).toEqual(["centro: Centro de custo inválido"]);
+  });
+});
+
+describe("baixaFaturaCartaoSchema", () => {
+  const s = baixaFaturaCartaoSchema(HOJE);
+  it("data até hoje, conta bancária e os valores em reais das compras estrangeiras", () => {
+    expect(s.parse({ data: HOJE, contaBancariaId: U1 })).toEqual({ data: HOJE, contaBancariaId: U1, estrangeiras: [] });
+    expect(s.parse({ data: HOJE, contaBancariaId: U1, estrangeiras: [{ pagamentoId: U2, valorBrl: "6.543,21" }] })).toEqual({
+      data: HOJE,
+      contaBancariaId: U1,
+      estrangeiras: [{ pagamentoId: U2, valorBrl: 654321n }],
+    });
+  });
+  it("recusa data futura, conta vazia e campos estranhos", () => {
+    expect(s.safeParse({ data: "2026-11-23", contaBancariaId: U1 }).success).toBe(false);
+    expect(s.safeParse({ data: HOJE, contaBancariaId: "" }).success).toBe(false);
+    expect(s.safeParse({ data: HOJE, contaBancariaId: U1, valorPago: "1,00" }).success).toBe(false);
+  });
+  it("valor em reais vazio, zero ou inválido: erro no campo da compra; compra repetida recusada", () => {
+    const r = s.safeParse({ data: HOJE, contaBancariaId: U1, estrangeiras: [{ pagamentoId: U2, valorBrl: "" }] });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0].path).toEqual(["estrangeiras", U2]);
+    expect(s.safeParse({ data: HOJE, contaBancariaId: U1, estrangeiras: [{ pagamentoId: U2, valorBrl: "0,00" }] }).success).toBe(false);
+    const rep = s.safeParse({ data: HOJE, contaBancariaId: U1, estrangeiras: [{ pagamentoId: U2, valorBrl: "1,00" }, { pagamentoId: U2, valorBrl: "2,00" }] });
+    expect(rep.success).toBe(false);
   });
 });

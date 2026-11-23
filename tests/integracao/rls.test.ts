@@ -140,6 +140,13 @@ describe("RLS: anon não lê nada", () => {
               values ('receber', 'Teste', ${cat.id}, 'MT', '2027-01', '2027-01-01', '2027-01-10', 100, 'pix', ${cb.id}, ${u.id})`;
     const [fat] = await sql`insert into faturas (venda_id, numero, emitida_por) values (${venda.id}, 1405, ${u.id}) returning id`;
     await sql`insert into faturas_versoes (fatura_id, versao, emitida_por, dados) values (${fat.id}, 1, ${u.id}, '{}')`;
+    // Fatia 4b: um anexo (só a linha; o objeto no Storage não importa para o RLS da tabela).
+    await sql`insert into anexos (dono_tipo, dono_id, caminho, nome, mime, tamanho, enviado_por)
+              values ('parcela', ${venda.id}, 'parcela/teste/rls', 'rls.pdf', 'application/pdf', 10, ${u.id})`;
+    // Fatia 4b: um cartão corporativo e uma fatura dele.
+    const [cartao] = await sql`insert into cartoes_corporativos (nome, final, dia_fechamento, dia_vencimento, conta_bancaria_id, centro)
+              values ('Visa', '1234', 15, 25, ${cb.id}, 'MT') returning id`;
+    await sql`insert into faturas_cartao (cartao_id, fechamento, vencimento) values (${cartao.id}, '2027-01-15', '2027-01-25')`;
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from lancamentos_financeiros`;
     expect(n).toBeGreaterThan(0);
   });
@@ -166,6 +173,10 @@ describe("RLS: anon não lê nada", () => {
     "faturas",
     "faturas_versoes",
     "lancamentos_financeiros",
+    "anexos",
+    "notas_fiscais",
+    "cartoes_corporativos",
+    "faturas_cartao",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
@@ -174,7 +185,7 @@ describe("RLS: anon não lê nada", () => {
   }
 
   it("tabelas do financeiro com RLS ligado", async () => {
-    const tabelas = ["categorias_financeiras", "contas_bancarias", "lancamentos", "faturas_contador", "faturas", "faturas_versoes"];
+    const tabelas = ["categorias_financeiras", "contas_bancarias", "lancamentos", "faturas_contador", "faturas", "faturas_versoes", "anexos", "notas_fiscais", "cartoes_corporativos", "faturas_cartao"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());

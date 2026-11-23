@@ -1,13 +1,14 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
-  pgEnum,
   pgTable,
   pgView,
   smallint,
@@ -17,16 +18,15 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { CATEGORIAS_SISTEMA, CENTROS, FORMAS_FINANCEIRO_SLUG, LADOS, STATUS_LANCAMENTO, type CategoriaSistema, type Origem } from "@/domain/financeiro";
+import { CATEGORIAS_SISTEMA, type CategoriaSistema, type Origem } from "@/domain/financeiro";
+import { cartoesCorporativos, faturasCartao } from "./cartoes";
 import { clientes } from "./clientes";
+import { centroCustoEnum, formaFinanceiroEnum, ladoFinanceiroEnum, statusLancamentoEnum } from "./financeiro-enums";
 import { fornecedores } from "./fornecedores";
 import { usuarios } from "./usuarios";
 import { vendas } from "./vendas";
 
-export const ladoFinanceiroEnum = pgEnum("lado_financeiro", LADOS);
-export const centroCustoEnum = pgEnum("centro_custo", CENTROS);
-export const formaFinanceiroEnum = pgEnum("forma_financeiro", FORMAS_FINANCEIRO_SLUG);
-export const statusLancamentoEnum = pgEnum("status_lancamento", STATUS_LANCAMENTO);
+export { centroCustoEnum, formaFinanceiroEnum, ladoFinanceiroEnum, statusLancamentoEnum };
 
 const centavos = (nome: string) => bigint(nome, { mode: "bigint" });
 
@@ -100,6 +100,10 @@ export const lancamentos = pgTable(
     desconto: centavos("desconto"),
     baixaContaBancariaId: uuid("baixa_conta_bancaria_id").references(() => contasBancarias.id, { onDelete: "restrict" }),
     motivoCancelamento: text("motivo_cancelamento"),
+    /** Compra no cartão corporativo (forma `cartao_credito`, lado pagar); fica registrado mesmo cancelada. */
+    cartaoId: uuid("cartao_id").references((): AnyPgColumn => cartoesCorporativos.id, { onDelete: "restrict" }),
+    /** Fatura do ciclo da compra (pelo vencimento = data da compra); nula se cancelada ou fora do cartão. */
+    faturaCartaoId: uuid("fatura_cartao_id"),
     criadoPor: uuid("criado_por")
       .notNull()
       .references(() => usuarios.id),
@@ -124,6 +128,10 @@ export const lancamentos = pgTable(
       // num_nonnulls: o par meio-nulo (só número ou só total) é recusado (num CHECK, NULL passaria).
       sql`num_nonnulls(${t.parcelaNumero}, ${t.parcelaTotal}) IN (0, 2) AND (${t.parcelaNumero} IS NULL OR (${t.parcelaNumero} >= 1 AND ${t.parcelaTotal} >= ${t.parcelaNumero}))`,
     ),
+    check("lancamentos_fatura_com_cartao", sql`${t.faturaCartaoId} IS NULL OR ${t.cartaoId} IS NOT NULL`),
+    // A fatura é do mesmo cartão da compra (FK composta; sem fatura, nada a conferir).
+    foreignKey({ name: "lancamentos_fatura_cartao_fk", columns: [t.faturaCartaoId, t.cartaoId], foreignColumns: [faturasCartao.id, faturasCartao.cartaoId] }).onDelete("restrict"),
+    index("lancamentos_fatura_cartao_idx").on(t.faturaCartaoId),
     index("lancamentos_em_aberto_vencimento_idx").on(t.vencimento).where(sql`${t.status} = 'em_aberto'`),
     index("lancamentos_grupo_idx").on(t.grupoId),
     index("lancamentos_categoria_idx").on(t.categoriaId),
@@ -190,8 +198,9 @@ export const faturasVersoes = pgTable(
 );
 
 /**
- * Lista única (spec §6.1): lançamentos manuais, parcelas, pagamentos a fornecedor e comissões, normalizados.
- * Definida na migração custom 0021_view_lancamentos.sql; `forma` vem em slug (o rótulo é mapeado em TS).
+ * Lista única (spec §6.1): lançamentos manuais, parcelas, pagamentos a fornecedor, comissões e faturas do cartão
+ * corporativo, normalizados. Criada na migração custom 0021_view_lancamentos.sql; a versão vigente é a
+ * 0033_view_fatura_cartao.sql. `forma` vem em slug (o rótulo é mapeado em TS).
  */
 export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
   origem: text("origem").$type<Origem>().notNull(),
@@ -218,4 +227,15 @@ export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
   forma: text("forma").notNull(),
   exigeIndividual: boolean("exige_individual").notNull(),
   repasse: boolean("repasse").notNull(),
+  /** Caixa (fatia 4b): o que entra/sai do banco. Crédito e boleto pelo líquido da taxa; repasse já é líquido. */
+  valorCaixaPrevisto: centavos("valor_caixa_previsto").notNull(),
+  /** Nulo se não baixado. */
+  valorCaixaBaixado: centavos("valor_caixa_baixado"),
+  /** Data em que entra/sai do caixa (crédito com antecipação: o primeiro vencimento em aberto do cartão da venda). */
+  dataCaixa: date("data_caixa").notNull(),
+  /**
+   * Fatura do cartão corporativo da compra (manual ou pagamento de viagem; fora do caixa e escondida da lista, que
+   * mostra a fatura). Nulo nas demais linhas e na própria linha da fatura (0033).
+   */
+  faturaCartaoId: uuid("fatura_cartao_id"),
 }).existing();

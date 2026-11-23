@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
 import { ArrowRight, Plus, Trash2 } from "lucide-react";
 import { Bilhete } from "@/components/bilhete";
 import { Grade, Semaforo, SoGestao } from "@/components/kit";
@@ -36,6 +37,7 @@ type Aba = "entradas" | "saidas" | "conciliacao" | "precificacao";
 
 /** Conta bancária ativa para as baixas (do servidor, só para quem age). */
 export type ContaBancariaOpcao = { id: string; nome: string };
+export type CartaoOpcao = { id: string; nome: string; final: string };
 
 type Painel =
   | { tipo: "baixaParcela"; parcela: ParcelaVendida }
@@ -357,7 +359,7 @@ function somaCampos(valores: string[]): bigint | null {
   }
 }
 
-function FormForma({ conta, onFechar }: { conta: ContaVendida; onFechar: () => void }) {
+function FormForma({ conta, cartoes, onFechar }: { conta: ContaVendida; cartoes: CartaoOpcao[]; onFechar: () => void }) {
   const acao = useAcao();
   const primeira = conta.pagamentos[0]?.vencimento ?? "";
   const alvo = conta.pagamentos.reduce((t, p) => t + p.valorOriginal, 0n);
@@ -365,6 +367,10 @@ function FormForma({ conta, onFechar }: { conta: ContaVendida; onFechar: () => v
   const alvoConhecido = !(conta.forma === "a_vista" && conta.descontoAVistaPct && Number(conta.descontoAVistaPct) > 0);
   const [tipo, setTipo] = useState<FormaPagamentoFornecedorTipo>(conta.forma ?? "a_vista");
   const [vencimento, setVencimento] = useState(primeira);
+  const cartaoAtual = conta.pagamentos[0]?.cartaoId ?? null;
+  const [cartaoId, setCartaoId] = useState(cartaoAtual ?? (cartoes.length === 1 ? cartoes[0].id : ""));
+  // O cartão já usado na conta pode ter sido desativado: continua na lista, como no formulário de lançamento.
+  const opcoesCartao = cartaoAtual && !cartoes.some((k) => k.id === cartaoAtual) ? [...cartoes, { id: cartaoAtual, nome: "Cartão desativado", final: "" }] : cartoes;
   const metade = alvoConhecido ? alvo / 2n : 0n;
   const [linhas, setLinhas] = useState<{ vencimento: string; valor: string }[]>([
     { vencimento: primeira, valor: alvoConhecido ? reaisParaCampo(metade) : "" },
@@ -381,7 +387,7 @@ function FormForma({ conta, onFechar }: { conta: ContaVendida; onFechar: () => v
           tipo === "a_vista"
             ? { tipo, ...(vencimento ? { vencimento } : {}) }
             : tipo === "cartao_corporativo"
-              ? { tipo, vencimento }
+              ? { tipo, vencimento, cartaoId }
               : { tipo, parcelas: linhas },
         ),
       onFechar,
@@ -397,8 +403,18 @@ function FormForma({ conta, onFechar }: { conta: ContaVendida; onFechar: () => v
           ))}
         </Select>
       </Campo>
+      {tipo === "cartao_corporativo" && (
+        <Campo label="Cartão corporativo">
+          <Select value={cartaoId} onChange={setCartaoId} className={`w-full ${marca(acao, "cartaoId")}`}>
+            <option value="">{opcoesCartao.length === 0 ? "Nenhum cartão ativo" : "Escolha o cartão"}</option>
+            {opcoesCartao.map((k) => (
+              <option key={k.id} value={k.id}>{k.final ? `${k.nome} (final ${k.final})` : k.nome}</option>
+            ))}
+          </Select>
+        </Campo>
+      )}
       {tipo !== "parcelado" && (
-        <Campo label={tipo === "cartao_corporativo" ? "Vencimento da fatura do cartão" : "Vencimento"}>
+        <Campo label={tipo === "cartao_corporativo" ? "Data da compra no cartão" : "Vencimento"}>
           <input type="date" className={`${inputCls} ${marca(acao, "vencimento")}`} value={vencimento} onChange={(e) => setVencimento(e.target.value)} />
         </Campo>
       )}
@@ -566,6 +582,7 @@ export function ViagemVendidaView({
   margem,
   hoje,
   contasBancarias,
+  cartoes = [],
 }: {
   v: ViagemVendida;
   ficha: FichaPrecificacao | null;
@@ -578,6 +595,8 @@ export function ViagemVendidaView({
   hoje: string;
   /** Contas bancárias ativas para as baixas (vazio para quem não age). */
   contasBancarias: ContaBancariaOpcao[];
+  /** Cartões corporativos ativos para a forma "cartão corporativo" (vazio para quem não age). */
+  cartoes?: CartaoOpcao[];
 }) {
   const [aba, setAba] = useState<Aba>("entradas");
   const [painel, setPainel] = useState<Painel | null>(null);
@@ -681,7 +700,7 @@ export function ViagemVendidaView({
             <FormRepasse parcela={painelDaAba.parcela} cartao={v.cartaoFornecedor} hoje={hoje} contas={contasBancarias} onFechar={fechar} />
           )}
           {painelDaAba.tipo === "baixaPagamento" && <FormBaixaPagamento conta={painelDaAba.conta} pag={painelDaAba.pag} hoje={hoje} contas={contasBancarias} onFechar={fechar} />}
-          {painelDaAba.tipo === "forma" && <FormForma conta={painelDaAba.conta} onFechar={fechar} />}
+          {painelDaAba.tipo === "forma" && <FormForma conta={painelDaAba.conta} cartoes={cartoes} onFechar={fechar} />}
           {painelDaAba.tipo === "comissaoTipo" && <FormComissaoTipo conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "previsto" && <FormPrevisto conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "contestar" && <FormContestar conta={painelDaAba.conta} onFechar={fechar} />}
@@ -691,7 +710,7 @@ export function ViagemVendidaView({
       )}
 
       {aba === "entradas" && <Entradas v={v} agir={agir} abrir={abrir} />}
-      {aba === "saidas" && <Saidas v={v} agir={agir} abrir={abrir} />}
+      {aba === "saidas" && <Saidas v={v} agir={agir} verCartoes={podeAgir} abrir={abrir} />}
       {aba === "conciliacao" && <Conciliacao v={v} agir={agir} abrir={abrir} />}
       {aba === "precificacao" && (
         <div>
@@ -796,7 +815,8 @@ function vencimentoDaConta(c: ContaVendida): string {
   return `${c.pagamentos.length} parcelas`;
 }
 
-function Saidas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p: Painel) => void }) {
+/** `verCartoes`: quem tem perfil do financeiro (abre a fatura do cartão corporativo, mesmo com a viagem conciliada). */
+function Saidas({ v, agir, verCartoes, abrir }: { v: ViagemVendida; agir: boolean; verCartoes: boolean; abrir: (p: Painel) => void }) {
   const contas = v.contas.filter((c) => c.status !== "cancelada");
   return (
     <Card>
@@ -813,7 +833,7 @@ function Saidas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p
             {contas.map((c) => {
               const semPagamento = !c.pagamentos.some((p) => p.status === "pago");
               return (
-                <ContaLinhas key={c.id} c={c} agir={agir} semPagamento={semPagamento} noCartao={c.moeda === "BRL" && c.fornecedorId !== null && c.fornecedorId === v.cartaoFornecedor?.fornecedorId} abrir={abrir} />
+                <ContaLinhas key={c.id} c={c} agir={agir} verCartoes={verCartoes} semPagamento={semPagamento} noCartao={c.moeda === "BRL" && c.fornecedorId !== null && c.fornecedorId === v.cartaoFornecedor?.fornecedorId} abrir={abrir} />
               );
             })}
             {contas.length === 0 && (
@@ -826,8 +846,37 @@ function Saidas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p
   );
 }
 
+const MESES_FATURA = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+/** Compra no cartão corporativo: a baixa (e o desfazer) é a da fatura inteira, na tela do cartão. */
+function NaFatura({ fatura, link }: { fatura: { id: string; cartao: string; fechamento: string }; link: boolean }) {
+  const texto = `Na fatura do cartão ${fatura.cartao} · ${MESES_FATURA[Number(fatura.fechamento.slice(5, 7)) - 1]}/${fatura.fechamento.slice(0, 4)}`;
+  // A tela dos cartões é só do financeiro: os outros perfis veem o texto, sem o link.
+  return link ? (
+    <Link href={`/financeiro/cartoes?fatura=${fatura.id}`} className="text-[12px] font-semibold text-verde hover:underline">
+      {texto}
+    </Link>
+  ) : (
+    <span className="text-[12px]">{texto}</span>
+  );
+}
+
 /** `noCartao`: conta em reais do fornecedor que recebeu no cartão direto (quitada só pelo repasse, sem baixa direta). */
-function ContaLinhas({ c, agir, semPagamento, noCartao, abrir }: { c: ContaVendida; agir: boolean; semPagamento: boolean; noCartao: boolean; abrir: (p: Painel) => void }) {
+function ContaLinhas({
+  c,
+  agir,
+  verCartoes,
+  semPagamento,
+  noCartao,
+  abrir,
+}: {
+  c: ContaVendida;
+  agir: boolean;
+  verCartoes: boolean;
+  semPagamento: boolean;
+  noCartao: boolean;
+  abrir: (p: Painel) => void;
+}) {
   return (
     <>
       <tr className={`border-t border-linha ${c.divergente || c.contestada ? "bg-ouro/10" : ""}`}>
@@ -871,10 +920,14 @@ function ContaLinhas({ c, agir, semPagamento, noCartao, abrir }: { c: ContaVendi
                   </Badge>
                   {p.peloRepasse ? (
                     <span className="text-[12px]">Quitado pelo repasse do cartão (desfaça o repasse em Entradas)</span>
+                  ) : p.fatura ? (
+                    <NaFatura fatura={p.fatura} link={verCartoes} />
                   ) : (
                     agir && <AcaoDireta rotulo="Desfazer baixa" mini variante="fantasma" executar={() => desfazerBaixaPagamento(p.id)} />
                   )}
                 </>
+              ) : p.fatura ? (
+                <NaFatura fatura={p.fatura} link={verCartoes} />
               ) : noCartao ? (
                 <span className="text-[12px]">Pago pelo cliente no cartão do fornecedor (quitado pelo repasse em Entradas)</span>
               ) : (

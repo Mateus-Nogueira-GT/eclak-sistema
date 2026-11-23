@@ -1,10 +1,13 @@
 /**
  * Financeiro do seed local: duas contas bancárias, os lançamentos "lançados à mão" do protótipo (contasIniciais, sem
  * origem) com datas relativas a hoje (America/Cuiabá), alguns baixados, e a fatura da venda da Família Ribeiro
- * emitida pelo mesmo núcleo do app (`emitirFaturaNa`, numeração sem buracos a partir do contador).
- * Idempotente: conta por nome, lançamento (ou série) pela descrição e fatura por venda.
+ * emitida pelo mesmo núcleo do app (`emitirFaturaNa`, numeração sem buracos a partir do contador), um cartão
+ * corporativo com três compras no ciclo atual (a fatura vem do `cicloDoCartao`, a regra do app) e uma nota fiscal sem anexo.
+ * Idempotente: conta por nome, lançamento (ou série) pela descrição, fatura por venda, cartão por nome, compra
+ * por descrição + cartão e nota pelo número.
  */
 import { hojeEmCuiaba } from "../src/domain/clientes";
+import { cicloDoCartao } from "../src/domain/caixa";
 import { dividirEmParcelas, datasRecorrentes } from "../src/domain/financeiro";
 import { somarMeses } from "../src/domain/venda";
 import { centavos, type Sql } from "./seed-orcamentos";
@@ -134,10 +137,72 @@ async function emitirFaturas(sql: Sql): Promise<number> {
   }
 }
 
-/** Devolve quantos lançamentos e faturas foram criados nesta execução. */
-export async function semearFinanceiro(sql: Sql): Promise<{ lancamentos: number; faturas: number }> {
+/** Um cartão corporativo com três compras manuais no ciclo atual; cada compra aponta para a fatura do seu ciclo. */
+async function semearCartao(sql: Sql, contas: Map<string, string>): Promise<{ cartoes: number; compras: number }> {
+  const [dir] = await sql`select id from usuarios where email = 'diretor@eclak.local'`;
+  if (!dir) throw new Error("Falta o usuário diretor do seed");
+  const fechamentoDia = 5;
+  const vencimentoDia = 15;
+  let cartoes = 0;
+  let [cartao] = await sql`select id from cartoes_corporativos where nome = 'Visa Corporativo' and ativo`;
+  if (!cartao) {
+    [cartao] = await sql`
+      insert into cartoes_corporativos (nome, final, dia_fechamento, dia_vencimento, conta_bancaria_id, centro)
+      values ('Visa Corporativo', '4821', ${fechamentoDia}, ${vencimentoDia}, ${contas.get("Banco do Brasil")!}, 'MT') returning id`;
+    cartoes++;
+  }
+  const hoje = hojeEmCuiaba();
+  const [cat] = await sql`select id from categorias_financeiras where lado = 'pagar' and nome = 'Serviços contratados'`;
+  const [catPapelaria] = await sql`select id from categorias_financeiras where lado = 'pagar' and nome = 'Papelaria'`;
+  if (!cat || !catPapelaria) throw new Error("Categorias do seed do cartão não existem");
+  const compras = [
+    { descricao: "Assinatura de ferramenta de reservas", pessoa: "Provedor de software", categoria: cat.id, dias: -6, valor: centavos(389.9) },
+    { descricao: "Material de escritório no cartão", pessoa: "Papelaria Central", categoria: catPapelaria.id, dias: -3, valor: centavos(215.4) },
+    { descricao: "Hospedagem do site da agência", pessoa: "Provedor de hospedagem", categoria: cat.id, dias: -1, valor: centavos(129) },
+  ];
+  let criadas = 0;
+  for (const c of compras) {
+    const [existe] = await sql`select 1 from lancamentos where descricao = ${c.descricao} and cartao_id = ${cartao.id}`;
+    if (existe) continue;
+    const data = somarDias(hoje, c.dias);
+    const ciclo = cicloDoCartao(data, fechamentoDia, vencimentoDia);
+    await sql.begin(async (tx) => {
+      await tx`
+        insert into faturas_cartao (cartao_id, fechamento, vencimento) values (${cartao.id}, ${ciclo.fechamento}, ${ciclo.vencimento})
+        on conflict (cartao_id, fechamento) do nothing`;
+      const [fat] = await tx`select id from faturas_cartao where cartao_id = ${cartao.id} and fechamento = ${ciclo.fechamento}`;
+      await tx`
+        insert into lancamentos (lado, descricao, pessoa_texto, categoria_id, centro, competencia, emissao, vencimento, valor, forma,
+                                 cartao_id, fatura_cartao_id, status, criado_por)
+        values ('pagar', ${c.descricao}, ${c.pessoa}, ${c.categoria}, 'MT', ${data.slice(0, 7)}, ${data}, ${data}, ${c.valor.toString()},
+                'cartao_credito', ${cartao.id}, ${fat.id}, 'em_aberto', ${dir.id})`;
+    });
+    criadas++;
+  }
+  return { cartoes, compras: criadas };
+}
+
+/** Uma nota fiscal emitida, sem PDF anexo. */
+async function semearNotaFiscal(sql: Sql): Promise<number> {
+  const numero = "1001";
+  const [existe] = await sql`select 1 from notas_fiscais where numero = ${numero}`;
+  if (existe) return 0;
+  const [dir] = await sql`select id from usuarios where email = 'diretor@eclak.local'`;
+  if (!dir) throw new Error("Falta o usuário diretor do seed");
+  const hoje = hojeEmCuiaba();
+  await sql`
+    insert into notas_fiscais (numero, emitida_em, competencia, valor, destinatario, documento, observacao, criado_por)
+    values (${numero}, ${somarDias(hoje, -7)}, ${hoje.slice(0, 7)}, ${centavos(2500).toString()}, 'Família Ribeiro', '11144477735',
+            'Serviço de assessoria de viagem (seed local)', ${dir.id})`;
+  return 1;
+}
+
+/** Devolve quantos lançamentos, faturas, cartões, compras no cartão e notas foram criados nesta execução. */
+export async function semearFinanceiro(sql: Sql): Promise<{ lancamentos: number; faturas: number; cartoes: number; compras: number; notas: number }> {
   const contas = await garantirContas(sql);
   const lancamentos = await semearLancamentos(sql, contas);
   const faturas = await emitirFaturas(sql);
-  return { lancamentos, faturas };
+  const { cartoes, compras } = await semearCartao(sql, contas);
+  const notas = await semearNotaFiscal(sql);
+  return { lancamentos, faturas, cartoes, compras, notas };
 }

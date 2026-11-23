@@ -47,7 +47,7 @@ function Linha({ lado, grupo, c, avisar }: { lado: Lado; grupo: string; c: Categ
         aria-label="Nome da categoria"
         className={cx("min-w-0 flex-1 rounded-[5px] border border-transparent bg-transparent px-2 py-1 text-[14px] outline-none hover:border-linha focus:border-verde", !c.ativa && "text-cinza line-through")}
       />
-      {c.sistema && <span className="shrink-0 text-[12px] font-semibold text-cinza">Usada pelas viagens</span>}
+      {c.sistema && <span className="shrink-0 text-[12px] font-semibold text-cinza">{c.sistema === "cartao_corporativo" ? "Usada pelo cartão corporativo" : "Usada pelas viagens"}</span>}
       <span className="num shrink-0 text-[12.5px] text-cinza">
         {c.usos} {c.usos === 1 ? "lançamento" : "lançamentos"}
       </span>

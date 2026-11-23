@@ -21,6 +21,8 @@ import {
   MSG_COMISSAO_REGISTRADA,
   MSG_JA_BAIXADO_NA_CONTA,
   MSG_NAO_CONCILIADA,
+  MSG_DESFACA_FATURA_CARTAO,
+  MSG_NAO_USE_CARTAO_CORPORATIVO,
   MSG_SEM_FORNECEDOR,
   valorReaisSchema,
 } from "@/domain/venda-entrada";
@@ -31,6 +33,7 @@ import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
 import {
   comissoes,
+  faturasCartao,
   contasPagar,
   fornecedores,
   itensViagem,
@@ -56,10 +59,12 @@ import {
   falha,
   linhasDaConta,
   naViagemVendidaNa,
+  pagoNoCartao,
   OK,
   PAGAMENTO_NAO_ENCONTRADO,
   PARCELA_NAO_ENCONTRADA,
   registrarComissaoNa,
+  vendaCartaoDireto,
   type ContaLinha,
   type Falha,
   type Feito,
@@ -67,6 +72,7 @@ import {
   type PagamentoLinha,
   type ViagemLinha,
 } from "@/server/financeiro/baixas-viagem";
+import { travarFaturasNa } from "@/server/financeiro/cartoes";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -220,12 +226,14 @@ async function reprevisar(
 export type FormaFornecedorEntrada =
   | { tipo: "a_vista"; vencimento?: string }
   | { tipo: "parcelado"; parcelas: { vencimento: string; valor: string }[] }
-  | { tipo: "cartao_corporativo"; vencimento: string };
+  | { tipo: "cartao_corporativo"; vencimento: string; cartaoId: string };
 
 /**
  * Forma de pagamento ao fornecedor: refaz as linhas de pagamento (à vista com o desconto da cotação; parcelado
- * somando o previsto na moeda; cartão corporativo na data da fatura). Só sem pagamento baixado na conta. À vista
- * sem data mantém o vencimento atual.
+ * somando o previsto na moeda; cartão corporativo numa linha na data da compra, no cartão escolhido e na fatura do
+ * ciclo dessa data). Só sem pagamento baixado na conta e sem pagamento em fatura do cartão já paga (ruling 12); as
+ * linhas antigas saem da fatura em aberto em que estavam (a fatura fica, sem elas). À vista sem data mantém o
+ * vencimento atual.
  */
 export async function definirFormaFornecedor(contaId: string, forma: FormaFornecedorEntrada): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
@@ -241,7 +249,21 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
         const conta = await contaTravada(tx, contaId, v.id);
         if (!conta) return CONTA_NAO_ENCONTRADA;
         const linhas = await linhasDaConta(tx, conta.id);
+        // Antes do "já baixado": o pagamento quitado pela fatura do cartão pede desfazer a baixa da fatura (ruling 12).
+        // Leitura sem trava (a baixa da fatura trava as compras antes da fatura, e as linhas já estão travadas); a
+        // conferência travada vem em `travarFaturasNa`, junto com as outras faturas.
+        const faturasAntigas = linhas.map((l) => l.faturaCartaoId).filter((x): x is string => x !== null);
+        if (faturasAntigas.length > 0) {
+          const pagas = await tx
+            .select({ id: faturasCartao.id })
+            .from(faturasCartao)
+            .where(and(inArray(faturasCartao.id, faturasAntigas), eq(faturasCartao.status, "baixado")));
+          if (pagas.length > 0) return falha(MSG_DESFACA_FATURA_CARTAO);
+        }
         if (linhas.some((l) => l.status === "pago")) return JA_BAIXADO;
+        // Conta do fornecedor que recebeu no cartão direto (venda com parcela `cartao_fornecedor` não cancelada):
+        // quitada pelo repasse, e o custo dela já sai do repasse esperado. Na fatura do cartão sairia duas vezes.
+        if (f.tipo === "cartao_corporativo" && pagoNoCartao(await vendaCartaoDireto(tx, v.id), conta)) return falha(MSG_NAO_USE_CARTAO_CORPORATIVO);
         const snapshot = await snapshotDaVenda(tx, v.id);
         if (!snapshot) return NAO_CALCULA;
         const base = contaBase(snapshot, conta, conta.comissaoTipo, v.fim);
@@ -259,6 +281,18 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
           return falha(e instanceof Error ? e.message : MSG_NAO_CALCULA, "parcelas");
         }
         if (novas.some((l) => l.vencimento === null) && !vencimentoAtual) return falha("Informe a data", "vencimento");
+        // Cartão corporativo: cada linha na fatura do ciclo da sua data (a data informada é a da compra).
+        // As faturas de saída (das linhas antigas) e de entrada são travadas juntas, em ordem única, antes das escritas.
+        const entradas = f.tipo === "cartao_corporativo" ? novas.map((l) => ({
+                cartaoId: f.cartaoId,
+                dataCompra: l.vencimento ?? vencimentoAtual!,
+                // Cartão desativado só se já era o da conta (como na edição do lançamento manual).
+                exigeAtivo: !linhas.some((x) => x.cartaoId === f.cartaoId),
+              })) : [];
+        const travadas = await travarFaturasNa(tx, usuario.id, faturasAntigas, entradas);
+        if (ehFalha(travadas)) throw new Desfazer(travadas);
+        const vinculos: { cartaoId: string | null; faturaCartaoId: string | null }[] =
+          f.tipo === "cartao_corporativo" ? travadas : novas.map(() => ({ cartaoId: null, faturaCartaoId: null }));
 
         for (const l of linhas) {
           await tx.delete(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, l.id));
@@ -267,12 +301,13 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
         const criadas = await tx
           .insert(pagamentosFornecedor)
           .values(
-            novas.map((l) => ({
+            novas.map((l, i) => ({
               contaId: conta.id,
               numero: l.numero,
               vencimento: l.vencimento ?? vencimentoAtual!,
               valorOriginal: l.valorOriginal,
               valorBrlPrevisto: l.valorBrlPrevisto,
+              ...vinculos[i],
             })),
           )
           .returning();
@@ -379,7 +414,9 @@ export async function definirComissaoTipo(contaId: string, dados: ComissaoTipoEn
 /**
  * Atualiza o previsto atual da conta em reais (o fornecedor cobrou diferente do orçado), com motivo obrigatório.
  * As linhas em aberto absorvem a diferença (`reprevisarLinhas`); sem linha em aberto, o aumento acima do já pago
- * vira uma linha nova (vence hoje) e a conta volta a `a_pagar`. O previsto na venda não muda.
+ * vira uma linha nova (vence hoje) e a conta volta a `a_pagar`; na conta paga no cartão corporativo, essa linha é
+ * compra nova no mesmo cartão, na fatura do ciclo de hoje (recusada se essa fatura já foi paga). O previsto na venda
+ * não muda.
  */
 export async function atualizarPrevisto(contaId: string, valorBrl: string, motivo: string): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
@@ -413,6 +450,16 @@ export async function atualizarPrevisto(contaId: string, valorBrl: string, motiv
         // (vence hoje), sem passar do novo previsto; a conta volta a `a_pagar`.
         const complemento = linhas.some((l) => l.status !== "pago") ? 0n : minimo(novo - conta.previstoBrl, novo - jaPago);
         if (complemento > 0n) {
+          const hoje = hojeEmCuiaba();
+          // Conta paga no cartão corporativo: o complemento é compra nova no mesmo cartão, na fatura do ciclo de hoje
+          // (fatura já paga: recusa). Ordem das travas de `cartoes.ts`: viagem → conta e linhas (acima) → cartão e fatura.
+          const cartaoId = conta.forma === "cartao_corporativo" ? ([...linhas].reverse().find((l) => l.cartaoId)?.cartaoId ?? null) : null;
+          let vinculo: { cartaoId: string | null; faturaCartaoId: string | null } = { cartaoId: null, faturaCartaoId: null };
+          if (cartaoId) {
+            const travadas = await travarFaturasNa(tx, usuario.id, [], [{ cartaoId, dataCompra: hoje, exigeAtivo: false }]);
+            if (ehFalha(travadas)) throw new Desfazer(travadas);
+            vinculo = travadas[0];
+          }
           const valorOriginal =
             conta.moeda === "BRL" || !conta.cambioAplicado
               ? complemento
@@ -422,9 +469,10 @@ export async function atualizarPrevisto(contaId: string, valorBrl: string, motiv
             .values({
               contaId: conta.id,
               numero: linhas.reduce((n, l) => Math.max(n, l.numero), 0) + 1,
-              vencimento: hojeEmCuiaba(),
+              vencimento: hoje,
               valorOriginal,
               valorBrlPrevisto: complemento,
+              ...vinculo,
             })
             .returning();
           await registrarAuditoria(tx, { usuarioId: usuario.id, tabela: "pagamentos_fornecedor", registroId: linha.id, acao: "criar", depois: semId(linha) });

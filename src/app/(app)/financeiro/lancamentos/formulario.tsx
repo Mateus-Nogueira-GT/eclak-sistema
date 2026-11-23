@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { Anexos } from "@/components/anexos";
 import { Botao, Campo, Tabs, inputCls } from "@/components/ui";
 import { FORMAS_FINANCEIRO, FREQUENCIAS, ROTULO_FORMA_FINANCEIRO, competenciaDe, type Frequencia, type Lado } from "@/domain/financeiro";
 import { cancelarLancamento, criarLancamento, editarLancamento } from "@/server/actions/financeiro";
+import type { AnexoItem } from "@/server/queries/anexos";
 import type { GrupoCategorias } from "@/server/queries/financeiro";
 import { useAcao } from "../../viagens/[id]/acao";
 import { reaisParaCampo } from "../../viagens/formatos";
@@ -26,12 +28,15 @@ export type LancamentoForm = {
   forma: keyof typeof ROTULO_FORMA_FINANCEIRO;
   contaBancariaId: string | null;
   observacao: string | null;
+  /** Cartão corporativo da compra (a pagar no cartão de crédito). */
+  cartaoId: string | null;
   parcelaNumero: number | null;
   parcelaTotal: number | null;
   status: "em_aberto" | "baixado" | "cancelado";
 };
 
 export type Opcao = { id: string; nome: string };
+export type CartaoOpcao = { id: string; nome: string; final: string };
 
 type TipoPessoa = "fornecedor" | "cliente" | "texto";
 type Repeticao = "unica" | "parcelado" | "recorrente";
@@ -49,6 +54,8 @@ export function FormularioLancamento({
   contas,
   fornecedores,
   clientes,
+  cartoes = [],
+  anexos = [],
   onFechar,
 }: {
   lancamento: LancamentoForm | null;
@@ -58,6 +65,10 @@ export function FormularioLancamento({
   contas: ContaOpcao[];
   fornecedores: Opcao[];
   clientes: Opcao[];
+  /** Cartões corporativos ativos (compra a pagar no cartão de crédito). */
+  cartoes?: CartaoOpcao[];
+  /** Anexos do lançamento em edição. */
+  anexos?: AnexoItem[];
   onFechar: () => void;
 }) {
   const acao = useAcao();
@@ -81,6 +92,10 @@ export function FormularioLancamento({
   const [frequencia, setFrequencia] = useState<Frequencia>("mensal");
   const [quantidade, setQuantidade] = useState("12");
   const [conta, setConta] = useState(l?.contaBancariaId ?? "");
+  const [cartaoId, setCartaoId] = useState(l?.cartaoId ?? "");
+  const noCartao = lado === "pagar" && forma === "Cartão de crédito";
+  // O cartão da compra em edição pode ter sido desativado: continua na lista para a edição não perdê-lo.
+  const opcoesCartao = l?.cartaoId && !cartoes.some((k) => k.id === l.cartaoId) ? [...cartoes, { id: l.cartaoId, nome: "Cartão desativado", final: "" }] : cartoes;
   const [observacao, setObservacao] = useState(l?.observacao ?? "");
   const [alcance, setAlcance] = useState<"esta" | "proximas">("esta");
   const [cancelando, setCancelando] = useState(false);
@@ -105,6 +120,7 @@ export function FormularioLancamento({
       forma,
       contaBancariaId: conta,
       observacao,
+      cartaoId: noCartao ? cartaoId : "",
       repeticao:
         repeticao === "parcelado"
           ? { tipo: "parcelado", parcelas: n(parcelas) }
@@ -222,13 +238,23 @@ export function FormularioLancamento({
                 ))}
               </select>
             </Campo>
+            {noCartao && (
+              <Campo label="Cartão corporativo" className="col-span-3">
+                <select className={`${inputCls} ${marca(acao, "cartaoId")}`} value={cartaoId} onChange={(e) => setCartaoId(e.target.value)}>
+                  <option value="">{opcoesCartao.length === 0 ? "Nenhum cartão ativo" : "Escolha o cartão"}</option>
+                  {opcoesCartao.map((k) => (
+                    <option key={k.id} value={k.id}>{k.final ? `${k.nome} (final ${k.final})` : k.nome}</option>
+                  ))}
+                </select>
+              </Campo>
+            )}
             <Campo label="Descrição" className="col-span-6">
               <input className={`${inputCls} ${marca(acao, "descricao")}`} value={descricao} onChange={(e) => setDescricao(e.target.value)} placeholder="Ex.: Aluguel do escritório" />
             </Campo>
             <Campo label={repeticao === "parcelado" ? "Valor total" : "Valor"} className="col-span-2">
               <input className={`${inputCls} num text-right ${marca(acao, "valor")}`} inputMode="decimal" placeholder="0,00" value={valor} onChange={(e) => setValor(e.target.value)} />
             </Campo>
-            <Campo label={repeticao === "unica" ? "Vencimento" : "Primeiro vencimento"} className="col-span-2">
+            <Campo label={noCartao ? (repeticao === "unica" ? "Data da compra" : "Data da primeira") : repeticao === "unica" ? "Vencimento" : "Primeiro vencimento"} className="col-span-2">
               <input type="date" className={`${inputCls} ${marca(acao, "vencimento")}`} value={vencimento} onChange={(e) => setVencimento(e.target.value)} />
             </Campo>
             <Campo label="Centro de custo" className="col-span-2">
@@ -302,6 +328,7 @@ export function FormularioLancamento({
             <Campo label="Observação" className="col-span-6">
               <textarea rows={3} className={`${inputCls} ${marca(acao, "observacao")}`} value={observacao} onChange={(e) => setObservacao(e.target.value)} placeholder="Fica registrada com o seu nome e a data" />
             </Campo>
+            {l && <Anexos className="col-span-6" donoTipo="manual" donoId={l.id} anexos={anexos} />}
           </div>
         )}
         <ErroAcao acao={acao} />

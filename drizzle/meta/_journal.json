@@ -183,6 +183,69 @@
       "when": 1795418263957,
       "tag": "0025_view_repasse_gravado",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795419333451,
+      "tag": "0026_view_caixa",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1795420457848,
+      "tag": "0027_anexos",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1795420458410,
+      "tag": "0028_anexos_rls_bucket",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1795421585410,
+      "tag": "0029_notas_fiscais",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795421585983,
+      "tag": "0030_notas_fiscais_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795422579270,
+      "tag": "0031_cartoes_corporativos",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795422598436,
+      "tag": "0032_cartoes_rls_categoria",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795424774766,
+      "tag": "0033_view_fatura_cartao",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1795426021597,
+      "tag": "0034_view_fatura_cartao_baixada",
+      "breakpoints": true
     }
   ]
 }

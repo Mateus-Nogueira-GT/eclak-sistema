@@ -26,7 +26,7 @@ export const CATEGORIAS_INICIAIS: CategoriaInicial[] = (
     ["pagar", "Administrativo", "Seguros", null],
     ["pagar", "Administrativo", "Serviços contratados", null],
     ["pagar", "Administrativo", "Papelaria", null],
-    ["pagar", "Administrativo", "Cartão corporativo", null],
+    ["pagar", "Administrativo", "Cartão corporativo", "cartao_corporativo"],
     ["pagar", "Impostos e encargos", "Impostos federais", null],
     ["pagar", "Impostos e encargos", "FGTS", null],
     ["pagar", "Impostos e encargos", "Tarifas bancárias", null],

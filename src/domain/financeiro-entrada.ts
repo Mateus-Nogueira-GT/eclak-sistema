@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { hojeEmCuiaba } from "./clientes";
 import { CENTROS, FORMAS_FINANCEIRO, FREQUENCIAS, LADOS, ORIGENS, SITUACOES } from "./financeiro";
-import { contaBancariaId, data, obrigatorio, reais, texto } from "./venda-entrada";
+import { contaBancariaId, data, MSG_CARTAO_CORPORATIVO, MSG_COMPRA_NO_CARTAO, obrigatorio, reais, texto } from "./venda-entrada";
 
 // Entradas das actions do financeiro (Zod). Datas "AAAA-MM-DD", competência "AAAA-MM".
 
@@ -10,11 +10,14 @@ export const MSG_VALOR_ZERO = "Informe um valor maior que zero";
 export const MSG_FORMA = "Forma de pagamento inválida";
 export const MSG_DATA_FUTURA = "A data não pode ser futura";
 export const MSG_LINHA_REPETIDA = "Linha repetida no lote";
+export const MSG_FATURA_ESTRANGEIRA = "Fatura do cartão com compra em moeda estrangeira: dê baixa individual com o valor em reais cobrado";
+export const MSG_VALOR_BRL_CARTAO = "Informe o valor em reais cobrado no cartão";
 export const MSG_LOTE_RECUSADO = "Tire do lote as linhas indicadas: elas pedem baixa individual";
 export const MSG_LOTE_LADOS = "Escolha linhas de um lado só (a pagar ou a receber)";
 const MSG_DATA = "Informe a data";
 const MSG_COMPETENCIA = "Competência inválida";
 const MSG_ID = "Identificador inválido";
+const MSG_FINAL = "Informe os 4 últimos dígitos do cartão";
 
 const uuid = z.string({ error: MSG_ID }).uuid(MSG_ID);
 /** Select vazio de formulário chega como "" e vale null. */
@@ -59,6 +62,9 @@ const repeticao = z.discriminatedUnion(
   { error: "Repetição inválida" },
 );
 
+/** Lançamento a pagar no cartão de crédito: compra no cartão corporativo (vai para a fatura do ciclo). */
+const ehCompraNoCartao = (v: { lado: string; forma: string }) => v.lado === "pagar" && v.forma === "Cartão de crédito";
+
 export const lancamentoSchema = z
   .strictObject({
     lado,
@@ -76,11 +82,15 @@ export const lancamentoSchema = z
     contaBancariaId: uuidOpcional,
     observacao: texto(2000),
     repeticao,
+    /** Cartão corporativo da compra: só a pagar no cartão de crédito (obrigatório aí); nas outras, vale null. */
+    cartaoId: uuidOpcional,
   })
   .superRefine((v, ctx) => {
     const preenchidos = [v.fornecedorId, v.clienteId, v.pessoaTexto].filter((x) => x !== null).length;
     if (preenchidos > 1) ctx.addIssue({ code: "custom", message: MSG_PESSOA, path: ["pessoa"] });
-  });
+    if (ehCompraNoCartao(v) && !v.cartaoId) ctx.addIssue({ code: "custom", message: MSG_CARTAO_CORPORATIVO, path: ["cartaoId"] });
+  })
+  .transform((v) => (ehCompraNoCartao(v) ? v : { ...v, cartaoId: null }));
 export type LancamentoEntrada = z.infer<typeof lancamentoSchema>;
 
 /** Baixa individual: a diferença entre `valorPago` e `valor + juros − desconto` é conferida na action. */
@@ -108,6 +118,41 @@ export function loteSchema(hoje: string = hojeEmCuiaba()) {
   });
 }
 
+/**
+ * Baixa da fatura do cartão corporativo: data, conta bancária e, para cada compra em moeda estrangeira, o valor em
+ * reais cobrado na fatura (com IOF). Erro de valor fica no campo `estrangeiras.<pagamentoId>`; a falta de uma
+ * compra estrangeira é conferida no núcleo (que sabe quais são).
+ */
+export function baixaFaturaCartaoSchema(hoje: string = hojeEmCuiaba()) {
+  return z.strictObject({
+    data: dataAteHoje(hoje),
+    contaBancariaId: uuid,
+    estrangeiras: z
+      .array(z.strictObject({ pagamentoId: uuid, valorBrl: z.string({ error: MSG_VALOR_BRL_CARTAO }).nullish() }), { error: "Compras estrangeiras inválidas" })
+      .max(200, "Compras demais")
+      .default([])
+      .transform((xs, ctx) => {
+        const vistos = new Set<string>();
+        const saida: { pagamentoId: string; valorBrl: bigint }[] = [];
+        for (const x of xs) {
+          if (vistos.has(x.pagamentoId)) {
+            ctx.addIssue({ code: "custom", message: "Compra repetida", path: [x.pagamentoId] });
+            continue;
+          }
+          vistos.add(x.pagamentoId);
+          const v = positivo.safeParse(x.valorBrl?.trim() ? x.valorBrl : null);
+          if (!v.success) {
+            ctx.addIssue({ code: "custom", message: x.valorBrl?.trim() ? v.error.issues[0].message : MSG_VALOR_BRL_CARTAO, path: [x.pagamentoId] });
+            continue;
+          }
+          saida.push({ pagamentoId: x.pagamentoId, valorBrl: v.data });
+        }
+        return saida;
+      }),
+  });
+}
+export type BaixaFaturaCartaoValidada = z.output<ReturnType<typeof baixaFaturaCartaoSchema>>;
+
 /** A linha da view, no que o lote confere. */
 export type LinhaDoLote = {
   origem: (typeof ORIGENS)[number];
@@ -115,6 +160,8 @@ export type LinhaDoLote = {
   exigeIndividual: boolean;
   repasse: boolean;
   transitaCaixa: boolean;
+  /** Compra numa fatura do cartão corporativo (sai pela fatura). */
+  faturaCartaoId?: string | null;
 };
 
 /**
@@ -124,6 +171,8 @@ export type LinhaDoLote = {
 export function motivoForaDoLote(l: LinhaDoLote): string | null {
   if (l.statusBase === "baixado") return "Já baixada";
   if (l.statusBase === "cancelado") return "Cancelada";
+  if (l.faturaCartaoId) return MSG_COMPRA_NO_CARTAO;
+  if (l.origem === "fatura_cartao") return l.exigeIndividual ? MSG_FATURA_ESTRANGEIRA : null;
   if (l.repasse) return l.exigeIndividual ? "Repasse sem fornecedor do cartão: escolha o fornecedor na viagem" : "Repasse do cartão direto no fornecedor: dê baixa individual";
   if (!l.transitaCaixa) return "Não passa pelo caixa: pago pelo cliente no cartão do fornecedor";
   if (l.exigeIndividual) return "Pagamento em moeda estrangeira: dê baixa individual com o câmbio efetivo";
@@ -210,3 +259,20 @@ export function filtroDaUrl(params: Record<string, string | string[] | undefined
   }
   return filtroLancamentosSchema.parse(filtro);
 }
+
+const MSG_DIA = "Escolha um dia de 1 a 28";
+const dia = z.preprocess(
+  (v) => (typeof v === "string" ? (/^\s*\d+\s*$/.test(v) ? Number(v) : NaN) : v),
+  z.number({ error: MSG_DIA }).int(MSG_DIA).min(1, MSG_DIA).max(28, MSG_DIA),
+);
+
+/** Cadastro do cartão corporativo: dias de fechamento e de vencimento de 1 a 28 (todo mês tem). */
+export const cartaoSchema = z.strictObject({
+  nome: obrigatorio("Informe o nome do cartão", 100),
+  final: z.string({ error: MSG_FINAL }).trim().regex(/^\d{4}$/, MSG_FINAL),
+  diaFechamento: dia,
+  diaVencimento: dia,
+  contaBancariaId,
+  centro,
+});
+export type CartaoValidado = z.output<typeof cartaoSchema>;
