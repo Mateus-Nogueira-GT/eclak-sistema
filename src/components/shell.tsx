@@ -34,6 +34,7 @@ const areas: { titulo: string; itens: Item[] }[] = [
       { href: "/financeiro/notas-fiscais", label: "Notas fiscais" },
       { href: "/financeiro/categorias", label: "Categorias" },
       { href: "/financeiro/contas-bancarias", label: "Contas bancárias" },
+      { href: "/financeiro/cartoes", label: "Cartões corporativos" },
     ],
   },
   {

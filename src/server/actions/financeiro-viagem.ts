@@ -67,6 +67,7 @@ import {
   type PagamentoLinha,
   type ViagemLinha,
 } from "@/server/financeiro/baixas-viagem";
+import { desvincularCompraNa, vincularCompraNa } from "@/server/financeiro/cartoes";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
@@ -220,12 +221,14 @@ async function reprevisar(
 export type FormaFornecedorEntrada =
   | { tipo: "a_vista"; vencimento?: string }
   | { tipo: "parcelado"; parcelas: { vencimento: string; valor: string }[] }
-  | { tipo: "cartao_corporativo"; vencimento: string };
+  | { tipo: "cartao_corporativo"; vencimento: string; cartaoId: string };
 
 /**
  * Forma de pagamento ao fornecedor: refaz as linhas de pagamento (à vista com o desconto da cotação; parcelado
- * somando o previsto na moeda; cartão corporativo na data da fatura). Só sem pagamento baixado na conta. À vista
- * sem data mantém o vencimento atual.
+ * somando o previsto na moeda; cartão corporativo numa linha na data da compra, no cartão escolhido e na fatura do
+ * ciclo dessa data). Só sem pagamento baixado na conta e sem pagamento em fatura do cartão já paga (ruling 12); as
+ * linhas antigas saem da fatura em aberto em que estavam (a fatura fica, sem elas). À vista sem data mantém o
+ * vencimento atual.
  */
 export async function definirFormaFornecedor(contaId: string, forma: FormaFornecedorEntrada): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
@@ -241,6 +244,12 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
         const conta = await contaTravada(tx, contaId, v.id);
         if (!conta) return CONTA_NAO_ENCONTRADA;
         const linhas = await linhasDaConta(tx, conta.id);
+        // Antes do "já baixado": o pagamento quitado pela fatura do cartão pede desfazer a baixa da fatura.
+        const faturas = [...new Set(linhas.map((l) => l.faturaCartaoId).filter((x): x is string => x !== null))].sort();
+        for (const id of faturas) {
+          const r = await desvincularCompraNa(tx, id);
+          if (ehFalha(r)) return r;
+        }
         if (linhas.some((l) => l.status === "pago")) return JA_BAIXADO;
         const snapshot = await snapshotDaVenda(tx, v.id);
         if (!snapshot) return NAO_CALCULA;
@@ -259,6 +268,17 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
           return falha(e instanceof Error ? e.message : MSG_NAO_CALCULA, "parcelas");
         }
         if (novas.some((l) => l.vencimento === null) && !vencimentoAtual) return falha("Informe a data", "vencimento");
+        // Cartão corporativo: cada linha na fatura do ciclo da sua data (a data informada é a da compra).
+        const vinculos: { cartaoId: string | null; faturaCartaoId: string | null }[] = [];
+        for (const l of novas) {
+          if (f.tipo !== "cartao_corporativo") {
+            vinculos.push({ cartaoId: null, faturaCartaoId: null });
+            continue;
+          }
+          const r = await vincularCompraNa(tx, usuario.id, f.cartaoId, l.vencimento ?? vencimentoAtual!);
+          if (ehFalha(r)) throw new Desfazer(r);
+          vinculos.push(r);
+        }
 
         for (const l of linhas) {
           await tx.delete(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, l.id));
@@ -267,12 +287,13 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
         const criadas = await tx
           .insert(pagamentosFornecedor)
           .values(
-            novas.map((l) => ({
+            novas.map((l, i) => ({
               contaId: conta.id,
               numero: l.numero,
               vencimento: l.vencimento ?? vencimentoAtual!,
               valorOriginal: l.valorOriginal,
               valorBrlPrevisto: l.valorBrlPrevisto,
+              ...vinculos[i],
             })),
           )
           .returning();

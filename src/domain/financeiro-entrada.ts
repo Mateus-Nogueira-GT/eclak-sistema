@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { hojeEmCuiaba } from "./clientes";
 import { CENTROS, FORMAS_FINANCEIRO, FREQUENCIAS, LADOS, ORIGENS, SITUACOES } from "./financeiro";
-import { contaBancariaId, data, obrigatorio, reais, texto } from "./venda-entrada";
+import { contaBancariaId, data, MSG_CARTAO_CORPORATIVO, obrigatorio, reais, texto } from "./venda-entrada";
 
 // Entradas das actions do financeiro (Zod). Datas "AAAA-MM-DD", competência "AAAA-MM".
 
@@ -15,6 +15,7 @@ export const MSG_LOTE_LADOS = "Escolha linhas de um lado só (a pagar ou a receb
 const MSG_DATA = "Informe a data";
 const MSG_COMPETENCIA = "Competência inválida";
 const MSG_ID = "Identificador inválido";
+const MSG_FINAL = "Informe os 4 últimos dígitos do cartão";
 
 const uuid = z.string({ error: MSG_ID }).uuid(MSG_ID);
 /** Select vazio de formulário chega como "" e vale null. */
@@ -59,6 +60,9 @@ const repeticao = z.discriminatedUnion(
   { error: "Repetição inválida" },
 );
 
+/** Lançamento a pagar no cartão de crédito: compra no cartão corporativo (vai para a fatura do ciclo). */
+const ehCompraNoCartao = (v: { lado: string; forma: string }) => v.lado === "pagar" && v.forma === "Cartão de crédito";
+
 export const lancamentoSchema = z
   .strictObject({
     lado,
@@ -76,11 +80,15 @@ export const lancamentoSchema = z
     contaBancariaId: uuidOpcional,
     observacao: texto(2000),
     repeticao,
+    /** Cartão corporativo da compra: só a pagar no cartão de crédito (obrigatório aí); nas outras, vale null. */
+    cartaoId: uuidOpcional,
   })
   .superRefine((v, ctx) => {
     const preenchidos = [v.fornecedorId, v.clienteId, v.pessoaTexto].filter((x) => x !== null).length;
     if (preenchidos > 1) ctx.addIssue({ code: "custom", message: MSG_PESSOA, path: ["pessoa"] });
-  });
+    if (ehCompraNoCartao(v) && !v.cartaoId) ctx.addIssue({ code: "custom", message: MSG_CARTAO_CORPORATIVO, path: ["cartaoId"] });
+  })
+  .transform((v) => (ehCompraNoCartao(v) ? v : { ...v, cartaoId: null }));
 export type LancamentoEntrada = z.infer<typeof lancamentoSchema>;
 
 /** Baixa individual: a diferença entre `valorPago` e `valor + juros − desconto` é conferida na action. */
@@ -210,3 +218,20 @@ export function filtroDaUrl(params: Record<string, string | string[] | undefined
   }
   return filtroLancamentosSchema.parse(filtro);
 }
+
+const MSG_DIA = "Escolha um dia de 1 a 28";
+const dia = z.preprocess(
+  (v) => (typeof v === "string" ? (/^\s*\d+\s*$/.test(v) ? Number(v) : NaN) : v),
+  z.number({ error: MSG_DIA }).int(MSG_DIA).min(1, MSG_DIA).max(28, MSG_DIA),
+);
+
+/** Cadastro do cartão corporativo: dias de fechamento e de vencimento de 1 a 28 (todo mês tem). */
+export const cartaoSchema = z.strictObject({
+  nome: obrigatorio("Informe o nome do cartão", 100),
+  final: z.string({ error: MSG_FINAL }).trim().regex(/^\d{4}$/, MSG_FINAL),
+  diaFechamento: dia,
+  diaVencimento: dia,
+  contaBancariaId,
+  centro,
+});
+export type CartaoValidado = z.output<typeof cartaoSchema>;

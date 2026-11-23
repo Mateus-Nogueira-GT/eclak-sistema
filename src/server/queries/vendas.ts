@@ -253,6 +253,8 @@ export type PagamentoVendido = {
   valorBrlPago: bigint | null;
   /** Quitado pelo repasse do cartão direto no fornecedor (desfaz-se pelo repasse). */
   peloRepasse: boolean;
+  /** Cartão corporativo da compra (forma "cartão corporativo"). */
+  cartaoId: string | null;
 };
 
 export type ComissaoVendida = {
@@ -429,6 +431,7 @@ function montarContas(cs: ContaLinha[], pags: PagamentoLinha[], coms: ComissaoLi
         cambioEfetivo: p.cambioEfetivo,
         valorBrlPago: p.valorBrlPago,
         peloRepasse: p.repasseParcelaId !== null,
+        cartaoId: p.cartaoId,
       })),
     comissao: comissoesVendidas.find((x) => x.contaId === c.id) ?? null,
   }));

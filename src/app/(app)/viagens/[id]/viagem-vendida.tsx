@@ -36,6 +36,7 @@ type Aba = "entradas" | "saidas" | "conciliacao" | "precificacao";
 
 /** Conta bancária ativa para as baixas (do servidor, só para quem age). */
 export type ContaBancariaOpcao = { id: string; nome: string };
+export type CartaoOpcao = { id: string; nome: string; final: string };
 
 type Painel =
   | { tipo: "baixaParcela"; parcela: ParcelaVendida }
@@ -357,7 +358,7 @@ function somaCampos(valores: string[]): bigint | null {
   }
 }
 
-function FormForma({ conta, onFechar }: { conta: ContaVendida; onFechar: () => void }) {
+function FormForma({ conta, cartoes, onFechar }: { conta: ContaVendida; cartoes: CartaoOpcao[]; onFechar: () => void }) {
   const acao = useAcao();
   const primeira = conta.pagamentos[0]?.vencimento ?? "";
   const alvo = conta.pagamentos.reduce((t, p) => t + p.valorOriginal, 0n);
@@ -365,6 +366,7 @@ function FormForma({ conta, onFechar }: { conta: ContaVendida; onFechar: () => v
   const alvoConhecido = !(conta.forma === "a_vista" && conta.descontoAVistaPct && Number(conta.descontoAVistaPct) > 0);
   const [tipo, setTipo] = useState<FormaPagamentoFornecedorTipo>(conta.forma ?? "a_vista");
   const [vencimento, setVencimento] = useState(primeira);
+  const [cartaoId, setCartaoId] = useState(conta.pagamentos[0]?.cartaoId ?? (cartoes.length === 1 ? cartoes[0].id : ""));
   const metade = alvoConhecido ? alvo / 2n : 0n;
   const [linhas, setLinhas] = useState<{ vencimento: string; valor: string }[]>([
     { vencimento: primeira, valor: alvoConhecido ? reaisParaCampo(metade) : "" },
@@ -381,7 +383,7 @@ function FormForma({ conta, onFechar }: { conta: ContaVendida; onFechar: () => v
           tipo === "a_vista"
             ? { tipo, ...(vencimento ? { vencimento } : {}) }
             : tipo === "cartao_corporativo"
-              ? { tipo, vencimento }
+              ? { tipo, vencimento, cartaoId }
               : { tipo, parcelas: linhas },
         ),
       onFechar,
@@ -397,8 +399,18 @@ function FormForma({ conta, onFechar }: { conta: ContaVendida; onFechar: () => v
           ))}
         </Select>
       </Campo>
+      {tipo === "cartao_corporativo" && (
+        <Campo label="Cartão corporativo">
+          <Select value={cartaoId} onChange={setCartaoId} className={`w-full ${marca(acao, "cartaoId")}`}>
+            <option value="">{cartoes.length === 0 ? "Nenhum cartão ativo" : "Escolha o cartão"}</option>
+            {cartoes.map((k) => (
+              <option key={k.id} value={k.id}>{`${k.nome} (final ${k.final})`}</option>
+            ))}
+          </Select>
+        </Campo>
+      )}
       {tipo !== "parcelado" && (
-        <Campo label={tipo === "cartao_corporativo" ? "Vencimento da fatura do cartão" : "Vencimento"}>
+        <Campo label={tipo === "cartao_corporativo" ? "Data da compra no cartão" : "Vencimento"}>
           <input type="date" className={`${inputCls} ${marca(acao, "vencimento")}`} value={vencimento} onChange={(e) => setVencimento(e.target.value)} />
         </Campo>
       )}
@@ -566,6 +578,7 @@ export function ViagemVendidaView({
   margem,
   hoje,
   contasBancarias,
+  cartoes = [],
 }: {
   v: ViagemVendida;
   ficha: FichaPrecificacao | null;
@@ -578,6 +591,8 @@ export function ViagemVendidaView({
   hoje: string;
   /** Contas bancárias ativas para as baixas (vazio para quem não age). */
   contasBancarias: ContaBancariaOpcao[];
+  /** Cartões corporativos ativos para a forma "cartão corporativo" (vazio para quem não age). */
+  cartoes?: CartaoOpcao[];
 }) {
   const [aba, setAba] = useState<Aba>("entradas");
   const [painel, setPainel] = useState<Painel | null>(null);
@@ -681,7 +696,7 @@ export function ViagemVendidaView({
             <FormRepasse parcela={painelDaAba.parcela} cartao={v.cartaoFornecedor} hoje={hoje} contas={contasBancarias} onFechar={fechar} />
           )}
           {painelDaAba.tipo === "baixaPagamento" && <FormBaixaPagamento conta={painelDaAba.conta} pag={painelDaAba.pag} hoje={hoje} contas={contasBancarias} onFechar={fechar} />}
-          {painelDaAba.tipo === "forma" && <FormForma conta={painelDaAba.conta} onFechar={fechar} />}
+          {painelDaAba.tipo === "forma" && <FormForma conta={painelDaAba.conta} cartoes={cartoes} onFechar={fechar} />}
           {painelDaAba.tipo === "comissaoTipo" && <FormComissaoTipo conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "previsto" && <FormPrevisto conta={painelDaAba.conta} onFechar={fechar} />}
           {painelDaAba.tipo === "contestar" && <FormContestar conta={painelDaAba.conta} onFechar={fechar} />}

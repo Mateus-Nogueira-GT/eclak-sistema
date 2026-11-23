@@ -53,6 +53,7 @@ import {
   registrarComissaoNa,
   type Feito,
 } from "@/server/financeiro/baixas-viagem";
+import { desvincularCompraNa, vincularCompraNa, type Vinculo } from "@/server/financeiro/cartoes";
 import { travarViagem } from "@/server/trava-viagem";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
@@ -68,7 +69,8 @@ const falha = (erro: string, campo?: string): Falha => (campo ? { ok: false, err
 const LANCAMENTO_NAO_ENCONTRADO = falha("Lançamento não encontrado");
 const CATEGORIA_NAO_ENCONTRADA = falha("Categoria não encontrada");
 const CONTA_NAO_ENCONTRADA = falha("Conta bancária não encontrada");
-const MSG_CATEGORIA_SISTEMA = "Categoria usada pelas viagens: não pode ser desativada";
+const msgCategoriaSistema = (sistema: string, acao: string) =>
+  `Categoria usada ${sistema === "cartao_corporativo" ? "pelo cartão corporativo" : "pelas viagens"}: não pode ${acao}`;
 const MSG_DESFACA_BAIXA = "Desfaça a baixa para editar";
 const MSG_DIFERENCA_PAGO = "Explique a diferença do valor pago";
 
@@ -141,7 +143,7 @@ export async function salvarCategoria(dados: unknown, id?: string) {
         const [cat] = await tx.select().from(categoriasFinanceiras).where(eq(categoriasFinanceiras.id, id)).for("update");
         if (!cat) return CATEGORIA_NAO_ENCONTRADA;
         if (cat.lado !== v.lado) {
-          if (cat.sistema) return falha("Categoria usada pelas viagens: não pode trocar de lado", "lado");
+          if (cat.sistema) return falha(msgCategoriaSistema(cat.sistema, "trocar de lado"), "lado");
           const [uso] = await tx.select({ id: lancamentos.id }).from(lancamentos).where(eq(lancamentos.categoriaId, id)).limit(1);
           if (uso) return falha("Categoria com lançamentos: não pode trocar de lado", "lado");
         }
@@ -167,7 +169,7 @@ export async function alternarCategoria(id: string, ativa: boolean) {
     const r = await transacao("Falha ao alterar a categoria", async (tx) => {
       const [cat] = await tx.select().from(categoriasFinanceiras).where(eq(categoriasFinanceiras.id, id)).for("update");
       if (!cat) return CATEGORIA_NAO_ENCONTRADA;
-      if (!ativa && cat.sistema) return falha(MSG_CATEGORIA_SISTEMA);
+      if (!ativa && cat.sistema) return falha(msgCategoriaSistema(cat.sistema, "ser desativada"));
       if (cat.ativa !== ativa) {
         await tx.update(categoriasFinanceiras).set({ ativa }).where(eq(categoriasFinanceiras.id, id));
         await auditarAlteracao(tx, u.id, "categorias_financeiras", cat, { ativa }, ativa ? "alterar" : "desativar");
@@ -278,6 +280,33 @@ function slugDaForma(rotulo: string): FormaFinanceiroSlug {
   return par[0];
 }
 
+const SEM_CARTAO = { cartaoId: null, faturaCartaoId: null };
+
+/** Vínculo da compra no cartão (ou a recusa, desfazendo a transação). */
+async function vincular(tx: Transacao, usuarioId: string, cartaoId: string, dataCompra: string, exigeAtivo = true): Promise<Vinculo> {
+  const r = await vincularCompraNa(tx, usuarioId, cartaoId, dataCompra, exigeAtivo);
+  if (ehFalha(r)) throw new Desfazer(r);
+  return r;
+}
+
+/** A compra sai da fatura `faturaCartaoId` (recusa, desfazendo a transação, se a fatura já foi paga). */
+async function desvincular(tx: Transacao, faturaCartaoId: string | null): Promise<void> {
+  if (!faturaCartaoId) return;
+  const r = await desvincularCompraNa(tx, faturaCartaoId);
+  if (ehFalha(r)) throw new Desfazer(r);
+}
+
+/**
+ * Cartão e fatura da linha `l` depois da edição (compra na data `dataCompra`): sem cartão, nenhum; mesma compra (mesmo
+ * cartão, mesma data, já vinculada) fica na fatura em que está; senão sai da fatura atual e vai para a do ciclo da
+ * data (cartão desativado só é aceito se já era o da compra).
+ */
+async function revincular(tx: Transacao, usuarioId: string, l: LancamentoLinha, cartaoId: string | null, dataCompra: string) {
+  if (cartaoId === l.cartaoId && l.faturaCartaoId && dataCompra === l.vencimento) return { cartaoId, faturaCartaoId: l.faturaCartaoId };
+  await desvincular(tx, l.faturaCartaoId);
+  return cartaoId ? vincular(tx, usuarioId, cartaoId, dataCompra, cartaoId !== l.cartaoId) : SEM_CARTAO;
+}
+
 /** Campos editáveis comuns (sem as datas, que cada linha mantém nas "próximas"). */
 function camposComuns(v: Entrada) {
   return {
@@ -311,11 +340,15 @@ export async function criarLancamento(dados: unknown) {
             ? dividirEmParcelas(v.valor, rep.parcelas, v.vencimento).map((x) => ({ vencimento: x.vencimento, valor: x.valor, numero: x.numero, total: x.total }))
             : datasRecorrentes(v.vencimento, rep.frequencia, rep.quantidade).map((d, i) => ({ vencimento: d, valor: v.valor, numero: i + 1, total: rep.quantidade }));
       const base = camposComuns(v);
+      // Compra no cartão: cada linha na fatura do ciclo da sua data (as datas crescem: faturas travadas em ordem).
+      const vinculos: (Vinculo | typeof SEM_CARTAO)[] = [];
+      for (const x of itens) vinculos.push(v.cartaoId ? await vincular(tx, u.id, v.cartaoId, x.vencimento) : SEM_CARTAO);
       const linhas = await tx
         .insert(lancamentos)
         .values(
-          itens.map((x) => ({
+          itens.map((x, i) => ({
             ...base,
+            ...vinculos[i],
             competencia: somarMesesCompetencia(v.competencia, mesesDe(x.vencimento) - mesesDe(v.vencimento)),
             emissao: v.emissao,
             vencimento: x.vencimento,
@@ -367,6 +400,9 @@ async function travarAlcance(tx: Transacao, id: string, alcance: Alcance): Promi
   return { alvo, afetadas: todos.filter((l) => l.id === id || l.status === "em_aberto") };
 }
 
+/** Linhas por vencimento (e id): as faturas do cartão são travadas em ordem de data, como na criação. */
+const porData = (ls: LancamentoLinha[]) => [...ls].sort((a, b) => (a.vencimento + a.id < b.vencimento + b.id ? -1 : 1));
+
 export async function editarLancamento(id: string, dados: unknown, alcance: Alcance) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
     const p = lancamentoSchema.safeParse(dados);
@@ -383,9 +419,12 @@ export async function editarLancamento(id: string, dados: unknown, alcance: Alca
       // "repeticao" não se aplica à edição. As datas só mudam na linha escolhida: cada parcela mantém as suas. O
       // valor só vai às próximas quando foi mudado na escolhida (senão a última parcela perderia o resto da divisão).
       const nasOutras = valor === t.alvo.valor ? semValor : { ...semValor, valor };
-      for (const l of t.afetadas) {
-        const depois: Record<string, unknown> =
-          l.id === id ? { ...semValor, valor, competencia: v.competencia, emissao: v.emissao, vencimento: v.vencimento } : { ...nasOutras };
+      for (const l of porData(t.afetadas)) {
+        const depois: Record<string, unknown> = {
+          ...(l.id === id ? { ...semValor, valor, competencia: v.competencia, emissao: v.emissao, vencimento: v.vencimento } : { ...nasOutras }),
+          // Compra no cartão: cada linha pela sua data (a da escolhida pode ter mudado).
+          ...(await revincular(tx, u.id, l, v.cartaoId, l.id === id ? v.vencimento : l.vencimento)),
+        };
         const mudou = Object.keys(depois).filter((k) => l[k as keyof LancamentoLinha] !== depois[k]);
         if (mudou.length === 0) continue;
         const parcial = Object.fromEntries(mudou.map((k) => [k, depois[k]]));
@@ -466,8 +505,10 @@ export async function cancelarLancamento(id: string, motivo: unknown, alcance: A
       if (!t) return LANCAMENTO_NAO_ENCONTRADO;
       if (t.alvo.status === "baixado") return falha("Desfaça a baixa para cancelar");
       if (t.alvo.status === "cancelado") return falha("Lançamento já cancelado");
-      const depois = { status: "cancelado" as const, motivoCancelamento: m.data };
-      for (const l of t.afetadas) {
+      for (const l of porData(t.afetadas)) {
+        // Compra no cartão sai da fatura (o cartão fica registrado na linha).
+        await desvincular(tx, l.faturaCartaoId);
+        const depois = { status: "cancelado" as const, motivoCancelamento: m.data, ...(l.faturaCartaoId ? { faturaCartaoId: null } : {}) };
         await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, l.id));
         await auditarAlteracao(tx, u.id, "lancamentos", l, depois);
       }

@@ -142,6 +142,9 @@ export const MSG_REPASSE_ESTRANGEIRA = "Dê baixa no pagamento em moeda estrange
 export const MSG_NAO_CARTAO_FORNECEDOR = "Esta parcela não é de cartão direto no fornecedor";
 export const MSG_DESFACA_REPASSE = "Desfaça o repasse para trocar o fornecedor";
 export const MSG_ESCOLHA_FORNECEDOR_ANTES = "Escolha o fornecedor que recebeu no cartão antes de dar baixa";
+export const MSG_CARTAO_CORPORATIVO = "Escolha o cartão corporativo";
+export const MSG_FATURA_CARTAO_PAGA = "A fatura do cartão deste período já foi paga";
+export const MSG_DESFACA_FATURA_CARTAO = "Desfaça a baixa da fatura do cartão antes";
 export const MSG_FORNECEDOR_JA_PAGO = "Este fornecedor já tem pagamento feito pela ECLAK: desfaça a baixa antes";
 
 /** Conta bancária da baixa: obrigatória (ativa: conferido no núcleo, na transação). Select vazio chega como "". */
@@ -238,7 +241,12 @@ export const formaFornecedorSchema = z.discriminatedUnion(
         .max(24, "Parcelas demais")
         .transform((ps) => ps.map((p) => ({ vencimento: p.vencimento, valorOriginal: p.valor }))),
     }),
-    z.strictObject({ tipo: z.literal("cartao_corporativo"), vencimento: data(MSG_DATA) }),
+    /** `vencimento` = data da compra no cartão; a fatura sai do ciclo do cartão (`cicloDoCartao`). */
+    z.strictObject({
+      tipo: z.literal("cartao_corporativo"),
+      vencimento: data(MSG_DATA),
+      cartaoId: z.string({ error: MSG_CARTAO_CORPORATIVO }).uuid(MSG_CARTAO_CORPORATIVO),
+    }),
   ],
   { error: "Forma inválida" },
 );

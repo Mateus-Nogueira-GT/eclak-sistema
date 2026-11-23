@@ -12,6 +12,7 @@ import { aprovar, enviarParaAprovacao } from "@/server/actions/aprovacoes";
 import { criarOrcamento, salvarCotacao, salvarItem, type ItemEntrada } from "@/server/actions/viagens";
 import { fecharVenda } from "@/server/actions/vendas";
 import { salvarContaBancaria } from "@/server/actions/financeiro";
+import { criarCartao } from "@/server/actions/cartoes";
 import { obterCliente } from "@/server/queries/clientes";
 import { comSessao, criarUsuarioTeste } from "./db";
 
@@ -30,6 +31,13 @@ const CARTAO_FORNECEDOR: FormaPagamento = { tipo: "cartao_fornecedor", parcelas:
 export async function contaBancaria(uid: string, nome = "Banco do Brasil"): Promise<string> {
   const r = await comSessao(uid, () => salvarContaBancaria({ nome, banco: "001", saldoInicial: "0,00", saldoInicialEm: "2026-01-01" }));
   if (!r.ok || !r.id) throw new Error(r.ok ? "Conta bancária sem id" : r.erro);
+  return r.id;
+}
+
+/** Cartão corporativo ativo (fecha dia 15, vence dia 25) debitado na conta `contaBancariaId`; devolve o id. */
+export async function cartaoCorporativo(uid: string, contaBancariaId: string, nome = "Visa empresarial"): Promise<string> {
+  const r = await comSessao(uid, () => criarCartao({ nome, final: "1234", diaFechamento: "15", diaVencimento: "25", contaBancariaId, centro: "MT" }));
+  if (!r.ok) throw new Error(r.erro);
   return r.id;
 }
 

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { type AnyPgColumn, bigint, boolean, check, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, bigint, boolean, check, date, foreignKey, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import {
   COMISSAO_TIPOS,
   FORMAS_PAGAMENTO_FORNECEDOR,
@@ -9,6 +9,7 @@ import {
   STATUS_PAGAMENTO,
   STATUS_PARCELA,
 } from "@/domain/venda";
+import { cartoesCorporativos, faturasCartao } from "./cartoes";
 import { contasBancarias } from "./financeiro";
 import { fornecedores } from "./fornecedores";
 import { usuarios } from "./usuarios";
@@ -158,10 +159,18 @@ export const pagamentosFornecedor = pgTable(
     contaBancariaId: uuid("conta_bancaria_id").references((): AnyPgColumn => contasBancarias.id, { onDelete: "restrict" }),
     /** Parcela de repasse que quitou este pagamento (cartão direto no fornecedor). */
     repasseParcelaId: uuid("repasse_parcela_id").references((): AnyPgColumn => parcelasReceber.id, { onDelete: "restrict" }),
+    /** Pago no cartão corporativo (conta na forma `cartao_corporativo`): o cartão escolhido. */
+    cartaoId: uuid("cartao_id").references((): AnyPgColumn => cartoesCorporativos.id, { onDelete: "restrict" }),
+    /** Fatura do ciclo da compra (o vencimento da linha é a data da compra). */
+    faturaCartaoId: uuid("fatura_cartao_id"),
   },
   (t) => [
     check("pagamentos_fornecedor_valores", sql`${t.valorOriginal} >= 0 AND ${t.valorBrlPrevisto} >= 0 AND (${t.valorOriginalPago} IS NULL OR ${t.valorOriginalPago} >= 0) AND (${t.valorBrlPago} IS NULL OR ${t.valorBrlPago} >= 0)`),
     unique("pagamentos_fornecedor_conta_numero_unico").on(t.contaId, t.numero),
+    check("pagamentos_fornecedor_fatura_com_cartao", sql`${t.faturaCartaoId} IS NULL OR ${t.cartaoId} IS NOT NULL`),
+    // A fatura é do mesmo cartão do pagamento (FK composta; sem fatura, nada a conferir).
+    foreignKey({ name: "pagamentos_fornecedor_fatura_cartao_fk", columns: [t.faturaCartaoId, t.cartaoId], foreignColumns: [faturasCartao.id, faturasCartao.cartaoId] }).onDelete("restrict"),
+    index("pagamentos_fornecedor_fatura_cartao_idx").on(t.faturaCartaoId),
     // Fluxo de caixa: o que ainda vai sair, por vencimento.
     index("pagamentos_fornecedor_a_pagar_vencimento_idx").on(t.vencimento).where(sql`${t.status} = 'a_pagar'`),
   ],

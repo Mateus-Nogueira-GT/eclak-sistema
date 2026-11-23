@@ -15,7 +15,7 @@ import type { GrupoCategorias, LinhaLancamento, TotaisLancamentos } from "@/serv
 import { MSG_FALHA } from "../../viagens/[id]/acao";
 import { dataBr, reaisParaCampo } from "../../viagens/formatos";
 import { CampoConta, Dialogo, DialogoBaixa, contaPadrao, type ContaOpcao } from "./baixa";
-import { FormularioLancamento, type LancamentoForm, type Opcao } from "./formulario";
+import { FormularioLancamento, type CartaoOpcao, type LancamentoForm, type Opcao } from "./formulario";
 
 type Aba = FiltroLancamentos["lado"];
 type Chave = `${Origem}:${string}`;
@@ -72,6 +72,8 @@ type Props = {
   contas: (ContaOpcao & { ativa: boolean })[];
   fornecedores: Opcao[];
   clientes: Opcao[];
+  /** Cartões corporativos ativos (só com o formulário aberto). */
+  cartoes: CartaoOpcao[];
   edicao: LancamentoForm | null;
   novo: Lado | null;
   /** Linha com os anexos abertos (`?anexos=origem:id`) e os anexos dela (ou os do manual em edição). */
@@ -477,6 +479,7 @@ export function ListaLancamentos(p: Props) {
           contas={ativas}
           fornecedores={p.fornecedores}
           clientes={p.clientes}
+          cartoes={p.cartoes}
           anexos={p.anexos}
           onFechar={() => router.push(urlDe(f, { pagina: f.pagina }))}
         />

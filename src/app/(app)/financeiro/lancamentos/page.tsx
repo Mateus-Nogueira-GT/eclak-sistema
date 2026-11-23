@@ -4,6 +4,7 @@ import { filtroDaUrl } from "@/domain/financeiro-entrada";
 import { ORIGENS, type Origem } from "@/domain/financeiro";
 import { ehUuid } from "@/server/acesso";
 import { listarAnexos } from "@/server/queries/anexos";
+import { listarCartoesAtivos } from "@/server/queries/cartoes";
 import { listarClientes } from "@/server/queries/clientes";
 import { listarCategorias, listarContasBancarias, listarLancamentos, obterLancamento } from "@/server/queries/financeiro";
 import { listarFornecedores } from "@/server/queries/fornecedores";
@@ -28,7 +29,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
   const novo = primeiro(sp.novo);
   const formularioAberto = Boolean(editar || novo);
   const anexosDe = editar ? null : linhaDosAnexos(primeiro(sp.anexos));
-  const [lista, categorias, contas, edicao, fornecedores, clientes, anexos] = await Promise.all([
+  const [lista, categorias, contas, edicao, fornecedores, clientes, anexos, cartoes] = await Promise.all([
     listarLancamentos(filtro),
     listarCategorias(),
     listarContasBancarias(),
@@ -36,6 +37,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
     formularioAberto ? listarFornecedores() : Promise.resolve([]),
     formularioAberto ? listarClientes() : Promise.resolve([]),
     editar ? listarAnexos("manual", editar) : anexosDe ? listarAnexos(anexosDe.origem, anexosDe.id) : Promise.resolve([]),
+    formularioAberto ? listarCartoesAtivos() : Promise.resolve([]),
   ]);
   const lancamento: LancamentoForm | null =
     edicao && edicao.status === "em_aberto"
@@ -55,6 +57,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
           forma: edicao.forma,
           contaBancariaId: edicao.contaBancariaId,
           observacao: edicao.observacao,
+          cartaoId: edicao.cartaoId,
           parcelaNumero: edicao.parcelaNumero,
           parcelaTotal: edicao.parcelaTotal,
           status: edicao.status,
@@ -77,6 +80,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
         contas={contas.map((c) => ({ id: c.id, nome: c.nome, ativa: c.ativa }))}
         fornecedores={fornecedores.map((x) => ({ id: x.id, nome: x.nome }))}
         clientes={clientes.map((x) => ({ id: x.id, nome: `${x.grupo} (${x.codigo})` }))}
+        cartoes={cartoes}
         edicao={lancamento}
         novo={!lancamento && (novo === "pagar" || novo === "receber") ? novo : null}
         anexosDe={anexosDe}
