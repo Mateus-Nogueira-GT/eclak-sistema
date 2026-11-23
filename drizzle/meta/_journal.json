@@ -183,20 +183,6 @@
       "when": 1795418263957,
       "tag": "0025_view_repasse_gravado",
       "breakpoints": true
-    },
-    {
-      "idx": 26,
-      "version": "7",
-      "when": 1795431336008,
-      "tag": "0026_operacao",
-      "breakpoints": true
-    },
-    {
-      "idx": 27,
-      "version": "7",
-      "when": 1795431351052,
-      "tag": "0027_operacao_rls",
-      "breakpoints": true
     }
   ]
 }
