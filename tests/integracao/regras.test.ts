@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { ENCERRAMENTO_INICIAL, REGRAS_INICIAIS } from "@/domain/regras";
-import { db } from "@/server/db/client";
+import { db, sql } from "@/server/db/client";
 import { auditoria, regrasVersoes } from "@/server/db/schema";
 import { salvarRegras } from "@/server/actions/regras";
 import { historicoRegras, regrasVigentes } from "@/server/queries/regras";
@@ -11,6 +11,9 @@ import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
 
 const com = (p: Partial<typeof REGRAS_INICIAIS>) => ({ ...REGRAS_INICIAIS, ...p });
 const pausa = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Relógio do banco: `vigente_desde` vem do Postgres, então a referência também vem de lá (sem depender do relógio do Node). */
+const relogioDoBanco = async () =>
+  new Date((await sql<{ ms: number }[]>`select (extract(epoch from clock_timestamp()) * 1000)::float8 as ms`)[0].ms);
 
 describe("parâmetros versionados", () => {
   beforeEach(limparBanco);
@@ -41,9 +44,9 @@ describe("parâmetros versionados", () => {
   it("Diretor salva margem 20: vigente passa a 20, data anterior ainda devolve 19, auditoria 'criar'", async () => {
     const d = await criarUsuarioTeste("diretor");
     await comSessao(d.id, () => regrasVigentes());
-    await pausa(20);
-    const antes = new Date();
-    await pausa(20);
+    await pausa(5);
+    const antes = await relogioDoBanco();
+    await pausa(5);
     const r = await comSessao(d.id, () => salvarRegras(com({ margemReferenciaPct: "20.000" })));
     expect(r.ok).toBe(true);
     if (!r.ok) return;

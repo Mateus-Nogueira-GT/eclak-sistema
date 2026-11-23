@@ -165,7 +165,7 @@ const hotelSchema = z
 const vooSchema = z.object({
   data: data.nullable(),
   voo: z.string().max(40, "Texto muito longo"),
-  trecho: z.string().max(120, "Texto muito longo"),
+  trecho: z.string().max(200, "Texto muito longo"),
   saida: hora,
   chegada: hora,
 });
@@ -222,7 +222,12 @@ export function noitesDoHotel(h: HotelRoteiro): string | null {
 
 // ---------- Nome de arquivo ----------
 
-const emMaiusculas = (t: string) => semAcento(t).toUpperCase().trim().split(/\s+/).join("-");
+/** Maiúsculas sem acento; cada trecho que não é A-Z/0-9 (espaço, vírgula, barra…) vira um "-", sem "-" nas pontas. */
+const emMaiusculas = (t: string) =>
+  semAcento(t)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
 export function nomeArquivo(prefixo: "RT" | "TAREFAS", titular: string, destino: string, inicio: string, fim: string): string {
   return `${prefixo}_${emMaiusculas(ultimoSobrenome(titular))}_${emMaiusculas(destino)}_${inicio.replaceAll("-", "")}-${fim.replaceAll("-", "")}`;

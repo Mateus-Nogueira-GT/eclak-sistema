@@ -131,6 +131,12 @@ describe("troca, datas e estado", () => {
     expect(estadoDoDaily("2027-08-16", "revisado", "2027-08-14")).toMatchObject({ rotulo: "Pronto para enviar", tom: "agua" });
     expect(estadoDoDaily("2027-08-16", "enviado", "2027-08-14")).toMatchObject({ rotulo: "Enviado", tom: "verde" });
   });
+  it("dia que já passou sem ser gerado fica neutro", () => {
+    expect(estadoDoDaily("2027-08-16", null, "2027-08-16")).toMatchObject({ rotulo: "A gerar", tom: "ouro" });
+    expect(estadoDoDaily("2027-08-16", null, "2027-08-17")).toEqual({ rotulo: "Não gerado", tom: "cinza", noPrazoDeGerar: true });
+    expect(estadoDoDaily("2027-08-16", "pendente", "2027-08-20")).toMatchObject({ rotulo: "Não gerado", tom: "cinza" });
+    expect(estadoDoDaily("2027-08-16", "gerado", "2027-08-20")).toMatchObject({ rotulo: "Gerado, a revisar", tom: "ouro" });
+  });
 });
 
 describe("converterHorario", () => {

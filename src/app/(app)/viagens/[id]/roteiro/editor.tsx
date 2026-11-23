@@ -526,7 +526,7 @@ function TabelaVoos({ voos, onChange }: { voos: VooRoteiro[]; onChange: (v: VooR
           <div key={i} className="grid grid-cols-[132px_110px_1fr_84px_84px_30px] items-center gap-1.5">
             <input aria-label="Data do voo" type="date" value={v.data ?? ""} onChange={(e) => set(i, { data: ouNull(e.target.value) })} className={inputPequeno} />
             <input aria-label="Voo" placeholder="Voo" value={v.voo} maxLength={40} onChange={(e) => set(i, { voo: e.target.value })} className={inputPequeno} />
-            <input aria-label="Trecho" placeholder="Trecho" value={v.trecho} maxLength={120} onChange={(e) => set(i, { trecho: e.target.value })} className={inputPequeno} />
+            <input aria-label="Trecho" placeholder="Trecho" value={v.trecho} maxLength={200} onChange={(e) => set(i, { trecho: e.target.value })} className={inputPequeno} />
             <input aria-label="Saída" title="Saída" type="time" value={v.saida ?? ""} onChange={(e) => set(i, { saida: ouNull(e.target.value) })} className={inputPequeno} />
             <input aria-label="Chegada" title="Chegada" type="time" value={v.chegada ?? ""} onChange={(e) => set(i, { chegada: ouNull(e.target.value) })} className={inputPequeno} />
             <button type="button" aria-label="Remover voo" className={botaoIcone} onClick={() => onChange(voos.filter((_, k) => k !== i))}>

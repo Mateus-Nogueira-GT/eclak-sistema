@@ -140,6 +140,12 @@ function conteudoDoRoteiro(v: Viagem): ConteudoRoteiro {
   };
 }
 
+// A viagem da Ribeiro é "Portugal e Espanha" e o voo chega em Lisboa: saudação em português, fuso de Lisboa.
+const IDIOMA = "portugues";
+const FUSO = "Europe/Lisbon";
+/** Último dia da viagem usado pelo seed (hotel de Roma sai em início + 14); viagens mais curtas não recebem a operação. */
+const DIAS_USADOS = 14;
+
 async function semearRoteiro(sql: Sql, v: Viagem, usuarios: Record<string, string>) {
   const [existe] = await sql`select id from roteiros where viagem_id = ${v.id}`;
   if (existe) return { roteiroId: existe.id as string, novo: false };
@@ -147,7 +153,7 @@ async function semearRoteiro(sql: Sql, v: Viagem, usuarios: Record<string, strin
   const conteudo = conteudoDoRoteiro(v);
   const [r] = await sql`
     insert into roteiros (viagem_id, status, idioma, fuso, abertura, conteudo, enviado_cliente_em, enviado_cliente_por, aprovado_em, aprovado_por, criado_por)
-    values (${v.id}, 'aprovado', 'italiano', 'Europe/Rome',
+    values (${v.id}, 'aprovado', ${IDIOMA}, ${FUSO},
             'Preparamos este roteiro pensando no ritmo da família: manhãs com cultura e tardes mais leves.',
             ${sql.json(conteudo as never)}, now(), ${v.consultorId}, now(), ${diretor}, ${v.consultorId})
     returning id`;
@@ -223,6 +229,10 @@ export async function semearOperacao(sql: Sql): Promise<{ tarefas: number; rotei
   for (const v of viagens) {
     tarefas += await inserirAutomaticas(sql, v, tarefasDaVenda(v.aceite, v.inicio), "venda", usuarios["diretor@eclak.local"]);
     if (v.grupo !== "Família Ribeiro") continue;
+    if (somarDias(v.inicio, DIAS_USADOS) > v.fim) {
+      console.warn(`Seed da operação: a viagem da ${v.grupo} tem menos de ${DIAS_USADOS + 1} dias; tarefas manuais, roteiro e dailies não semeados.`);
+      continue;
+    }
     tarefas += await semearManuais(sql, v, usuarios, hoje);
     const { roteiroId, novo } = await semearRoteiro(sql, v, usuarios);
     if (novo) roteiros++;

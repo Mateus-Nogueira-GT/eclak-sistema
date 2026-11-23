@@ -158,6 +158,8 @@ export function estadoDoDaily(
   if (estado === "gerado") return { rotulo: "Gerado, a revisar", tom: "ouro", noPrazoDeGerar };
   if (estado === "revisado") return { rotulo: "Pronto para enviar", tom: "agua", noPrazoDeGerar };
   if (estado === "enviado") return { rotulo: "Enviado", tom: "verde", noPrazoDeGerar };
+  // Dia que já passou sem texto: nada mais a cobrar, fica neutro.
+  if (data < hoje) return { rotulo: "Não gerado", tom: "cinza", noPrazoDeGerar };
   if (!noPrazoDeGerar) return { rotulo: `Gera em ${dataBr(geracao).slice(0, 5)}`, tom: "cinza", noPrazoDeGerar };
   return { rotulo: "A gerar", tom: "ouro", noPrazoDeGerar };
 }

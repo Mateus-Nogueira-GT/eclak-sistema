@@ -60,10 +60,15 @@ function revalidar(viagemId: string) {
   revalidatePath(`/viagens/${viagemId}/dailies`);
 }
 
-/** Roteiro (sem lock) e a viagem dele, vendida e não excluída; a data precisa ser um dia do roteiro. */
+/**
+ * Roteiro lido `for share` e a viagem dele, vendida e não excluída; a data precisa ser um dia do roteiro. O lock
+ * compartilhado faz um `salvarRoteiro` concorrente (que trava o roteiro `for update`) esperar o fim desta transação,
+ * então o texto gerado nunca sai de um conteúdo já substituído sem o aviso de "roteiro mudou". Sem ciclo de locks:
+ * ninguém trava um daily e depois o roteiro.
+ */
 async function roteiroDoDia(tx: Transacao, roteiroId: string, data: string): Promise<{ r: RoteiroDb } | Falha> {
   if (!ehUuid(roteiroId)) return SEM_ROTEIRO;
-  const [r] = await tx.select().from(roteiros).where(eq(roteiros.id, roteiroId));
+  const [r] = await tx.select().from(roteiros).where(eq(roteiros.id, roteiroId)).for("share");
   if (!r) return SEM_ROTEIRO;
   const [v] = await tx
     .select({ status: viagens.status })
@@ -288,7 +293,9 @@ export async function salvarInterno(
       r = await db.transaction(async (tx) => {
         const x = await roteiroDoDia(tx, roteiroId, data);
         if (ehFalha(x)) return x;
-        if (p.data.plantaoId) {
+        const antes = await travarDoDia(tx, roteiroId, data);
+        // Só confere "ativo" quando o plantão muda: um plantão que ficou inativo depois não impede salvar os localizadores.
+        if (p.data.plantaoId && p.data.plantaoId !== antes?.plantaoId) {
           const [u] = await tx
             .select({ id: usuarios.id })
             .from(usuarios)
@@ -296,7 +303,6 @@ export async function salvarInterno(
           if (!u) return { ok: false, erro: "Escolha um usuário ativo para o plantão", campos: { plantaoId: "Escolha um usuário ativo para o plantão" } } as Falha;
         }
         const colunas = { plantaoId: p.data.plantaoId, interno, atualizadoEm: new Date() };
-        const antes = await travarDoDia(tx, roteiroId, data);
         if (!antes) {
           const novo = await inserirDoDia(tx, { roteiroId, data, estado: "pendente", ...colunas });
           if (ehFalha(novo)) return novo;

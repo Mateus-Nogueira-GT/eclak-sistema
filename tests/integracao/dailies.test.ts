@@ -5,7 +5,7 @@ vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSup
 import { ENCERRAMENTO_INICIAL } from "@/domain/regras";
 import type { ConteudoRoteiro, HotelRoteiro } from "@/domain/roteiro";
 import { db } from "@/server/db/client";
-import { auditoria, dailies } from "@/server/db/schema";
+import { auditoria, dailies, roteiros, usuarios } from "@/server/db/schema";
 import { salvarRegras } from "@/server/actions/regras";
 import { aprovarRoteiro, criarRoteiro, salvarRoteiro } from "@/server/actions/roteiros";
 import {
@@ -99,6 +99,29 @@ async function gerar(data = "2027-08-16", uid = op.id, esperado?: string) {
 }
 
 describe("gerar", () => {
+  it("espera um salvarRoteiro em andamento (lê o roteiro for share) e gera com o conteúdo novo", async () => {
+    // Já regenera a regra vigente antes, para gerarDaily não abrir outra transação no meio do teste.
+    await comSessao(op.id, () => regrasVigentes());
+    let pronto = false;
+    let geracao!: Promise<unknown>;
+    await db.transaction(async (tx) => {
+      const [r] = await tx.select().from(roteiros).where(eq(roteiros.id, roteiroId)).for("update");
+      geracao = gerar().then(() => (pronto = true));
+      await new Promise((ok) => setTimeout(ok, 400));
+      expect(pronto).toBe(false);
+      const conteudo = {
+        ...r.conteudo,
+        dias: r.conteudo.dias.map((d) => (d.data === "2027-08-16" ? { ...d, itens: [{ hora: "09:00", titulo: "Visita à Accademia", texto: "", mapa: null }] } : d)),
+      };
+      await tx.update(roteiros).set({ conteudo, atualizadoEm: new Date() }).where(eq(roteiros.id, roteiroId));
+    });
+    await geracao;
+    expect(pronto).toBe(true);
+    const d = await dia("2027-08-16");
+    expect(d.daily?.texto).toContain("Visita à Accademia");
+    expect(d.roteiroMudou).toBe(false);
+  });
+
   it("monta o texto do modelo, estado 'Gerado, a revisar' e os 6 indicadores ok", async () => {
     const antes = await dia("2027-08-16");
     expect(antes.daily).toBeNull();
@@ -239,6 +262,23 @@ describe("interno", () => {
       ok: false,
       erro: "Dia fora do roteiro",
     });
+  });
+
+  it("plantão que ficou inativo e não mudou não impede salvar; trocar para inativo recusa", async () => {
+    const plantao = await criarUsuarioTeste("consultor");
+    const s = await comSessao(op.id, () => salvarInterno(roteiroId, "2027-08-16", { plantaoId: plantao.id, interno: "" }));
+    if (!s.ok) throw new Error(s.erro);
+    await db.update(usuarios).set({ ativo: false }).where(eq(usuarios.id, plantao.id));
+    const s2 = await comSessao(op.id, () =>
+      salvarInterno(roteiroId, "2027-08-16", { plantaoId: plantao.id, interno: "Localizador XYZ789" }, s.atualizadoEm),
+    );
+    if (!s2.ok) throw new Error(s2.erro);
+    expect((await dia("2027-08-16")).daily).toMatchObject({ interno: "Localizador XYZ789", plantao: { id: plantao.id } });
+
+    const outroInativo = await criarUsuarioTeste("consultor", { ativo: false });
+    expect(
+      await comSessao(op.id, () => salvarInterno(roteiroId, "2027-08-16", { plantaoId: outroInativo.id, interno: "" }, s2.atualizadoEm)),
+    ).toMatchObject({ ok: false, erro: "Escolha um usuário ativo para o plantão" });
   });
 
   it("horários do item convertidos para Mato Grosso e Brasília (Europe/Rome)", async () => {

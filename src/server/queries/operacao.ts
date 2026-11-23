@@ -87,7 +87,7 @@ export async function cabecalhoDaViagem(viagemId: string): Promise<CabecalhoViag
     .select({ id: pessoas.id, nome: pessoas.nome, nascimento: pessoas.nascimento })
     .from(viagemPassageiros)
     .innerJoin(pessoas, eq(pessoas.id, viagemPassageiros.pessoaId))
-    .where(eq(viagemPassageiros.viagemId, v.id))
+    .where(and(eq(viagemPassageiros.viagemId, v.id), isNull(pessoas.removidoEm)))
     .orderBy(asc(pessoas.ordem), asc(pessoas.nome));
   return {
     id: v.id,

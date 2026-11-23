@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/server/db/client";
-import { dailies, roteiros, tarefas } from "@/server/db/schema";
+import { eq } from "drizzle-orm";
+import { dailies, pessoas, roteiros, tarefas, viagemPassageiros } from "@/server/db/schema";
 import { cabecalhoDaViagem } from "@/server/queries/operacao";
 import { limparBanco, comSessao } from "../helpers/db";
 import { vendida, type Fixture } from "../helpers/venda";
@@ -71,6 +72,14 @@ describe("cabecalhoDaViagem", () => {
     expect(c!.consultor.id).toBe(f.u.id);
     const json = JSON.stringify(c);
     for (const proibido of ["valor", "margem", "custo", "comissao"]) expect(json).not.toContain(`"${proibido}"`);
+  });
+
+  it("não lista passageiro removido do cadastro", async () => {
+    const [p] = await db.select({ id: viagemPassageiros.pessoaId }).from(viagemPassageiros).where(eq(viagemPassageiros.viagemId, f.viagemId));
+    await db.update(pessoas).set({ removidoEm: new Date() }).where(eq(pessoas.id, p.id));
+    const c = await comSessao(f.u.id, () => cabecalhoDaViagem(f.viagemId));
+    expect(c!.passageiros).toHaveLength(1);
+    expect(c!.passageiros.map((x) => x.id)).not.toContain(p.id);
   });
 
   it("id inválido ou inexistente devolve null", async () => {

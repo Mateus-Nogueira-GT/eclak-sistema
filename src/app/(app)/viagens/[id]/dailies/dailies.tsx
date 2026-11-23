@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Check, Copy, TriangleAlert } from "lucide-react";
 import { Badge, Botao, Card, Tabs, cx, inputCls } from "@/components/ui";
 import { conferirDaily, dataDeGeracao } from "@/domain/daily";
@@ -34,6 +34,9 @@ function dataHora(iso: string): string {
   const p = Object.fromEntries(quando.formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
   return `${p.day}/${p.month} às ${p.hour}h${p.minute}`;
 }
+
+const DESCARTAR_AO_TROCAR = "Há alterações não salvas neste dia. Trocar de dia e descartá-las?";
+const DESCARTAR_INTERNO_AO_GERAR = "A versão interna tem alterações não salvas e será recarregada. Gerar mesmo assim?";
 
 const NOTA_INTERNA = "A versão interna não é enviada ao cliente. Serve para o controle de plantão.";
 
@@ -75,8 +78,16 @@ export function Dailies({
 }) {
   const [aberto, setAberto] = useState(diaInicial);
   const dia = dias.find((d) => d.data === aberto) ?? dias[0];
+  // O painel do dia avisa aqui se tem alterações não salvas; trocar de dia desmonta o painel e as perderia.
+  const sujo = useRef(false);
+  const aoMudarSujo = useCallback((v: boolean) => {
+    sujo.current = v;
+  }, []);
 
   function abrir(data: string) {
+    if (data === dia?.data) return;
+    if (sujo.current && !window.confirm(DESCARTAR_AO_TROCAR)) return;
+    sujo.current = false;
     setAberto(data);
     // Mantém o dia aberto num recarregamento, sem nova navegação.
     window.history.replaceState(null, "", `?dia=${data}`);
@@ -120,6 +131,7 @@ export function Dailies({
         encerramento={encerramento}
         usuarios={usuarios}
         dia={dia}
+        aoMudarSujo={aoMudarSujo}
       />
     </div>
   );
@@ -131,12 +143,14 @@ function PainelDia({
   encerramento,
   usuarios,
   dia,
+  aoMudarSujo,
 }: {
   roteiro: { id: string; idioma: Idioma; fuso: string };
   destino: string;
   encerramento: string;
   usuarios: { id: string; nome: string }[];
   dia: DailyTela;
+  aoMudarSujo: (sujo: boolean) => void;
 }) {
   const router = useRouter();
   const [pendente, iniciar] = useTransition();
@@ -162,6 +176,16 @@ function PainelDia({
   const [forcar, setForcar] = useState(false);
   const textoSujo = texto !== baseTexto;
   const internoSujo = plantao !== baseInterno.plantao || interno !== baseInterno.interno;
+  const algoSujo = textoSujo || internoSujo;
+
+  // Como no editor do roteiro: avisa a lista de dias e pede confirmação ao sair da página com alterações não salvas.
+  useEffect(() => {
+    aoMudarSujo(algoSujo);
+    if (!algoSujo) return;
+    const aoSair = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", aoSair);
+    return () => window.removeEventListener("beforeunload", aoSair);
+  }, [algoSujo, aoMudarSujo]);
 
   if (srvVersao !== visto) {
     setVisto(srvVersao);
@@ -201,6 +225,8 @@ function PainelDia({
   }
 
   function gerar() {
+    // Gerar recarrega a linha inteira (texto e versão interna); não descarta edições internas sem perguntar.
+    if (internoSujo && !window.confirm(DESCARTAR_INTERNO_AO_GERAR)) return;
     setConfirmar(false);
     rodar(() => gerarDaily(roteiro.id, dia.data, versao ?? undefined), "Texto gerado. Revise antes de enviar.", () => setForcar(true));
   }

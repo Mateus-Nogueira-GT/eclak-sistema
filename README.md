@@ -20,7 +20,7 @@ E-mails enviados localmente (convite, nova senha) chegam no Mailpit: http://127.
 - `npm run lint`: ESLint.
 - `npm run typecheck`: verificação de tipos (`tsc --noEmit`).
 - `npm test`: testes de domínio (Vitest, `tests/domain`).
-- `npm run test:integracao`: testes de integração (`tests/integracao`, exigem o banco local; rodam em sequência, um arquivo por vez).
+- `npm run test:integracao`: testes de integração (`tests/integracao`, exigem o banco local; rodam em sequência, um arquivo por vez). Como truncam o banco, só uma execução por vez: o global setup (`tests/integracao/trava-global.ts`) pega um advisory lock do Postgres numa conexão aberta até o fim e, se outra execução já o tem, falha logo com "Outra execução dos testes de integração está usando o banco local agora". Rode sempre por este script (um `npx vitest run tests/integracao/...` avulso não passa pela trava).
 - `npm run db:local`: sobe o Supabase local (Docker). Depois, `npm run db:migrate` aplica as migrações.
 - `npm run db:generate`: gera migração a partir do esquema Drizzle (`src/server/db/schema`).
 - `npm run db:migrate`: aplica as migrações em `drizzle/` no banco de `DATABASE_URL`.

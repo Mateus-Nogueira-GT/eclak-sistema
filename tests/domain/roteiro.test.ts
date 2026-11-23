@@ -75,6 +75,11 @@ describe("conteudoRoteiroSchema", () => {
     dias: base.dias.map((d, i) => (i === 0 ? { ...d, itens: [{ hora: null, titulo: "x", texto: "", mapa: null, ...item }] } : d)),
   });
 
+  it("aceita trecho de voo com até 200 caracteres (o serviço do item vai até 200)", () => {
+    const voo = { data: null, voo: "AZ 123", trecho: "x".repeat(200), saida: null, chegada: null };
+    expect(msgs({ ...base, voos: [voo] })).toEqual([]);
+    expect(msgs({ ...base, voos: [{ ...voo, trecho: "x".repeat(201) }] })).toContain("Texto muito longo");
+  });
   it("recusa dias que não batem", () => {
     expect(msgs({ ...base, dias: base.dias.slice(0, 18) })).toContain("Os dias do roteiro não batem com as datas da viagem");
   });
@@ -107,6 +112,13 @@ describe("nomeArquivo", () => {
     expect(nomeArquivo("TAREFAS", "Ana Conceição", "Costa Amalfitana", "2027-05-02", "2027-05-10")).toBe(
       "TAREFAS_CONCEICAO_COSTA-AMALFITANA_20270502-20270510",
     );
+  });
+  it("pontuação vira hífen, sem hífen nas pontas", () => {
+    expect(nomeArquivo("RT", "Marcos Souza", "Costa Amalfitana, Itália", "2027-08-14", "2027-09-01")).toBe(
+      "RT_SOUZA_COSTA-AMALFITANA-ITALIA_20270814-20270901",
+    );
+    expect(nomeArquivo("RT", "Marcos Souza", "Roma/Florença", "2027-08-14", "2027-09-01")).toBe("RT_SOUZA_ROMA-FLORENCA_20270814-20270901");
+    expect(nomeArquivo("RT", "Marcos Souza", "  ¿Roma?  ", "2027-08-14", "2027-09-01")).toBe("RT_SOUZA_ROMA_20270814-20270901");
   });
 });
 
