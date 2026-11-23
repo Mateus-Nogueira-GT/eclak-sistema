@@ -61,6 +61,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
       {filtrado && (
         <p className="mb-4 text-[13.5px] text-cinza">
           Filtro aplicado só aos movimentos: o saldo de partida é o de todas as contas ({formatarReais(fluxo.saldoAtual)}).
+          {filtro.viagemId && " As compras desta viagem no cartão corporativo estão dentro das faturas do cartão (fora deste filtro)."}
         </p>
       )}
 
@@ -74,7 +75,8 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
 
       <Card className="mt-5">
         <CardHeader eyebrow="Mês a mês, a partir do mês atual" title="Projeção de 12 meses" />
-        <TabelaPeriodos periodos={fluxo.meses} coluna="Mês" meta={fluxo.reserva.meta} />
+        {/* A meta de reserva compara com o saldo de todas as contas: com filtro, a coluna esconde (o card usa a projeção sem filtro). */}
+        <TabelaPeriodos periodos={fluxo.meses} coluna="Mês" meta={filtrado ? undefined : fluxo.reserva.meta} />
       </Card>
     </div>
   );

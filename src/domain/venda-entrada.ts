@@ -148,6 +148,10 @@ export const MSG_DESFACA_FATURA_CARTAO = "Desfaça a baixa da fatura do cartão 
 /** Compra no cartão corporativo (lançamento ou pagamento numa fatura): sem baixa direta, só pela fatura. */
 export const MSG_COMPRA_NO_CARTAO = "Compra no cartão corporativo: dê baixa na fatura do cartão";
 export const MSG_FORNECEDOR_JA_PAGO = "Este fornecedor já tem pagamento feito pela ECLAK: desfaça a baixa antes";
+/** Conta do fornecedor que recebeu no cartão direto: quitada pelo repasse, nunca pela fatura do cartão corporativo. */
+export const MSG_NAO_USE_CARTAO_CORPORATIVO = "Pago pelo cliente no cartão do fornecedor: não use o cartão corporativo";
+/** Fornecedor com pagamento numa fatura do cartão corporativo (em aberto ou paga): não pode ser o do cartão direto. */
+export const MSG_FORNECEDOR_NO_CARTAO_CORPORATIVO = "Este fornecedor tem pagamento no cartão corporativo: troque a forma de pagamento antes";
 
 /** Conta bancária da baixa: obrigatória (ativa: conferido no núcleo, na transação). Select vazio chega como "". */
 export const contaBancariaId = z.string({ error: MSG_CONTA_BANCARIA }).uuid(MSG_CONTA_BANCARIA);

@@ -20,6 +20,7 @@ import {
 import {
   alternarCategoria,
   baixarLancamento,
+  baixarLinha,
   baixarRepasse,
   definirFornecedorCartao,
   desfazerRepasse,
@@ -27,15 +28,24 @@ import {
   criarLancamento,
   desativarContaBancaria,
   desfazerBaixaLancamento,
+  desfazerBaixaLinha,
   editarLancamento,
   salvarCategoria,
   salvarContaBancaria,
 } from "@/server/actions/financeiro";
-import { atualizarPrevisto, baixarPagamento, baixarParcela, cancelarParcela, desfazerBaixaPagamento, desfazerBaixaParcela } from "@/server/actions/financeiro-viagem";
+import {
+  atualizarPrevisto,
+  baixarPagamento,
+  baixarParcela,
+  cancelarParcela,
+  definirFormaFornecedor,
+  desfazerBaixaPagamento,
+  desfazerBaixaParcela,
+} from "@/server/actions/financeiro-viagem";
 import { listarCategorias, listarContasBancarias, listarLancamentos } from "@/server/queries/financeiro";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
-import { contaBancaria, vendida, type Fixture } from "../helpers/venda";
+import { cartaoCorporativo, contaBancaria, vendida, type Fixture } from "../helpers/venda";
 
 const SEM_PERMISSAO = { ok: false, erro: "Sem permissão" };
 
@@ -681,6 +691,91 @@ describe("repasse do cartão direto no fornecedor", () => {
       expect(await comSessao(uid, () => desfazerRepasse(x.parcelas[0].id))).toEqual(SEM_PERMISSAO);
       expect(await comSessao(uid, () => definirFornecedorCartao(x.viagemId, x.fornecedores.roma))).toEqual(SEM_PERMISSAO);
     }
+    expect(await estado(x)).toBe(antes);
+  });
+  // -------------------------------------------------------------------------
+  // Revisão final: cartão direto no fornecedor × cartão corporativo. A conta do fornecedor do cartão é quitada pelo
+  // repasse (o custo sai do repasse esperado); se fosse também para a fatura do cartão, sairia duas vezes.
+  // -------------------------------------------------------------------------
+
+  const NAO_USE_CORPORATIVO = "Pago pelo cliente no cartão do fornecedor: não use o cartão corporativo";
+  const NO_CORPORATIVO = "Este fornecedor tem pagamento no cartão corporativo: troque a forma de pagamento antes";
+  const noCorporativo = (x: Fixture, contaId: string, k: string, vencimento = "2027-07-10") =>
+    comSessao(x.fin.id, () => definirFormaFornecedor(contaId, { tipo: "cartao_corporativo", vencimento, cartaoId: k }));
+  /** A linha (única) da conta: `definirFormaFornecedor` recria as linhas, com ids novos. */
+  const linhaDa = async (contaId: string) => (await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, contaId)))[0];
+  const faturaDa = async (contaId: string) => (await linhaDa(contaId)).faturaCartaoId;
+
+  it("I-1a: conta do fornecedor do cartão direto não vai para o cartão corporativo (em reais ou estrangeira); a de outro fornecedor vai; parcela cancelada libera", async () => {
+    const x = await cartao();
+    const k = await cartaoCorporativo(x.fin.id, cb);
+    const antes = await estado(x);
+    expect(await noCorporativo(x, x.hotel.id, k)).toEqual({ ok: false, erro: NAO_USE_CORPORATIVO });
+    expect(await estado(x)).toBe(antes);
+    expect(await noCorporativo(x, x.passeio.id, k)).toEqual({ ok: true });
+    // estrangeira do fornecedor do cartão também (o custo do repasse conta a conta em qualquer moeda)
+    const y = await vendida({ cartao: "transfer" });
+    const k2 = await cartaoCorporativo(y.fin.id, cb, "Master empresarial");
+    expect(await noCorporativo(y, y.transfer.id, k2)).toEqual({ ok: false, erro: NAO_USE_CORPORATIVO });
+    // parcela de cartão direto cancelada: a venda deixa de ser de cartão direto e a conta pode ir para o cartão
+    expect(await comSessao(x.fin.id, () => cancelarParcela(x.parcelas[0].id, "Cliente pagou à parte"))).toEqual({ ok: true });
+    expect(await noCorporativo(x, x.hotel.id, k)).toEqual({ ok: true });
+    expect(await faturaDa(x.hotel.id)).not.toBeNull();
+  });
+
+  it("I-1b: definirFornecedorCartao recusa fornecedor com pagamento na fatura do cartão (em aberto ou paga)", async () => {
+    const x = await cartao();
+    const k = await cartaoCorporativo(x.fin.id, cb);
+    expect(await noCorporativo(x, x.passeio.id, k)).toEqual({ ok: true });
+    const antes = await estado(x);
+    expect(await comSessao(x.fin.id, () => definirFornecedorCartao(x.viagemId, x.fornecedores.roma))).toEqual({
+      ok: false,
+      erro: NO_CORPORATIVO,
+      campos: { fornecedorCartaoId: NO_CORPORATIVO },
+    });
+    expect(await estado(x)).toBe(antes);
+    // fatura paga: o pagamento fica pago, sem conta bancária (pela fatura); continua recusado
+    const fatura = (await faturaDa(x.passeio.id))!;
+    expect(await comSessao(x.fin.id, () => baixarLinha("fatura_cartao", fatura, { data: HOJE, contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await linhaDa(x.passeio.id)).toMatchObject({ status: "pago", contaBancariaId: null, faturaCartaoId: fatura });
+    expect(await comSessao(x.fin.id, () => definirFornecedorCartao(x.viagemId, x.fornecedores.roma))).toMatchObject({ ok: false, erro: NO_CORPORATIVO });
+    // fora do cartão: liberado
+    expect(await comSessao(x.fin.id, () => desfazerBaixaLinha("fatura_cartao", fatura))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => definirFormaFornecedor(x.passeio.id, { tipo: "a_vista", vencimento: "2027-07-10" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => definirFornecedorCartao(x.viagemId, x.fornecedores.roma))).toEqual({ ok: true });
+  });
+
+  it("I-1c: parcela cancelada e conta do fornecedor no cartão corporativo → desfazer o cancelamento recusado (em aberto ou paga pela fatura)", async () => {
+    const x = await cartao();
+    const k = await cartaoCorporativo(x.fin.id, cb);
+    expect(await comSessao(x.fin.id, () => cancelarParcela(x.parcelas[0].id, "Cliente pagou à parte"))).toEqual({ ok: true });
+    expect(await noCorporativo(x, x.hotel.id, k)).toEqual({ ok: true });
+    const fatura = (await faturaDa(x.hotel.id))!;
+    const antes = await estado(x);
+    expect(await comSessao(x.fin.id, () => desfazerRepasse(x.parcelas[0].id))).toEqual({ ok: false, erro: NO_CORPORATIVO });
+    expect(await estado(x)).toBe(antes);
+    // paga pela fatura (sem conta bancária no pagamento): recusado também
+    expect(await comSessao(x.fin.id, () => baixarLinha("fatura_cartao", fatura, { data: HOJE, contaBancariaId: cb }))).toEqual({ ok: true });
+    expect(await linhaDa(x.hotel.id)).toMatchObject({ status: "pago", contaBancariaId: null, faturaCartaoId: fatura });
+    expect(await comSessao(x.fin.id, () => desfazerRepasse(x.parcelas[0].id))).toEqual({ ok: false, erro: NO_CORPORATIVO });
+    expect((await parcela(x.parcelas[0].id)).status).toBe("cancelada");
+    // desfeita a baixa da fatura e tirada do cartão: liberado
+    expect(await comSessao(x.fin.id, () => desfazerBaixaLinha("fatura_cartao", fatura))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => definirFormaFornecedor(x.hotel.id, { tipo: "a_vista", vencimento: "2027-07-10" }))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => desfazerRepasse(x.parcelas[0].id))).toEqual({ ok: true });
+    expect((await parcela(x.parcelas[0].id)).status).toBe("a_receber");
+  });
+
+  it("I-1d: o repasse recusa quando um pagamento do fornecedor do cartão está numa fatura do cartão (defesa em profundidade)", async () => {
+    const x = await cartao();
+    const k = await cartaoCorporativo(x.fin.id, cb);
+    // Estado que as actions não deixam mais criar (dado antigo): conta do hotel no cartão com a venda de cartão direto.
+    expect(await comSessao(x.fin.id, () => cancelarParcela(x.parcelas[0].id, "temporário"))).toEqual({ ok: true });
+    expect(await noCorporativo(x, x.hotel.id, k)).toEqual({ ok: true });
+    await db.update(parcelasReceber).set({ status: "a_receber", observacao: null }).where(eq(parcelasReceber.id, x.parcelas[0].id));
+    const antes = await estado(x);
+    const esperado = (await linhaDaView(x.parcelas[0].id)).valorPrevisto;
+    expect(await repasse(x, reais(esperado))).toEqual({ ok: false, erro: NO_CORPORATIVO });
     expect(await estado(x)).toBe(antes);
   });
 });

@@ -21,9 +21,6 @@ const ASSINATURAS: { tipo: TipoAnexo; bytes: number[] }[] = [
   { tipo: "image/jpeg", bytes: [0xff, 0xd8, 0xff] },
 ];
 
-/** Bytes iniciais que bastam para reconhecer qualquer tipo aceito. */
-export const BYTES_ASSINATURA = 8;
-
 /** Tipo do arquivo pela assinatura no começo; `null` se não for PDF, PNG ou JPEG. */
 export function tipoPelosBytes(bytes: Uint8Array): TipoAnexo | null {
   for (const a of ASSINATURAS) {

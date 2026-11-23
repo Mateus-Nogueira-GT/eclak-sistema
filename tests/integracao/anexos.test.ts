@@ -100,6 +100,17 @@ describe("anexos: envio, link assinado e remoção", () => {
     expect(lista[0]).toMatchObject({ nome: "comprovante.pdf", mime: "application/pdf", tamanho: PDF.length, enviadoPorNome: "Teste fin_estrategico" });
   });
 
+  it("nome longo é cortado em 255 caracteres sem partir um par substituto ao meio", async () => {
+    // 254 letras + um caractere fora do plano básico (2 unidades UTF-16): o corte por unidade deixaria meio par.
+    const nome = `${"a".repeat(254)}\u{1F4C4}resto.pdf`;
+    const r = await enviar("manual", c.manual, arquivo(PDF, nome));
+    expect(r).toMatchObject({ ok: true });
+    const [a] = await db.select().from(anexos).where(eq(anexos.id, (r as { id: string }).id));
+    subidos.push(a.caminho);
+    expect(Array.from(a.nome)).toHaveLength(255);
+    expect(a.nome.endsWith("\u{1F4C4}")).toBe(true);
+  });
+
   it("PNG e JPEG pelos bytes valem; o tipo gravado é o dos bytes, não o declarado", async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
     const jpg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);

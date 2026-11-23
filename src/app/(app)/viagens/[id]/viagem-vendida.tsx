@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
 import { ArrowRight, Plus, Trash2 } from "lucide-react";
 import { Bilhete } from "@/components/bilhete";
 import { Grade, Semaforo, SoGestao } from "@/components/kit";
@@ -709,7 +710,7 @@ export function ViagemVendidaView({
       )}
 
       {aba === "entradas" && <Entradas v={v} agir={agir} abrir={abrir} />}
-      {aba === "saidas" && <Saidas v={v} agir={agir} abrir={abrir} />}
+      {aba === "saidas" && <Saidas v={v} agir={agir} verCartoes={podeAgir} abrir={abrir} />}
       {aba === "conciliacao" && <Conciliacao v={v} agir={agir} abrir={abrir} />}
       {aba === "precificacao" && (
         <div>
@@ -814,7 +815,8 @@ function vencimentoDaConta(c: ContaVendida): string {
   return `${c.pagamentos.length} parcelas`;
 }
 
-function Saidas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p: Painel) => void }) {
+/** `verCartoes`: quem tem perfil do financeiro (abre a fatura do cartão corporativo, mesmo com a viagem conciliada). */
+function Saidas({ v, agir, verCartoes, abrir }: { v: ViagemVendida; agir: boolean; verCartoes: boolean; abrir: (p: Painel) => void }) {
   const contas = v.contas.filter((c) => c.status !== "cancelada");
   return (
     <Card>
@@ -831,7 +833,7 @@ function Saidas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p
             {contas.map((c) => {
               const semPagamento = !c.pagamentos.some((p) => p.status === "pago");
               return (
-                <ContaLinhas key={c.id} c={c} agir={agir} semPagamento={semPagamento} noCartao={c.moeda === "BRL" && c.fornecedorId !== null && c.fornecedorId === v.cartaoFornecedor?.fornecedorId} abrir={abrir} />
+                <ContaLinhas key={c.id} c={c} agir={agir} verCartoes={verCartoes} semPagamento={semPagamento} noCartao={c.moeda === "BRL" && c.fornecedorId !== null && c.fornecedorId === v.cartaoFornecedor?.fornecedorId} abrir={abrir} />
               );
             })}
             {contas.length === 0 && (
@@ -844,8 +846,37 @@ function Saidas({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p
   );
 }
 
+const MESES_FATURA = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+/** Compra no cartão corporativo: a baixa (e o desfazer) é a da fatura inteira, na tela do cartão. */
+function NaFatura({ fatura, link }: { fatura: { id: string; cartao: string; fechamento: string }; link: boolean }) {
+  const texto = `Na fatura do cartão ${fatura.cartao} · ${MESES_FATURA[Number(fatura.fechamento.slice(5, 7)) - 1]}/${fatura.fechamento.slice(0, 4)}`;
+  // A tela dos cartões é só do financeiro: os outros perfis veem o texto, sem o link.
+  return link ? (
+    <Link href={`/financeiro/cartoes?fatura=${fatura.id}`} className="text-[12px] font-semibold text-verde hover:underline">
+      {texto}
+    </Link>
+  ) : (
+    <span className="text-[12px]">{texto}</span>
+  );
+}
+
 /** `noCartao`: conta em reais do fornecedor que recebeu no cartão direto (quitada só pelo repasse, sem baixa direta). */
-function ContaLinhas({ c, agir, semPagamento, noCartao, abrir }: { c: ContaVendida; agir: boolean; semPagamento: boolean; noCartao: boolean; abrir: (p: Painel) => void }) {
+function ContaLinhas({
+  c,
+  agir,
+  verCartoes,
+  semPagamento,
+  noCartao,
+  abrir,
+}: {
+  c: ContaVendida;
+  agir: boolean;
+  verCartoes: boolean;
+  semPagamento: boolean;
+  noCartao: boolean;
+  abrir: (p: Painel) => void;
+}) {
   return (
     <>
       <tr className={`border-t border-linha ${c.divergente || c.contestada ? "bg-ouro/10" : ""}`}>
@@ -889,10 +920,14 @@ function ContaLinhas({ c, agir, semPagamento, noCartao, abrir }: { c: ContaVendi
                   </Badge>
                   {p.peloRepasse ? (
                     <span className="text-[12px]">Quitado pelo repasse do cartão (desfaça o repasse em Entradas)</span>
+                  ) : p.fatura ? (
+                    <NaFatura fatura={p.fatura} link={verCartoes} />
                   ) : (
                     agir && <AcaoDireta rotulo="Desfazer baixa" mini variante="fantasma" executar={() => desfazerBaixaPagamento(p.id)} />
                   )}
                 </>
+              ) : p.fatura ? (
+                <NaFatura fatura={p.fatura} link={verCartoes} />
               ) : noCartao ? (
                 <span className="text-[12px]">Pago pelo cliente no cartão do fornecedor (quitado pelo repasse em Entradas)</span>
               ) : (

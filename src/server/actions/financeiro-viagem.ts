@@ -22,6 +22,7 @@ import {
   MSG_JA_BAIXADO_NA_CONTA,
   MSG_NAO_CONCILIADA,
   MSG_DESFACA_FATURA_CARTAO,
+  MSG_NAO_USE_CARTAO_CORPORATIVO,
   MSG_SEM_FORNECEDOR,
   valorReaisSchema,
 } from "@/domain/venda-entrada";
@@ -58,10 +59,12 @@ import {
   falha,
   linhasDaConta,
   naViagemVendidaNa,
+  pagoNoCartao,
   OK,
   PAGAMENTO_NAO_ENCONTRADO,
   PARCELA_NAO_ENCONTRADA,
   registrarComissaoNa,
+  vendaCartaoDireto,
   type ContaLinha,
   type Falha,
   type Feito,
@@ -258,6 +261,9 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
           if (pagas.length > 0) return falha(MSG_DESFACA_FATURA_CARTAO);
         }
         if (linhas.some((l) => l.status === "pago")) return JA_BAIXADO;
+        // Conta do fornecedor que recebeu no cartão direto (venda com parcela `cartao_fornecedor` não cancelada):
+        // quitada pelo repasse, e o custo dela já sai do repasse esperado. Na fatura do cartão sairia duas vezes.
+        if (f.tipo === "cartao_corporativo" && pagoNoCartao(await vendaCartaoDireto(tx, v.id), conta)) return falha(MSG_NAO_USE_CARTAO_CORPORATIVO);
         const snapshot = await snapshotDaVenda(tx, v.id);
         if (!snapshot) return NAO_CALCULA;
         const base = contaBase(snapshot, conta, conta.comissaoTipo, v.fim);

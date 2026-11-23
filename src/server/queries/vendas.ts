@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, gte, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { rotuloForma, type ResultadoVersao, type Snapshot } from "@/domain/aprovacoes";
 import type { Moeda } from "@/domain/cambio";
@@ -34,9 +34,11 @@ import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
 import {
+  cartoesCorporativos,
   clientes,
   comissoes,
   contasPagar,
+  faturasCartao,
   fornecedores,
   itensViagem,
   lancamentosFinanceiros,
@@ -255,6 +257,8 @@ export type PagamentoVendido = {
   peloRepasse: boolean;
   /** Cartão corporativo da compra (forma "cartão corporativo"). */
   cartaoId: string | null;
+  /** Fatura do cartão corporativo em que a compra está: sem baixa direta, sai (e volta) pela fatura. */
+  fatura: { id: string; cartao: string; fechamento: string } | null;
 };
 
 export type ComissaoVendida = {
@@ -365,7 +369,7 @@ export type ViagemVendida = {
 
 type ParcelaLinha = typeof parcelasReceber.$inferSelect;
 type ContaLinha = { c: typeof contasPagar.$inferSelect; fornecedor: string | null };
-type PagamentoLinha = typeof pagamentosFornecedor.$inferSelect;
+type PagamentoLinha = typeof pagamentosFornecedor.$inferSelect & { faturaFechamento: string | null; cartaoNome: string | null };
 type ComissaoLinha = typeof comissoes.$inferSelect;
 type VersaoLinha = typeof versoesPrecificacao.$inferSelect;
 
@@ -432,6 +436,7 @@ function montarContas(cs: ContaLinha[], pags: PagamentoLinha[], coms: ComissaoLi
         valorBrlPago: p.valorBrlPago,
         peloRepasse: p.repasseParcelaId !== null,
         cartaoId: p.cartaoId,
+        fatura: p.faturaCartaoId && p.faturaFechamento && p.cartaoNome ? { id: p.faturaCartaoId, cartao: p.cartaoNome, fechamento: p.faturaFechamento } : null,
       })),
     comissao: comissoesVendidas.find((x) => x.contaId === c.id) ?? null,
   }));
@@ -573,10 +578,17 @@ function contasDe(viagemIds: string[]) {
     .orderBy(asc(itensViagem.ordem), asc(contasPagar.id));
 }
 
-function pagamentosDe(contaIds: string[]) {
+/** Pagamentos das contas, com a fatura do cartão corporativo (fechamento e nome do cartão) quando estão numa. */
+function pagamentosDe(contaIds: string[]): Promise<PagamentoLinha[]> {
   return contaIds.length === 0
-    ? Promise.resolve([] as PagamentoLinha[])
-    : db.select().from(pagamentosFornecedor).where(inArray(pagamentosFornecedor.contaId, contaIds)).orderBy(asc(pagamentosFornecedor.numero));
+    ? Promise.resolve([])
+    : db
+        .select({ ...getTableColumns(pagamentosFornecedor), faturaFechamento: faturasCartao.fechamento, cartaoNome: cartoesCorporativos.nome })
+        .from(pagamentosFornecedor)
+        .leftJoin(faturasCartao, eq(faturasCartao.id, pagamentosFornecedor.faturaCartaoId))
+        .leftJoin(cartoesCorporativos, eq(cartoesCorporativos.id, faturasCartao.cartaoId))
+        .where(inArray(pagamentosFornecedor.contaId, contaIds))
+        .orderBy(asc(pagamentosFornecedor.numero));
 }
 
 function comissoesDe(viagemIds: string[]) {

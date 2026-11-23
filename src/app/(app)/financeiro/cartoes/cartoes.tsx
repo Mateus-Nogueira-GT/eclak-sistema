@@ -253,7 +253,7 @@ export function Cartoes({
                     className="mt-3"
                     right={[3]}
                     head={["Data da compra", "Descrição", "Fornecedor ou pessoa", "Valor", "Origem"]}
-                    rows={f.compras.map((c) => linhaCompra(c))}
+                    rows={f.compras.map((c) => linhaCompra(c, f.status === "baixado"))}
                   />
                 </details>
               ))}
@@ -265,9 +265,14 @@ export function Cartoes({
   );
 }
 
-/** Uma compra da fatura numa linha da grade: data, descrição, pessoa, valor (com a moeda original) e a origem. */
-function linhaCompra(c: CompraTela, comPago = false) {
+/**
+ * Uma compra da fatura numa linha da grade: data, descrição, pessoa, valor (com a moeda original) e a origem. A compra
+ * lançada à mão fica fora da lista (a fatura a substitui): daqui ela abre para editar ou cancelar (só com a fatura em
+ * aberto; paga, a baixa da fatura é desfeita antes) e para os anexos. A de viagem abre a viagem.
+ */
+function linhaCompra(c: CompraTela, faturaPaga: boolean, comPago = false) {
   const estrangeira = c.moeda !== "BRL";
+  const link = "font-semibold text-verde hover:underline";
   return [
     <span key="d" className="num">{dataBr(c.data)}</span>,
     c.descricao,
@@ -277,12 +282,31 @@ function linhaCompra(c: CompraTela, comPago = false) {
       {estrangeira && <span className="block text-[12px] text-cinza">{formatarMoeda(BigInt(c.valorOriginal), c.moeda)}</span>}
       {comPago && c.paga && c.valorPago !== null && c.valorPago !== c.valor && <span className="block text-[12px] text-cinza">previsto {reais(c.valor)}</span>}
     </span>,
-    c.viagemId ? (
-      <Link key="o" href={`/viagens/${c.viagemId}`} className="font-semibold text-verde hover:underline">
-        Viagem {c.viagemDestino}
-      </Link>
+    c.origem === "pagamento" ? (
+      <span key="o" className="flex flex-wrap gap-x-3">
+        {c.viagemId && (
+          <Link href={`/viagens/${c.viagemId}`} className={link}>
+            Viagem {c.viagemDestino}
+          </Link>
+        )}
+        <Link href={`/financeiro/lancamentos?anexos=pagamento:${c.id}`} className={link}>
+          Anexos
+        </Link>
+      </span>
     ) : (
-      "Lançado à mão"
+      <span key="o" className="flex flex-wrap items-baseline gap-x-3">
+        <span>Lançado à mão</span>
+        {faturaPaga ? (
+          <span className="text-[12px] text-cinza">desfaça a baixa da fatura para editar</span>
+        ) : (
+          <Link href={`/financeiro/lancamentos?editar=${c.id}`} className={link}>
+            Editar ou cancelar
+          </Link>
+        )}
+        <Link href={`/financeiro/lancamentos?anexos=manual:${c.id}`} className={link}>
+          Anexos
+        </Link>
+      </span>
     ),
   ];
 }
@@ -366,7 +390,7 @@ function FaturaDetalhe({ aberta, contas, hoje }: { aberta: { k: CartaoTela; f: F
           className="mt-4"
           right={[3]}
           head={["Data da compra", "Descrição", "Fornecedor ou pessoa", "Valor", "Origem"]}
-          rows={f.compras.map((c) => linhaCompra(c, true))}
+          rows={f.compras.map((c) => linhaCompra(c, paga, true))}
         />
       )}
       {baixando && (

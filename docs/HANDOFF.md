@@ -202,7 +202,7 @@ npm run dev               # abrir em localhost (127.0.0.1 não fica interativo n
 ```
 - `.env.local` (não versionado): `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SITE_URL` (ver `.env.example`).
 - Usuários do seed: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`, senha `eclak-local`.
-- Testes: `npm run lint && npm run typecheck && npm test && npm run test:integracao && npm run build`. Últimos números (23/11/2026, fatia 4b): 306 testes de domínio, 358 de integração, tudo verde. **A integração trunca o banco local**: rodar `npm run seed:local` depois.
+- Testes: `npm run lint && npm run typecheck && npm test && npm run test:integracao && npm run build`. Últimos números (23/11/2026, fatia 4b): 306 testes de domínio, 363 de integração, tudo verde. **A integração trunca o banco local**: rodar `npm run seed:local` depois.
 - Migração nova: `npm run db:generate` (gerada) ou `npx drizzle-kit generate --custom --name <nome>` (RLS, índices, enums); validar do zero (`npx supabase db reset` + `npm run db:migrate`) e sobre banco populado.
 - Next gera `AGENTS.md` no dev: está no `.gitignore`.
 

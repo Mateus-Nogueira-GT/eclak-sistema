@@ -81,7 +81,8 @@ export async function enviarAnexo(formData: FormData) {
 
     // O nome original só na coluna `nome` (nada do usuário no caminho).
     const caminho = `${donoTipo}/${donoId}/${randomUUID()}`;
-    const nome = (arquivo.name || "arquivo").slice(0, 255);
+    // Por code point (não por unidade UTF-16): o corte em 255 não parte um emoji ou outro par substituto ao meio.
+    const nome = Array.from(arquivo.name || "arquivo").slice(0, 255).join("");
     const subiu = await subirObjeto(caminho, bytes, mime);
     if (!subiu.ok) return FALHA_ENVIO;
 
