@@ -48,16 +48,22 @@ Toda tabela de `public` tem RLS ligado e nenhuma política para `anon`/`authenti
 
 ## Seed local
 
-`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Também semeia o financeiro (contas Banco do Brasil e Bradesco PJ, lançamentos manuais do protótipo com datas relativas a hoje, alguns já baixados, e a fatura da Família Ribeiro). Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
+`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Também semeia o financeiro (contas Banco do Brasil e Bradesco PJ, lançamentos manuais do protótipo com datas relativas a hoje, alguns já baixados, a fatura da Família Ribeiro, o cartão "Visa Corporativo" final 4821 com três compras no ciclo atual e uma nota fiscal sem PDF). Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
 
 ## Financeiro
 
-Área só do Diretor e dos perfis financeiros (Financeiro › Lançamentos, Faturas, Contas bancárias e Categorias).
+Área só do Diretor e dos perfis financeiros (Financeiro › Lançamentos, Fluxo de caixa, Faturas, Notas fiscais, Cartões, Contas bancárias e Categorias).
 
 - **Lista única de lançamentos** (a pagar e a receber): os lançamentos manuais (únicos, parcelados ou recorrentes) e as linhas das viagens (parcelas, pagamentos a fornecedores e comissões) aparecem juntos. A baixa individual ou em lote é a mesma da tela da viagem: o que se baixa de um lado aparece no outro.
 - **Conta bancária obrigatória** em toda baixa nova.
 - **Cartão direto no fornecedor** (cliente paga no cartão e o fornecedor repassa): a lista mostra uma linha de repasse; a baixa informa o valor repassado, e a diferença para o esperado vira taxa da forma.
 - **Faturas** numeradas a partir de 1405, sem buracos (rollback não consome número). Reemitir mantém o número e guarda um novo retrato. Enquanto não houver nenhuma fatura, o próximo número pode ser ajustado em Admin › Parâmetros.
+
+- **Fluxo de caixa** (`/financeiro/caixa`): saldo atual por conta (saldo inicial mais as baixas desde a data do saldo, só o que transita pelo caixa) e projeção de 8 semanas e 12 meses a partir das linhas em aberto. Cartão de crédito e boleto entram pelo valor líquido da taxa; crédito antecipado entra no primeiro vencimento; vencidas ficam marcadas na semana e no mês atuais. Filtros por centro, viagem e tipo (clientes, fornecedores, comissões, empresa, cartão). A coluna Saldo atual também aparece em Contas bancárias.
+- **Reserva**: meta = 6 × custo fixo mensal vigente (Admin › Parâmetros), com o mês em que a projeção a atinge ("atingida em") ou "não atingida em 12 meses".
+- **Anexos**: PDF, PNG ou JPEG de até 10 MB (tipo conferido pelos bytes) em qualquer linha da lista, nas faturas do cartão e nas notas fiscais. Ficam no bucket privado `anexos` do Supabase Storage; o download usa URL assinada de 60 segundos.
+- **Notas fiscais** (`/financeiro/notas-fiscais`): número único entre as não canceladas, CPF/CNPJ validado, cancelamento com motivo (a nota nunca é apagada), PDF anexo e filtros por período e destinatário.
+- **Cartões corporativos** (`/financeiro/cartoes`): cadastro com final, dias de fechamento e vencimento (1 a 28), conta de débito e centro. Compras (lançamento a pagar em Cartão de crédito com o cartão, ou pagamento de viagem na forma Cartão corporativo) caem na fatura do ciclo. A fatura é uma só linha na lista e no caixa; a baixa quita todas as compras com uma saída no banco (compras em moeda estrangeira pedem o valor em reais cobrado, que vira o câmbio efetivo) e pode ser desfeita.
 
 ## Deploy (produção)
 
@@ -99,6 +105,12 @@ Um único ambiente: um projeto Supabase e um serviço no Railway. Dados fictíci
    `NEXT_PUBLIC_*` são embutidas no build; ao mudá-las, faça novo deploy. O Railway define `PORT` sozinho. As variáveis precisam existir já no build (o build carrega os módulos do servidor).
 3. O pré-deploy roda `drizzle-kit` (dependência de desenvolvimento). No log do primeiro deploy, confirme que as devDependencies foram instaladas e mantidas na imagem (o `npm run db:migrate` precisa achar `drizzle-kit`). Se não estiverem, defina `NPM_CONFIG_PRODUCTION=false` no serviço.
 4. Gere o domínio público do serviço e volte aos passos 1.3 (Site URL e Redirect URLs) e 2.2 (`NEXT_PUBLIC_SITE_URL`, que exige novo deploy).
+
+### 2.1 Anexos (Storage) e limite de upload
+
+- A migração `0028` cria o bucket privado `anexos` (insert em `storage.buckets`). No primeiro deploy, confirme no painel do Supabase (Storage) que o bucket existe; se não existir, crie-o como **privado**.
+- O upload passa pela Server Action com `serverActions.bodySizeLimit` e `experimental.proxyClientMaxBodySize` em `"11mb"` (`next.config.ts`), para caber o arquivo de 10 MB. Se houver proxy na frente do serviço, ele também precisa aceitar corpos de 11 MB.
+- A categoria de sistema "Cartão corporativo" é marcada pela migração `0032` casando por nome (Administrativo › Cartão corporativo); confirme após migrar.
 
 ### 3. Primeiro Diretor
 
