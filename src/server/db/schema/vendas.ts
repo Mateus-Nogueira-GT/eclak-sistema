@@ -82,12 +82,14 @@ export const parcelasReceber = pgTable(
     recebidaEm: date("recebida_em"),
     valorRecebido: centavos("valor_recebido"),
     taxaEfetiva: centavos("taxa_efetiva"),
+    /** Repasse do cartão direto no fornecedor: o valor que entrou no banco, gravado na baixa do repasse. */
+    valorRepassado: centavos("valor_repassado"),
     observacao: text("observacao"),
     /** Conta da baixa (nula só nas baixas anteriores à fatia 4a). */
     contaBancariaId: uuid("conta_bancaria_id").references((): AnyPgColumn => contasBancarias.id, { onDelete: "restrict" }),
   },
   (t) => [
-    check("parcelas_receber_valores", sql`${t.valor} >= 0 AND ${t.taxaPrevista} >= 0 AND (${t.valorRecebido} IS NULL OR ${t.valorRecebido} >= 0) AND (${t.taxaEfetiva} IS NULL OR ${t.taxaEfetiva} >= 0)`),
+    check("parcelas_receber_valores", sql`${t.valor} >= 0 AND ${t.taxaPrevista} >= 0 AND (${t.valorRecebido} IS NULL OR ${t.valorRecebido} >= 0) AND (${t.taxaEfetiva} IS NULL OR ${t.taxaEfetiva} >= 0) AND (${t.valorRepassado} IS NULL OR ${t.valorRepassado} >= 0)`),
     unique("parcelas_receber_venda_numero_unico").on(t.vendaId, t.numero),
     // Fluxo de caixa: o que ainda vai entrar, por vencimento.
     index("parcelas_receber_a_receber_vencimento_idx").on(t.vencimento).where(sql`${t.status} = 'a_receber'`),

@@ -1,0 +1,3 @@
+ALTER TABLE "parcelas_receber" DROP CONSTRAINT "parcelas_receber_valores";--> statement-breakpoint
+ALTER TABLE "parcelas_receber" ADD COLUMN "valor_repassado" bigint;--> statement-breakpoint
+ALTER TABLE "parcelas_receber" ADD CONSTRAINT "parcelas_receber_valores" CHECK ("parcelas_receber"."valor" >= 0 AND "parcelas_receber"."taxa_prevista" >= 0 AND ("parcelas_receber"."valor_recebido" IS NULL OR "parcelas_receber"."valor_recebido" >= 0) AND ("parcelas_receber"."taxa_efetiva" IS NULL OR "parcelas_receber"."taxa_efetiva" >= 0) AND ("parcelas_receber"."valor_repassado" IS NULL OR "parcelas_receber"."valor_repassado" >= 0));

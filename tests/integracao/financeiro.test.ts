@@ -31,7 +31,7 @@ import {
   salvarCategoria,
   salvarContaBancaria,
 } from "@/server/actions/financeiro";
-import { baixarPagamento, baixarParcela, cancelarParcela, desfazerBaixaPagamento, desfazerBaixaParcela } from "@/server/actions/financeiro-viagem";
+import { atualizarPrevisto, baixarPagamento, baixarParcela, cancelarParcela, desfazerBaixaPagamento, desfazerBaixaParcela } from "@/server/actions/financeiro-viagem";
 import { listarCategorias, listarContasBancarias, listarLancamentos } from "@/server/queries/financeiro";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
@@ -641,6 +641,35 @@ describe("repasse do cartão direto no fornecedor", () => {
     expect(await estado(x)).toBe(antes);
     expect(await comSessao(x.fin.id, () => desfazerBaixaPagamento(x.pagPasseio.id))).toEqual({ ok: true });
     expect(await comSessao(x.fin.id, () => definirFornecedorCartao(x.viagemId, x.fornecedores.roma))).toEqual({ ok: true });
+  });
+
+  it("residual A: parcela de cartão cancelada e fornecedor pago pelo banco → desfazer o cancelamento recusado até desfazer a baixa", async () => {
+    const x = await cartao();
+    const JA_PAGO = "Este fornecedor já tem pagamento feito pela ECLAK: desfaça a baixa antes";
+    expect(await comSessao(x.fin.id, () => cancelarParcela(x.parcelas[0].id, "Cliente pagou à parte"))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => baixarPagamento(x.pagHotel.id, { pagoEm: HOJE, valorOriginalPago: reais(x.pagHotel.valorOriginal), contaBancariaId: cb }))).toEqual({ ok: true });
+    const antes = await estado(x);
+    expect(await comSessao(x.fin.id, () => desfazerRepasse(x.parcelas[0].id))).toEqual({ ok: false, erro: JA_PAGO });
+    expect(await estado(x)).toBe(antes);
+    expect(await comSessao(x.fin.id, () => desfazerBaixaPagamento(x.pagHotel.id))).toEqual({ ok: true });
+    expect(await comSessao(x.fin.id, () => desfazerRepasse(x.parcelas[0].id))).toEqual({ ok: true });
+    expect((await parcela(x.parcelas[0].id)).status).toBe("a_receber");
+  });
+
+  it("residual B: o repasse recebido fica gravado; atualizar o previsto do fornecedor depois não muda o Recebidos", async () => {
+    const x = await cartao();
+    const esperado = (await linhaDaView(x.parcelas[0].id)).valorPrevisto;
+    expect(await repasse(x, reais(esperado - 10000n))).toEqual({ ok: true });
+    expect((await parcela(x.parcelas[0].id)).valorRepassado).toBe(esperado - 10000n);
+    const linhasHotel = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.hotel.id));
+    const previstoHotel = linhasHotel.reduce((a, l) => a + l.valorBrlPrevisto, 0n);
+    expect((await comSessao(x.fin.id, () => atualizarPrevisto(x.hotel.id, reais(previstoHotel + 50000n), "Fornecedor reajustou"))).ok).toBe(true);
+    expect(await linhaDaView(x.parcelas[0].id)).toMatchObject({ statusBase: "baixado", valorPrevisto: esperado, valorBaixado: esperado - 10000n });
+    const lista = await comSessao(x.fin.id, () => listarLancamentos({ lado: "todos", de: "2000-01-01", ate: "2099-12-31", base: "vencimento", pagina: 1 }));
+    expect(lista.totais.receber.baixados).toBe(esperado - 10000n);
+    // desfazer limpa o valor gravado
+    expect(await comSessao(x.fin.id, () => desfazerRepasse(x.parcelas[0].id))).toEqual({ ok: true });
+    expect((await parcela(x.parcelas[0].id)).valorRepassado).toBeNull();
   });
 
   it("perfis: consultor e operacional não fazem repasse nem escolhem o fornecedor", async () => {

@@ -169,6 +169,20 @@
       "when": 1795402276367,
       "tag": "0023_lancamentos_parcela_par",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795418254008,
+      "tag": "0024_parcela_valor_repassado",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795418263957,
+      "tag": "0025_view_repasse_gravado",
+      "breakpoints": true
     }
   ]
 }
