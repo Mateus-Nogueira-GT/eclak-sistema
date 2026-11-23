@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-bodoni), "Newsreader", Georgia, serif;
+  --color-terracota: #F26531;
+  --color-petroleo: #2E5C71;
+  --color-verde: #2E5C71;
+  --color-grafite: #2E5C71;
+  --color-agua: #2F8F6B;
+  --color-ouro: #D9A441;
+  --color-alerta: #8E2F4F;
+  --color-cinza: #6B7A86;
+  --color-texto: #333132;
+  --color-linha: #E1E3E5;
+  --color-fundo: #F6F7F8;
+}
+
+html,
+body {
+  background: #ffffff;
+  color: #333132;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  font-size: 15px;
+}
+
+.num {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+@keyframes surgir {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.surgir {
+  animation: surgir 0.25s ease-out;
+}
+
+@keyframes entrar {
+  from { transform: translateY(8px); }
+  to { transform: translateY(0); }
+}
+.entrar {
+  animation: entrar 0.3s ease-out;
+}
+
+.titulo {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.012em;
+  font-variant-numeric: lining-nums;
+}
+
+:focus-visible {
+  outline: 2px solid #2E5C71;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .surgir, .entrar { animation: none; }
+}
+
+/* Celular: tabelas largas rolam na horizontal, sem empurrar a página */
+@media (max-width: 767px) {
+  main table { display: block; max-width: 100%; overflow-x: auto; }
+}
+
+
+::selection { background: #2E5C71; color: #fff; }
