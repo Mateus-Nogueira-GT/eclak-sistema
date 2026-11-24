@@ -251,3 +251,15 @@ describe("linkHttps", () => {
     expect(linkHttps(undefined)).toBeNull();
   });
 });
+
+describe("ambiente dos testes (tests/setup-env.ts)", () => {
+  it("toda variável de integração começa vazia, sem stub neste arquivo (a shell pode ter chave de verdade)", async () => {
+    // O ambiente é lido antes de importar a lista (o import roda o setup de novo).
+    const ambiente = { ...process.env };
+    expect(configIA()).toBeNull();
+    for (const i of INTEGRACOES) expect(estadoIntegracao(i).configurada).toBe(false);
+    const { VARIAVEIS_DE_INTEGRACAO } = await import("../setup-env");
+    for (const nome of Object.values(VARIAVEIS).flat()) expect(VARIAVEIS_DE_INTEGRACAO).toContain(nome);
+    for (const nome of VARIAVEIS_DE_INTEGRACAO) expect(ambiente[nome]).toBe("");
+  });
+});

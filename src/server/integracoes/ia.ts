@@ -19,7 +19,7 @@ export type PedidoIA = {
   mensagens: MensagemIA[];
   ferramentas?: FerramentaIA[];
   esforco: EsforcoIA;
-  /** Padrão 4000. */
+  /** Padrão `MAX_TOKENS_IA` (16000): o pensamento conta no limite. */
   maxTokens?: number;
   /** Prazo deste pedido em ms; nunca passa de `PRAZO_IA_MS` (o chat usa para caber no prazo da conversa). */
   prazoMs?: number;
@@ -45,7 +45,12 @@ export interface ProvedorIA {
 }
 
 export const BETA_FALLBACK = "server-side-fallback-2026-07-01";
-export const MAX_TOKENS_IA = 4000;
+/**
+ * Teto de saída do reescrever e do chat. O modelo sempre pensa e o pensamento conta no limite: com 4000 a resposta
+ * cortava (`max_tokens`) antes do texto. 16000 ainda cabe num pedido sem streaming (o SDK só recusa os que passariam
+ * de 10 min). O "Testar conexão" pede 256.
+ */
+export const MAX_TOKENS_IA = 16_000;
 /**
  * Chamada interativa (alguém espera na tela). O modelo sempre pensa, então os 15 s das outras integrações não bastam:
  * 60 s por pedido, nenhuma nova tentativa (um 429 com `retry-after` longo não segura a tela) e prazo total de 90 s

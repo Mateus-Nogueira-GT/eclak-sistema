@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { formatarCodigoCliente } from "@/domain/clientes";
 import { chavePasta, nomeDaPasta } from "@/domain/drive";
+import { protegerTexto } from "@/domain/ia-privacidade";
 import { chaveRoteiro, chaveVenda, descricaoDoCartao, nomeDoCartao } from "@/domain/trello";
 import { formatarCodigoViagem } from "@/domain/viagens";
 import type { Transacao } from "@/server/db/client";
@@ -55,6 +56,13 @@ function site(): string {
   }
 }
 
+/**
+ * Itens de checklist como saem para o Trello: o texto das tarefas é livre (a equipe pode digitar CPF, telefone ou
+ * passaporte nele), então passa por `protegerTexto`. Todo caminho que monta o payload (fechar a venda, aprovar o
+ * roteiro, o botão "Enviar ao Trello") passa por aqui; o payload gravado já é o protegido.
+ */
+const itensProtegidos = (itens: string[]) => itens.map((i) => protegerTexto(i));
+
 /** Envio `venda:<viagem>` (cartão + "Tarefas da venda"), sem conferir a configuração; null se a viagem não existe. */
 export async function eventoCartaoDaViagem(tx: Transacao, viagemId: string, itens: string[]): Promise<EventoFila | null> {
   const dados = await dadosDaViagem(tx, viagemId);
@@ -63,14 +71,14 @@ export async function eventoCartaoDaViagem(tx: Transacao, viagemId: string, iten
     viagemId,
     nome: nomeDoCartao(dados),
     descricao: descricaoDoCartao(site(), viagemId),
-    itens,
+    itens: itensProtegidos(itens),
   };
   return { integracao: "trello", tipo: "cartao_viagem", viagemId, chave: chaveVenda(viagemId), payload };
 }
 
 /** Envio `roteiro:<viagem>` ("Tarefas do roteiro" no cartão da venda), sem conferir a configuração. */
 export function eventoChecklistDoRoteiro(viagemId: string, itens: string[]): EventoFila {
-  const payload: PayloadRoteiro = { viagemId, itens };
+  const payload: PayloadRoteiro = { viagemId, itens: itensProtegidos(itens) };
   return { integracao: "trello", tipo: "checklist_roteiro", viagemId, chave: chaveRoteiro(viagemId), payload };
 }
 

@@ -190,9 +190,13 @@ describe("tokenGoogle", () => {
       classe: "autenticacao",
       status: 401,
     });
-    await expect(tokenGoogle(CFG, googleFalso(() => new Response("{}", { status: 400 })).buscar, agora)).rejects.toMatchObject({
+    // 400 no endpoint de token é credencial recusada (invalid_grant: chave revogada, relógio, conta apagada).
+    await expect(
+      tokenGoogle(CFG, googleFalso(() => Response.json({ error: "invalid_grant" }, { status: 400 })).buscar, agora),
+    ).rejects.toMatchObject({ classe: "autenticacao", status: 400 });
+    await expect(tokenGoogle(CFG, googleFalso(() => new Response("{}", { status: 404 })).buscar, agora)).rejects.toMatchObject({
       classe: "recusado",
-      status: 400,
+      status: 404,
     });
     await expect(tokenGoogle(CFG, googleFalso(() => Response.json({ token_type: "Bearer" })).buscar, agora)).rejects.toMatchObject({
       classe: "servidor",

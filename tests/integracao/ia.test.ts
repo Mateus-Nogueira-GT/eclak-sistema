@@ -88,7 +88,7 @@ describe("adaptador Claude (SDK com fetch falso)", () => {
     expect(c.headers.get("authorization")).toBe(`Bearer ${CHAVE}`);
     expect(c.body).toEqual({
       model: "claude-opus-5-5",
-      max_tokens: 4000,
+      max_tokens: 16000,
       fallbacks: "default",
       output_config: { effort: "low" },
       system: "Sistema de teste",

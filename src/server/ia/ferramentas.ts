@@ -16,16 +16,23 @@ import { listarOrcamentos, obterPrecificacao, type OrcamentoLista } from "@/serv
 
 // Ferramentas do chat, SÓ DE LEITURA. Cada uma chama as queries existentes (que fazem `exigirPerfil` com a sessão de
 // quem pergunta); nada aqui lê o banco direto. A saída é montada campo a campo (nunca o objeto da query inteiro): sem
-// ids, sem CPF, passaporte, nascimento, telefone, documento da fatura nem texto livre (observações, texto do daily). A
-// camada estratégica (custo, preço do pacote, margem, pagamentos a fornecedores) só entra quando
-// `veCamadaEstrategica(perfil)`, e sempre a partir do campo `estrategico` que a própria query já restringe. O JSON
-// passa por `protegerTexto` antes de sair (rede de segurança, não o controle).
+// ids, sem CPF, passaporte, nascimento, telefone, documento da fatura, observações nem texto do daily. Sai texto
+// livre curto que a equipe digita: o item e o "o que fazer" das tarefas (`tarefas.item`, `tarefas.fazer`) e o nome
+// do serviço dos itens da viagem (`servico`); por isso o JSON inteiro passa por `protegerTexto` antes de sair (CPF,
+// passaporte, telefone etc. digitados ali viram marcadores; rede de segurança, não o controle). A camada estratégica
+// (custo, preço do pacote, margem, pagamentos a fornecedores) só entra quando `veCamadaEstrategica(perfil)`, e sempre
+// a partir do campo `estrategico` que a própria query já restringe.
 
 const MAX_VIAGENS = 20;
 const MAX_TAREFAS = 30;
 const MAX_DAILIES = 40;
 
-/** Schemas no subconjunto aceito pelo modo estrito: só `type`, `properties`, `required` e `additionalProperties`. */
+/**
+ * Schemas no subconjunto aceito pelo modo estrito: só `type`, `properties`, `required` e `additionalProperties`. As
+ * ferramentas sem parâmetro não levam `strict: true`: não há entrada a garantir (o Zod confere o objeto vazio) e um
+ * schema sem propriedades no modo estrito é o caso mais provável de o serviço recusar a lista inteira (400 em toda
+ * pergunta). Ficam `properties: {}` e `additionalProperties: false`.
+ */
 export const FERRAMENTAS_CHAT: FerramentaIA[] = [
   {
     name: "buscar_viagens",
@@ -56,14 +63,12 @@ export const FERRAMENTAS_CHAT: FerramentaIA[] = [
   {
     name: "minhas_tarefas",
     description: `Tarefas abertas de quem pergunta (é a pessoa responsável), por prazo; até ${MAX_TAREFAS} e o total.`,
-    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
-    strict: true,
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
     name: "dailies_da_semana",
     description: "Dailies (mensagens do dia ao cliente) de hoje até daqui a 3 dias, das viagens vendidas com roteiro: dia, viagem, cidade e situação.",
-    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
-    strict: true,
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
 

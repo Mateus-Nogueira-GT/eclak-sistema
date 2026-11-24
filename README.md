@@ -56,7 +56,7 @@ Visível aos cinco perfis (nenhum valor de custo, margem ou comissão aparece ne
 
 - Rotas: `/tarefas` (minhas e todas, com filtros), `/roteiros` (viagens vendidas não terminadas), `/dailies` (hoje até +3 dias) e, por viagem, `/viagens/[id]/{roteiro,tarefas,dailies}` com a impressão em `/roteiro/imprimir` e `/tarefas/imprimir` (o título da página é o nome do arquivo: `RT_<TITULAR>_<DESTINO>_<ini>-<fim>` e `TAREFAS_…`).
 - Tarefas automáticas: 5 ao fechar a venda (prazo venda + 1/2/7 dias, nunca depois do início) e 3 ao aprovar o roteiro (60/60/90 dias antes do embarque), sem duplicar (chave única por viagem).
-- Dailies: o texto é gerado sob demanda ("Gerar texto"), e a geração é esperada em D-2 e o envio em D-1 da data do dia; antes de D-2 o botão vira "Gerar agora". O estado vai de A gerar a Gerado (a revisar), Pronto para enviar e Enviado. Com o agendador ligado (ver [Integrações](#integrações)), o sistema gera sozinho, às 07:00 de Cuiabá, o texto dos dias de hoje + 2 dos roteiros aprovados que ainda não têm texto.
+- Dailies: o texto é gerado sob demanda ("Gerar texto"), e a geração é esperada em D-2 e o envio em D-1 da data do dia; antes de D-2 o botão vira "Gerar agora". O estado vai de A gerar a Gerado (a revisar), Pronto para enviar e Enviado. Com o agendador ligado (ver [Integrações](#integrações)), o sistema gera sozinho, às 07:00 de Cuiabá, o texto dos dias de hoje, amanhã e depois de amanhã (hoje + 2, o D-2) dos roteiros aprovados que ainda não têm texto. Gerar os três dias faz uma execução perdida ser recuperada pela seguinte.
 - O texto de encerramento do daily muda em Admin › Parâmetros, card "Operação" (só o Diretor; vale a partir da versão nova, sem código).
 
 ## Financeiro
@@ -110,7 +110,7 @@ Todas as variáveis estão em `.env.example`, vazias e comentadas.
 
 1. Preencha as variáveis da integração no serviço do Railway (Variables) e faça um novo deploy. O sistema lê o ambiente na hora de cada chamada, sem cache.
 2. Abra **Admin › Integrações**. O cartão deve mostrar "Ligada".
-3. Clique em **Testar conexão**. O Trello lê a lista, o Drive pede o token e lê a pasta raiz, e a IA faz um pedido mínimo ao modelo. O resultado fica auditado e aparece no cartão como último teste: ok, ou a classe do erro (autenticação, limite, recusado, servidor, rede).
+3. Clique em **Testar conexão**. O Trello lê a lista, o Drive pede o token e lê a pasta raiz, e a IA faz um pedido mínimo ao modelo. O resultado fica auditado e aparece no cartão como último teste: ok, ou a classe do erro (autenticação, limite, recusado, servidor, rede). **O teste do Trello e o do Drive só leem:** passar não prova que o envio funciona, porque o envio escreve. O token do Trello precisa ter permissão de escrita (`scope=read,write`) e a conta de serviço precisa ser **Editor** (ou Gerente de conteúdo) do drive compartilhado. Confira com uma venda de teste (passo 4).
 4. A partir daí, cada venda fechada cria o cartão no Trello (checklist "Tarefas da venda") e as pastas no Drive (`ECL-NNNN_SOBRENOME_DESTINO_AAAAMMDD-AAAAMMDD`, com "Público" e "Uso interno"). Cada roteiro aprovado leva o checklist "Tarefas do roteiro" ao mesmo cartão. Esses envios entram numa fila na mesma transação do evento e são mandados logo depois da resposta. O que falhar é repetido pelo cron, até 6 tentativas, com espera de 1, 5, 15, 60 e 180 min. Erro de autenticação ou pedido recusado vai direto a "falhou" e espera o Reenviar.
 5. **Nada antigo é despejado ao ligar.** Só entra na fila o que acontece com a integração já ligada. Para uma viagem vendida antes de ligar, use os botões **Enviar para o Trello** e **Criar pastas no Drive** na própria viagem (só o Diretor).
 
@@ -125,23 +125,23 @@ Crie no Railway um serviço separado, de cron, que chame as duas URLs com `Autho
 | Rota | Quando | Agendamento (UTC) | O que faz |
 |---|---|---|---|
 | `POST /api/cron/integracoes` | a cada 10 min | `*/10 * * * *` | Manda o que está na fila e cuja próxima tentativa chegou (até 20 por vez). |
-| `POST /api/cron/dailies` | todo dia às 07:00 em Cuiabá | `0 11 * * *` | Gera os dailies de hoje + 2 (D-2) dos roteiros aprovados. |
+| `POST /api/cron/dailies` | todo dia às 07:00 em Cuiabá | `0 11 * * *` | Gera os dailies de hoje, hoje + 1 e hoje + 2 (D-2) dos roteiros aprovados que ainda não têm texto. |
 
-O comando de cada serviço (o `-f` faz o `curl` sair com erro em 401 ou 503, e o Railway mostra a falha):
+Cada serviço de cron do Railway roda uma imagem Docker com `curl` (por exemplo **`curlimages/curl`**; Source > Docker Image) e o comando em **Settings > Deploy > Custom Start Command**. O Railway não passa o comando por uma shell, então `$CRON_SECRET` e `$SITE` só são trocados pelos valores se o comando rodar dentro de `sh -c '…'` (sem isso, o cabeçalho vai com o texto literal `$CRON_SECRET` e a rota responde 401). O `-f` faz o `curl` sair com erro em 401 ou 503, e o Railway mostra a falha. Os dois comandos, exatos:
 
 ```bash
-curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" "$SITE/api/cron/integracoes"
-curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" "$SITE/api/cron/dailies"
+sh -c 'curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" "$SITE/api/cron/integracoes"'
+sh -c 'curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" "$SITE/api/cron/dailies"'
 ```
 
-Nos dois serviços, `SITE` é o domínio público do sistema, o mesmo de `NEXT_PUBLIC_SITE_URL`, e `CRON_SECRET` é o mesmo valor do serviço do sistema. As URLs também aparecem em Admin › Integrações, no cartão do agendador.
+Nos dois serviços, defina em Variables `SITE` (o domínio público do sistema, o mesmo de `NEXT_PUBLIC_SITE_URL`, sem barra no fim) e `CRON_SECRET` (o mesmo valor do serviço do sistema; pode ser uma referência `${{<serviço do sistema>.CRON_SECRET}}`). As URLs também aparecem em Admin › Integrações, no cartão do agendador. Sem o agendador, o que ficou na fila só sai no próximo evento (outra venda ou roteiro aprovado) ou pelo Reenviar.
 
-**O agendador do daily** gera só o texto de dias sem texto: dia sem linha ou só com a versão interna, de roteiro **aprovado** de viagem **vendida**. Nunca sobrescreve um daily gerado, revisado ou enviado. O daily fica "Gerado, a revisar", com `gerado_por` vazio (sistema), e a auditoria registra o usuário vazio. O envio ao cliente continua manual (WhatsApp). Chamar a rota duas vezes no mesmo dia não gera de novo.
+**O agendador do daily** gera só o texto de dias sem texto: dia sem linha ou só com a versão interna, de roteiro **aprovado** de viagem **vendida**. Nunca sobrescreve um daily gerado, revisado ou enviado. O daily fica "Gerado, a revisar", com `gerado_por` vazio (sistema), e a auditoria registra o usuário vazio. O envio ao cliente continua manual (WhatsApp). Cada execução cobre hoje, hoje + 1 e hoje + 2: chamar a rota duas vezes no mesmo dia (ou perder um dia) não gera de novo nem sobrescreve nada; os dias que já têm texto contam como `pulados` na resposta.
 
 ### O que nunca sai do sistema
 
-- **Trello e Drive:** só o código, o sobrenome do titular, o destino e as datas (no nome do cartão e da pasta), o link da viagem no sistema e os nomes das tarefas. Nunca vão valor, custo, margem, comissão, CPF, passaporte nem nascimento.
-- **IA:** antes de cada envio, CPF, CNPJ, passaporte, RG e as datas de nascimento conhecidas viram marcadores (`[CPF]`, `[PASSAPORTE]`, `[NASCIMENTO]`, `[DOCUMENTO]`…). Qualquer sequência de 11 dígitos é tratada como CPF, o que pode mascarar um celular escrito sem máscara. O chat só lê, com o perfil de quem pergunta: as ferramentas chamam as mesmas consultas das telas, e custo, margem e pagamentos a fornecedores só aparecem para quem já os vê. A conversa não é guardada no banco e some ao recarregar. O "Reescrever com IA" mostra a sugestão ao lado, e nada é gravado sem o clique.
+- **Trello e Drive:** só o código, o sobrenome do titular, o destino e as datas (no nome do cartão e da pasta), o link da viagem no sistema e os nomes das tarefas. Nunca vão valor, custo, margem, comissão, CPF, passaporte nem nascimento. O nome da tarefa é texto livre: antes de ir ao Trello passa pela mesma proteção da IA (CPF, telefone ou passaporte digitados ali viram marcadores).
+- **IA:** antes de cada envio, CPF e CNPJ (com ou sem máscara, com ponto, hífen, barra ou espaço), passaporte (`FZ123456`, `FZ 123456`, `FZ-123456`), RG com máscara, telefone com DDD (`(66) 99999-1234`, `+55 66 99999-1234`, `6634211234`), as datas de nascimento conhecidas (em `d/m/aaaa`, `dd-mm-aaaa`, `dd.mm.aaaa` ou ISO) e os documentos conhecidos (com ou sem separadores) viram marcadores (`[CPF]`, `[TELEFONE]`, `[PASSAPORTE]`, `[NASCIMENTO]`, `[DOCUMENTO]`…). Datas de viagem, horários, valores e códigos ECL ficam. Qualquer sequência de 11 dígitos sem separador é tratada como CPF, o que pode mascarar um celular escrito sem máscara (vira `[CPF]`, o lado seguro). O chat só lê, com o perfil de quem pergunta: as ferramentas chamam as mesmas consultas das telas, e custo, margem e pagamentos a fornecedores só aparecem para quem já os vê. A conversa não é guardada no banco e some ao recarregar. O "Reescrever com IA" mostra a sugestão ao lado, e nada é gravado sem o clique.
 - **Custo da IA:** é pago pela ECLAK direto à Anthropic (conta da `ANTHROPIC_API_KEY`). Cada uso fica em `ia_usos`: quem, quando, recurso, modelo e tokens de entrada e saída, sem o texto da conversa.
 - **Segredos:** ficam só nas variáveis de ambiente. Não vão para o código, o banco, os logs, a auditoria nem a tela. Um erro de serviço externo é registrado só com a integração, a classe do erro e o status HTTP, nunca com o corpo da resposta.
 

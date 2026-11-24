@@ -490,6 +490,46 @@ describe("enviarViagemAoTrello", () => {
     expect(aud.map((a) => [a.usuarioId, a.acao, (a.depois as { situacao: string }).situacao])).toEqual([[f.d.id, "alterar", "pendente"]]);
   });
 
+  it("texto livre das tarefas passa por protegerTexto: CPF, passaporte e telefone digitados no item não saem para o Trello", async () => {
+    desligarTrello();
+    const f = await vendida();
+    await roteiroAprovado(f);
+    await db
+      .update(tarefas)
+      .set({ item: "Grupo no WhatsApp: Marcos (66) 99999-1234, CPF 529.982.247-25" })
+      .where(and(eq(tarefas.viagemId, f.viagemId), eq(tarefas.chave, "venda.whatsapp")));
+    await db
+      .update(tarefas)
+      .set({ item: "Compra de trem com o passaporte FZ 123456" })
+      .where(and(eq(tarefas.viagemId, f.viagemId), eq(tarefas.chave, "roteiro.trem")));
+    ligarTrello();
+    expect(await comSessao(f.d.id, () => enviarViagemAoTrello(f.viagemId))).toEqual({ ok: true });
+    expect((await envioDe(`venda:${f.viagemId}`)).payload).toMatchObject({
+      itens: expect.arrayContaining(["Grupo no WhatsApp: Marcos [TELEFONE], CPF [CPF]"]),
+    });
+    expect((await envioDe(`roteiro:${f.viagemId}`)).payload).toMatchObject({
+      itens: ["Reserva de passeios", "Compra de ingressos", "Compra de trem com o passaporte [PASSAPORTE]"],
+    });
+
+    // Envio gravado antes da proteção (payload cru): o processador protege de novo na hora de mandar.
+    const venda = await envioDe(`venda:${f.viagemId}`);
+    const cru = venda.payload as { itens: string[] };
+    await db
+      .update(integracaoEnvios)
+      .set({ payload: { ...cru, itens: [...cru.itens, "Ligar para +55 66 3421-1234"] } })
+      .where(eq(integracaoEnvios.id, venda.id));
+
+    const t = trelloFalso();
+    await processarFila({ agora, buscar: t.buscar });
+    await processarFila({ agora: depois(6), buscar: t.buscar });
+    expect(await envioDe(`roteiro:${f.viagemId}`)).toMatchObject({ situacao: "enviado" });
+    const enviado = JSON.stringify(t.chamadas.map((c) => [c.url, c.corpo]));
+    expect(enviado).toContain("Ligar para [TELEFONE]");
+    expect(enviado).not.toContain("3421-1234");
+    expect(enviado).toContain("[TELEFONE]");
+    for (const dado of ["99999-1234", "529.982.247-25", "FZ 123456"]) expect(enviado).not.toContain(dado);
+  });
+
   it("roteiro não aprovado: só o cartão", async () => {
     desligarTrello();
     const f = await vendida();

@@ -59,7 +59,9 @@ export async function tokenGoogle(cfg: Pick<ConfigDrive, "email" | "chave">, bus
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body: corpo,
   });
-  if (!r.ok) throw new ErroIntegracao(r.classe, r.status);
+  // No endpoint de token, 400 e 401 são credencial recusada (`invalid_grant`, `invalid_client`: chave revogada,
+  // conta apagada, relógio errado): `autenticacao`, não `recusado`. Os dois vão direto a `falhou` (repetir não resolve).
+  if (!r.ok) throw new ErroIntegracao(r.status === 400 || r.status === 401 ? "autenticacao" : r.classe, r.status);
   const json = (typeof r.json === "object" && r.json !== null ? r.json : {}) as Record<string, unknown>;
   const token = typeof json.access_token === "string" && json.access_token !== "" ? json.access_token : null;
   if (!token) throw new ErroIntegracao("servidor", r.status);

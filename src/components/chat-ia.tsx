@@ -28,6 +28,15 @@ export function ChatIA({ aberto, onFechar, perfilNome }: { aberto: boolean; onFe
   useEffect(() => {
     if (aberto) campoRef.current?.focus();
   }, [aberto]);
+  // Escape fecha o painel (como o clique fora).
+  useEffect(() => {
+    if (!aberto) return;
+    const tecla = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onFechar();
+    };
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  }, [aberto, onFechar]);
 
   const enviar = () => {
     const t = texto.trim();
@@ -68,8 +77,11 @@ export function ChatIA({ aberto, onFechar, perfilNome }: { aberto: boolean; onFe
               <div
                 className={cx(
                   "max-w-[88%] whitespace-pre-wrap break-words rounded-[6px] px-3.5 py-2.5 text-[14px] leading-snug",
-                  m.de === "eu" ? "bg-verde text-white" : "border border-linha bg-white text-texto",
-                  "erro" in m && m.erro && "border-ouro/60 text-cinza",
+                  m.de === "eu"
+                    ? "bg-verde text-white"
+                    : "erro" in m && m.erro
+                      ? "border border-ouro/60 bg-white text-cinza"
+                      : "border border-linha bg-white text-texto",
                 )}
               >
                 {m.texto}

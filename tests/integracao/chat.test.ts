@@ -8,7 +8,7 @@ import { iaUsos, pessoas } from "@/server/db/schema";
 import { conversar } from "@/server/actions/chat";
 import { criarTarefa } from "@/server/actions/tarefas";
 import { ErroIntegracao } from "@/server/integracoes/http";
-import { definirProvedorIAParaTestes, type PedidoIA, type ProvedorIA, type RespostaIA } from "@/server/integracoes/ia";
+import { definirProvedorIAParaTestes, MAX_TOKENS_IA, type PedidoIA, type ProvedorIA, type RespostaIA } from "@/server/integracoes/ia";
 import { FERRAMENTAS_CHAT } from "@/server/ia/ferramentas";
 import { listarOrcamentos } from "@/server/queries/viagens";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
@@ -164,17 +164,22 @@ describe("conversar: o laço", () => {
     expect(resultados(pedidos[1]).map((x) => x.tool_use_id)).toEqual(["t1", "t2"]);
   });
 
-  it("pedido: esforço medium, ferramentas estritas, sistema com quem pergunta, hoje e as regras", async () => {
+  it("pedido: esforço medium, ferramentas com parâmetro estritas (as sem parâmetro sem strict), sistema com quem pergunta, hoje e as regras", async () => {
     const pedidos = provedorFalso([responde("Oi.")]);
     await comSessao(f.u.id, () => conversar(pergunta("Oi")));
     const p = pedidos[0];
     expect(p.esforco).toBe("medium");
     expect(p.ferramentas?.map((x) => x.name)).toEqual(["buscar_viagens", "resumo_da_viagem", "minhas_tarefas", "dailies_da_semana"]);
     for (const t of p.ferramentas ?? []) {
-      expect(t.strict).toBe(true);
+      const semParametro = Object.keys(t.input_schema.properties ?? {}).length === 0;
+      if (semParametro) {
+        expect(t).not.toHaveProperty("strict");
+        expect(t.input_schema).toEqual({ type: "object", properties: {}, additionalProperties: false });
+      } else expect(t.strict).toBe(true);
       expect(t.input_schema).toMatchObject({ type: "object", additionalProperties: false });
       expect(t.description).toBeTruthy();
     }
+    expect(p.ferramentas?.filter((t) => t.strict).map((t) => t.name)).toEqual(["buscar_viagens", "resumo_da_viagem"]);
     expect(p.sistema).toContain("Teste consultor");
     expect(p.sistema).toContain("Consultor");
     expect(p.sistema).toMatch(/Hoje é \d{2}\/\d{2}\/\d{4}/);
@@ -199,6 +204,15 @@ describe("conversar: o laço", () => {
     provedorFalso([{ parada: "refusal", texto: "", conteudo: [] }]);
     expect(await comSessao(f.u.id, () => conversar(pergunta("x")))).toEqual({ ok: false, erro: "A IA não respondeu a este pedido" });
     expect(await db.select().from(iaUsos)).toHaveLength(1);
+  });
+
+  it("resposta cortada (max_tokens): a mensagem, sem o texto parcial, e o uso gravado; o pedido usa o teto de 16000", async () => {
+    const pedidos = provedorFalso([{ parada: "max_tokens", texto: "Pela met", conteudo: [pensamento(1), textoDe("Pela met")] }]);
+    expect(await comSessao(f.u.id, () => conversar(pergunta("x")))).toEqual({ ok: false, erro: "A IA não respondeu a este pedido" });
+    expect(pedidos[0].maxTokens ?? MAX_TOKENS_IA).toBe(16000);
+    const usos = await db.select().from(iaUsos);
+    expect(usos).toHaveLength(1);
+    expect(usos[0]).toMatchObject({ recurso: "chat", tokensEntrada: 100, tokensSaida: 10 });
   });
 
   it("erro do serviço na segunda volta: mensagem da classe e o uso da primeira gravado", async () => {

@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { ClasseErro } from "@/domain/integracoes";
+import { protegerTexto } from "@/domain/ia-privacidade";
 import { CHECKLIST_ROTEIRO, CHECKLIST_VENDA, chaveVenda } from "@/domain/trello";
 import { db } from "@/server/db/client";
 import { integracaoEnvios } from "@/server/db/schema";
@@ -122,7 +123,8 @@ async function checklistComItens(
     await deps.gravarResultado(feito);
   }
   for (let n = feito.itens ?? 0; n < itens.length; n++) {
-    await cliente.adicionarItem(feito.checklistId!, itens[n]);
+    // O payload já vem protegido (eventos.ts); de novo aqui para envios gravados antes disso (marcador não muda).
+    await cliente.adicionarItem(feito.checklistId!, protegerTexto(itens[n]));
     feito = { ...feito, itens: n + 1 };
     await deps.gravarResultado(feito);
   }

@@ -101,12 +101,18 @@ function CorpoDoCartao({ c, site }: { c: CartaoIntegracao; site: string }) {
         )}
         <ul className="space-y-2">
           <Rota metodo="POST" caminho={`${site}/api/cron/integracoes`} quando="A cada 10 minutos" faz="manda o que ficou na fila" />
-          <Rota metodo="POST" caminho={`${site}/api/cron/dailies`} quando="Todo dia às 07:00 (Cuiabá)" faz="gera os dailies" />
+          <Rota
+            metodo="POST"
+            caminho={`${site}/api/cron/dailies`}
+            quando="Todo dia às 07:00 (Cuiabá)"
+            faz="gera os dailies de hoje até daqui a 2 dias que ainda não têm texto"
+          />
         </ul>
       </div>
     );
   }
   if (!c.estado.configurada) return <Desligada faltam={c.estado.faltam} />;
+  const soLeitura = SO_LEITURA[c.integracao];
   return (
     <div className="space-y-3">
       <p className="text-[14px] leading-relaxed text-texto">Ligada. As variáveis estão preenchidas no ambiente.</p>
@@ -114,11 +120,20 @@ function CorpoDoCartao({ c, site }: { c: CartaoIntegracao; site: string }) {
         <>
           <UltimoTeste t={c.ultimoTeste} />
           <TestarConexao integracao={c.integracao} />
+          {soLeitura && <p className="text-[13px] leading-relaxed text-cinza">{soLeitura}</p>}
         </>
       )}
     </div>
   );
 }
+
+/** O "Testar conexão" do Trello e do Drive só lê: passar não prova que o envio (que escreve) vai funcionar. */
+const SO_LEITURA: Partial<Record<CartaoIntegracao["integracao"], string>> = {
+  trello:
+    "O teste só lê a lista. Para os envios, o token do Trello precisa ter permissão de escrita (read,write) no quadro.",
+  drive:
+    "O teste só lê a pasta raiz. Para os envios, a conta de serviço precisa ser Editor (ou Gerente de conteúdo) do drive compartilhado.",
+};
 
 function Cartao({ c, site }: { c: CartaoIntegracao; site: string }) {
   const ligada = c.estado.configurada;
@@ -173,6 +188,7 @@ function Secao({ titulo, vazio, children, vazia }: { titulo: string; vazio: stri
 
 export default async function Pagina() {
   const { cartoes, fila } = await obterIntegracoes();
+  const semAgendador = cartoes.some((c) => c.integracao === "agendador" && !c.estado.configurada);
   const site = (process.env.NEXT_PUBLIC_SITE_URL ?? "").replace(/\/+$/, "");
 
   return (
@@ -208,6 +224,11 @@ export default async function Pagina() {
           />
         </Secao>
         <Secao titulo="Na fila" vazio="Nada esperando para sair." vazia={fila.pendentes.length === 0}>
+          {semAgendador && (
+            <p className="px-6 pt-2 text-[13px] leading-relaxed text-cinza">
+              Sem o agendador, o que ficou na fila só sai no próximo evento ou pelo Reenviar.
+            </p>
+          )}
           <Grade
             className="mt-2"
             head={["Envio", "Viagem", "Situação", "Último erro", "Tentativas"]}

@@ -54,4 +54,65 @@ describe("protegerTexto", () => {
       }),
     ).toBe("Ana (CPF [CPF], passaporte [PASSAPORTE], nascida em [NASCIMENTO]) viaja em 14/08/2027.");
   });
+  it("CPF com separadores variados (ponto, hífen, barra ou espaço entre os grupos 3-3-3-2)", () => {
+    expect(protegerTexto("cpf 123456789-09.")).toBe("cpf [CPF].");
+    expect(protegerTexto("cpf 123 456 789 09 ok")).toBe("cpf [CPF] ok");
+    expect(protegerTexto("cpf 123.456.789/09")).toBe("cpf [CPF]");
+    expect(protegerTexto("cpf 123-456-789-09")).toBe("cpf [CPF]");
+  });
+
+  it("CNPJ com separadores variados", () => {
+    expect(protegerTexto("cnpj 12.345.678/0001 95")).toBe("cnpj [CNPJ]");
+    expect(protegerTexto("cnpj 12 345 678 0001 95")).toBe("cnpj [CNPJ]");
+    expect(protegerTexto("cnpj 12345678/0001-95")).toBe("cnpj [CNPJ]");
+  });
+
+  it("passaporte com espaço ou hífen depois das letras", () => {
+    expect(protegerTexto("Passaporte FZ 123456.")).toBe("Passaporte [PASSAPORTE].");
+    expect(protegerTexto("Passaporte FZ-1234567")).toBe("Passaporte [PASSAPORTE]");
+  });
+
+  it("documentos conhecidos com separadores entre os caracteres", () => {
+    const conhecidos = { documentos: ["YA1234567", "563829104"] };
+    expect(protegerTexto("Doc YA 123 4567 e ya-1234567", conhecidos)).toBe("Doc [DOCUMENTO] e [DOCUMENTO]");
+    expect(protegerTexto("Doc 563.829.104 e 563 829 104 e 563/829-104", conhecidos)).toBe(
+      "Doc [DOCUMENTO] e [DOCUMENTO] e [DOCUMENTO]",
+    );
+    // O valor conhecido com máscara também casa com a sequência sem ela.
+    expect(protegerTexto("Doc 563829104", { documentos: ["563.829.104"] })).toBe("Doc [DOCUMENTO]");
+  });
+
+  it("documento conhecido só com dígitos não come valor nem data", () => {
+    const conhecidos = { documentos: ["1234567", "14082027"] };
+    expect(protegerTexto("Total R$ 1.234.567,00 em 14/08/2027", conhecidos)).toBe("Total R$ 1.234.567,00 em 14/08/2027");
+  });
+
+  it("nascimentos conhecidos em d/m/aaaa, dd-mm-aaaa e dd.mm.aaaa", () => {
+    const conhecidos = { nascimentos: ["1980-03-07"] };
+    expect(protegerTexto("Nasceu 7/3/1980, 07-03-1980, 07.03.1980, 7.3.1980 e 1980-03-07.", conhecidos)).toBe(
+      "Nasceu [NASCIMENTO], [NASCIMENTO], [NASCIMENTO], [NASCIMENTO] e [NASCIMENTO].",
+    );
+    // Conhecido em dd/mm/aaaa também vale nas outras formas.
+    expect(protegerTexto("Nasceu 31.12.1990", { nascimentos: ["31/12/1990"] })).toBe("Nasceu [NASCIMENTO]");
+    // Outra data com os mesmos números em outra ordem fica.
+    expect(protegerTexto("Embarque 3/7/1980", conhecidos)).toBe("Embarque 3/7/1980");
+  });
+
+  it("telefones com DDD viram [TELEFONE]", () => {
+    expect(protegerTexto("Tel (66) 99999-1234.")).toBe("Tel [TELEFONE].");
+    expect(protegerTexto("Tel 66 99999-1234")).toBe("Tel [TELEFONE]");
+    expect(protegerTexto("Tel +55 66 99999-1234")).toBe("Tel [TELEFONE]");
+    expect(protegerTexto("Tel +55 (66) 3421-1234")).toBe("Tel [TELEFONE]");
+    expect(protegerTexto("Tel 6634211234 fixo")).toBe("Tel [TELEFONE] fixo");
+    expect(protegerTexto("Tel (66)99999-1234")).toBe("Tel [TELEFONE]");
+    // 11 dígitos sem separador: continua [CPF] (o lado seguro).
+    expect(protegerTexto("Tel 66999991234")).toBe("Tel [CPF]");
+  });
+
+  it("não protege datas de viagem, valores, códigos ECL, voos e horários", () => {
+    const t =
+      "Viagem ECL-0147-01 de 14/08/2027 a 20/08/2027 (2027-08-14 a 2027-08-20), voo AZ675 às 10:30, " +
+      "total R$ 1.234,56, R$ 12.345.678,00 e R$ 123.456.789,00; 1234,56; USD 120000; pedido 123456789012; 14/08/2027 10:30.";
+    expect(protegerTexto(t, { nascimentos: ["1980-03-07"], documentos: ["YA1234567"] })).toBe(t);
+  });
 });
