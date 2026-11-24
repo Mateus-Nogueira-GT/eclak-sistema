@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FolderOpen } from "lucide-react";
 import { dataBr } from "@/domain/tarefas";
 import type { CabecalhoViagem } from "@/server/queries/operacao";
 
@@ -20,6 +21,16 @@ export function Trilha({ viagem, ativa }: { viagem: CabecalhoViagem; ativa: AbaT
           <span className="text-[13px] font-bold text-verde">{viagem.codigo}</span>
           <h2 className="text-[18px] font-bold text-texto">{viagem.cliente}</h2>
           <span className="text-[14px] text-texto">{viagem.destino}</span>
+          {viagem.pastaDrive && (
+            <a
+              href={viagem.pastaDrive}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-auto inline-flex items-center gap-1.5 self-center text-[13.5px] font-semibold text-verde hover:underline"
+            >
+              <FolderOpen size={15} aria-hidden /> Pasta no Drive
+            </a>
+          )}
         </div>
         <p className="mt-1 text-[13.5px] text-cinza">
           {dataBr(viagem.inicio)} a {dataBr(viagem.fim)} · {viagem.noites} {viagem.noites === 1 ? "noite" : "noites"}

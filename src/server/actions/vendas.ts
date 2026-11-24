@@ -42,7 +42,7 @@ import {
   versoesPrecificacao,
   viagens,
 } from "@/server/db/schema";
-import { agendarEnvios, enfileirarCartaoDaViagem } from "@/server/integracoes/eventos";
+import { agendarEnvios, enfileirarCartaoDaViagem, enfileirarPastaDaViagem } from "@/server/integracoes/eventos";
 import { criarTarefasAutomaticas } from "@/server/operacao/tarefas-automaticas";
 import { regrasDaVersao } from "@/server/queries/regras";
 import { travarViagem } from "@/server/trava-viagem";
@@ -325,7 +325,10 @@ export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): P
         const daVenda = tarefasDaVenda(hojeEmCuiaba(agora), v.inicio);
         await criarTarefasAutomaticas(tx, usuario.id, v, daVenda, "venda");
         // Cartão no Trello (se ligado): entra na fila nesta transação; a chamada vai depois do commit.
-        enfileirou = (await enfileirarCartaoDaViagem(tx, viagemId, daVenda.map((x) => x.item))) !== null;
+        const cartao = await enfileirarCartaoDaViagem(tx, viagemId, daVenda.map((x) => x.item));
+        // Pastas no Drive (se ligado), idem.
+        const pasta = await enfileirarPastaDaViagem(tx, viagemId);
+        enfileirou = cartao !== null || pasta !== null;
         return { id: venda.id };
       });
     } catch (x) {

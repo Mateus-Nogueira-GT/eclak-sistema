@@ -36,7 +36,18 @@ import { formatarCodigoViagem, noites } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { clientes, dailies, pessoas, roteiros, tarefas, usuarios, viagemPassageiros, viagens } from "@/server/db/schema";
+import { chavePasta } from "@/domain/drive";
+import {
+  clientes,
+  dailies,
+  integracaoEnvios,
+  pessoas,
+  roteiros,
+  tarefas,
+  usuarios,
+  viagemPassageiros,
+  viagens,
+} from "@/server/db/schema";
 import { regrasVigentes } from "@/server/queries/regras";
 
 export type CabecalhoViagem = {
@@ -52,7 +63,31 @@ export type CabecalhoViagem = {
   passageiros: { id: string; nome: string; nascimento: string | null }[];
   consultor: { id: string; nome: string };
   vendida: boolean;
+  /** Link da pasta da viagem no Google Drive, quando o envio `pasta:` já saiu; null sem pasta. */
+  pastaDrive: string | null;
 };
+
+/** Link (https) do `resultado` do envio `pasta:<viagem>` já `enviado`; o resultado parcial de um pendente não conta. */
+async function pastaNoDrive(viagemId: string): Promise<string | null> {
+  const [e] = await db
+    .select({ resultado: integracaoEnvios.resultado })
+    .from(integracaoEnvios)
+    .where(
+      and(
+        eq(integracaoEnvios.integracao, "drive"),
+        eq(integracaoEnvios.chave, chavePasta(viagemId)),
+        eq(integracaoEnvios.situacao, "enviado"),
+      ),
+    )
+    .limit(1);
+  const link = (e?.resultado as { link?: unknown } | null | undefined)?.link;
+  if (typeof link !== "string") return null;
+  try {
+    return new URL(link).protocol === "https:" ? link : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Cabeçalho da trilha da operação (só dados cadastrais; nada de preço, custo, margem ou comissão). */
 export async function cabecalhoDaViagem(viagemId: string): Promise<CabecalhoViagem | null> {
@@ -89,6 +124,7 @@ export async function cabecalhoDaViagem(viagemId: string): Promise<CabecalhoViag
     .innerJoin(pessoas, eq(pessoas.id, viagemPassageiros.pessoaId))
     .where(and(eq(viagemPassageiros.viagemId, v.id), isNull(pessoas.removidoEm)))
     .orderBy(asc(pessoas.ordem), asc(pessoas.nome));
+  const pastaDrive = await pastaNoDrive(v.id);
   return {
     id: v.id,
     codigo: formatarCodigoViagem(v.clienteCodigo, v.seq),
@@ -102,6 +138,7 @@ export async function cabecalhoDaViagem(viagemId: string): Promise<CabecalhoViag
     passageiros,
     consultor: { id: v.consultorId, nome: v.consultor },
     vendida: v.status === "vendida",
+    pastaDrive,
   };
 }
 

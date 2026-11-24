@@ -2,6 +2,8 @@
 
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { chavePasta } from "@/domain/drive";
+import type { IntegracaoFila } from "@/domain/integracoes";
 import { chaveRoteiro, chaveVenda } from "@/domain/trello";
 import { comPerfil, ehUuid } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
@@ -9,7 +11,7 @@ import { db } from "@/server/db/client";
 import type { Transacao } from "@/server/db/client";
 import { integracaoEnvios, roteiros, tarefas, viagens } from "@/server/db/schema";
 import { estadoIntegracao } from "@/server/integracoes/config";
-import { agendarEnvios, eventoCartaoDaViagem, eventoChecklistDoRoteiro } from "@/server/integracoes/eventos";
+import { agendarEnvios, eventoCartaoDaViagem, eventoChecklistDoRoteiro, eventoPastaDaViagem } from "@/server/integracoes/eventos";
 import { inserirEnvio, reenviarNaTransacao } from "@/server/integracoes/fila";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint). Só o Diretor.
@@ -20,6 +22,8 @@ const VIAGEM_NAO_ENCONTRADA: Falha = { ok: false, erro: "Viagem não encontrada"
 const NAO_VENDIDA: Falha = { ok: false, erro: "A viagem ainda não foi vendida" };
 const TRELLO_DESLIGADO: Falha = { ok: false, erro: "O Trello não está configurado" };
 const JA_NO_TRELLO: Falha = { ok: false, erro: "Esta viagem já foi enviada ao Trello" };
+const DRIVE_DESLIGADO: Falha = { ok: false, erro: "O Google Drive não está configurado" };
+const JA_NO_DRIVE: Falha = { ok: false, erro: "As pastas desta viagem já foram criadas no Drive" };
 
 function erroDeBanco(mensagem: string, e: unknown): Error {
   const x = e as { code?: string; cause?: { code?: string } } | null;
@@ -54,16 +58,16 @@ async function checklistDoRoteiroJunto(tx: Transacao, viagemId: string, usuarioI
     return;
   }
   const id = await inserirEnvio(tx, eventoChecklistDoRoteiro(viagemId, await itensDe(tx, viagemId, "roteiro")));
-  if (id) await auditarCriacao(tx, usuarioId, id, "checklist_roteiro", chaveRoteiro(viagemId));
+  if (id) await auditarCriacao(tx, usuarioId, id, "trello", "checklist_roteiro", chaveRoteiro(viagemId));
 }
 
-function auditarCriacao(tx: Transacao, usuarioId: string, id: string, tipo: string, chave: string) {
+function auditarCriacao(tx: Transacao, usuarioId: string, id: string, integracao: IntegracaoFila, tipo: string, chave: string) {
   return registrarAuditoria(tx, {
     usuarioId,
     tabela: "integracao_envios",
     registroId: id,
     acao: "criar",
-    depois: { integracao: "trello", tipo, chave, situacao: "pendente" },
+    depois: { integracao, tipo, chave, situacao: "pendente" },
   });
 }
 
@@ -89,12 +93,46 @@ export async function enviarViagemAoTrello(viagemId: string): Promise<{ ok: true
         const evento = await eventoCartaoDaViagem(tx, viagemId, await itensDe(tx, viagemId, "venda"));
         const id = evento ? await inserirEnvio(tx, evento) : null;
         if (!id) return JA_NO_TRELLO;
-        await auditarCriacao(tx, usuario.id, id, "cartao_viagem", chaveVenda(viagemId));
+        await auditarCriacao(tx, usuario.id, id, "trello", "cartao_viagem", chaveVenda(viagemId));
         await checklistDoRoteiroJunto(tx, viagemId, usuario.id);
         return { ok: true as const };
       });
     } catch (x) {
       throw erroDeBanco("Erro ao enviar a viagem ao Trello", x);
+    }
+    if (!r.ok) return r;
+    revalidatePath(`/viagens/${viagemId}`);
+    agendarEnvios();
+    return r;
+  });
+}
+
+/**
+ * Viagem vendida antes de o Drive ser ligado (R-C1): põe na fila a pasta da viagem com "Público" e "Uso interno". Uma
+ * vez por viagem: se o envio da pasta já existe (enviado, pendente ou com falha), recusa; a falha se reenvia em
+ * Admin › Integrações. A configuração é conferida uma vez só, dentro da transação.
+ */
+export async function criarPastasNoDrive(viagemId: string): Promise<{ ok: true } | Falha> {
+  return comPerfil(["diretor"], async (usuario) => {
+    if (!ehUuid(viagemId)) return VIAGEM_NAO_ENCONTRADA;
+    let r: { ok: true } | Falha;
+    try {
+      r = await db.transaction(async (tx) => {
+        if (!estadoIntegracao("drive").configurada) return DRIVE_DESLIGADO;
+        const [v] = await tx
+          .select({ status: viagens.status })
+          .from(viagens)
+          .where(and(eq(viagens.id, viagemId), isNull(viagens.excluidoEm)));
+        if (!v) return VIAGEM_NAO_ENCONTRADA;
+        if (v.status !== "vendida") return NAO_VENDIDA;
+        const evento = await eventoPastaDaViagem(tx, viagemId);
+        const id = evento ? await inserirEnvio(tx, evento) : null;
+        if (!id) return JA_NO_DRIVE;
+        await auditarCriacao(tx, usuario.id, id, "drive", "pasta_viagem", chavePasta(viagemId));
+        return { ok: true as const };
+      });
+    } catch (x) {
+      throw erroDeBanco("Erro ao criar as pastas no Drive", x);
     }
     if (!r.ok) return r;
     revalidatePath(`/viagens/${viagemId}`);

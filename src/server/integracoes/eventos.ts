@@ -1,19 +1,22 @@
 import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
+import { formatarCodigoCliente } from "@/domain/clientes";
+import { chavePasta, nomeDaPasta } from "@/domain/drive";
 import { chaveRoteiro, chaveVenda, descricaoDoCartao, nomeDoCartao } from "@/domain/trello";
 import { formatarCodigoViagem } from "@/domain/viagens";
 import type { Transacao } from "@/server/db/client";
 import { clientes, pessoas, viagens } from "@/server/db/schema";
 import { urlDoSite } from "@/server/site";
 import { estadoIntegracao } from "./config";
+import type { PayloadPasta } from "./drive";
 import { inserirEnvio, processarDepois, type EventoFila } from "./fila";
 import type { PayloadCartao, PayloadRoteiro } from "./trello";
 
-// Eventos do sistema que viram envio às integrações. Rodam na transação do evento (fechar venda, aprovar roteiro);
-// a chamada externa fica para depois do commit (`agendarEnvios`). Desligada: nenhuma consulta a mais.
+// Eventos do sistema que viram envio às integrações (Trello, Drive). Rodam na transação do evento (fechar venda,
+// aprovar roteiro); a chamada externa fica para depois do commit (`agendarEnvios`). Desligada: nenhuma consulta a mais.
 
-/** Código, titular, destino e datas da viagem, lidos na transação (nada de valor nem documento). */
-async function dadosDoCartao(tx: Transacao, viagemId: string) {
+/** Códigos (da viagem e do cliente), titular, destino e datas, lidos na transação (nada de valor nem documento). */
+async function dadosDaViagem(tx: Transacao, viagemId: string) {
   const [v] = await tx
     .select({
       seq: viagens.seq,
@@ -35,6 +38,7 @@ async function dadosDoCartao(tx: Transacao, viagemId: string) {
     .limit(1);
   return {
     codigo: formatarCodigoViagem(v.clienteCodigo, v.seq),
+    codigoCliente: formatarCodigoCliente(v.clienteCodigo),
     titular: titular?.nome ?? v.grupo,
     destino: v.destino,
     inicio: v.inicio,
@@ -53,7 +57,7 @@ function site(): string {
 
 /** Envio `venda:<viagem>` (cartão + "Tarefas da venda"), sem conferir a configuração; null se a viagem não existe. */
 export async function eventoCartaoDaViagem(tx: Transacao, viagemId: string, itens: string[]): Promise<EventoFila | null> {
-  const dados = await dadosDoCartao(tx, viagemId);
+  const dados = await dadosDaViagem(tx, viagemId);
   if (!dados) return null;
   const payload: PayloadCartao = {
     viagemId,
@@ -88,6 +92,22 @@ export async function enfileirarCartaoDaViagem(tx: Transacao, viagemId: string, 
 export async function enfileirarChecklistDoRoteiro(tx: Transacao, viagemId: string, itens: string[]): Promise<string | null> {
   if (!estadoIntegracao("trello").configurada) return null;
   return inserirEnvio(tx, eventoChecklistDoRoteiro(viagemId, itens));
+}
+
+/** Envio `pasta:<viagem>` (pasta-mãe com "Público" e "Uso interno"), sem conferir a configuração; null se a viagem não existe. */
+export async function eventoPastaDaViagem(tx: Transacao, viagemId: string): Promise<EventoFila | null> {
+  const dados = await dadosDaViagem(tx, viagemId);
+  if (!dados) return null;
+  // A pasta raiz vem da configuração na hora de processar (não fica no payload).
+  const payload: PayloadPasta = { viagemId, nome: nomeDaPasta(dados) };
+  return { integracao: "drive", tipo: "pasta_viagem", viagemId, chave: chavePasta(viagemId), payload };
+}
+
+/** Venda fechada: envio `pasta:<viagem>` no Drive. Devolve o id do envio criado; null se desligado ou já existia. */
+export async function enfileirarPastaDaViagem(tx: Transacao, viagemId: string): Promise<string | null> {
+  if (!estadoIntegracao("drive").configurada) return null;
+  const evento = await eventoPastaDaViagem(tx, viagemId);
+  return evento ? inserirEnvio(tx, evento) : null;
 }
 
 /** Depois do commit do evento: manda o que entrou na fila. Nunca lança (o evento já está gravado; o cron repete). */

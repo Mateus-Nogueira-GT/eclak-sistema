@@ -18,6 +18,7 @@ import { db, type Transacao } from "@/server/db/client";
 import { integracaoEnvios, type ErroEnvio } from "@/server/db/schema";
 import { estadoIntegracao } from "./config";
 import { ErroIntegracao, EsperaIntegracao, type Buscar } from "./http";
+import { processarDrive } from "./drive";
 import { processarTrello } from "./trello";
 
 // Fila de envios às integrações (outbox). `enfileirar` roda na transação do evento; `processarFila` toma os envios
@@ -59,8 +60,8 @@ export type DepsProcessador = {
  */
 export type Processador = (envio: EnvioTomado, deps: DepsProcessador) => Promise<unknown>;
 
-// Integração sem processador não é tomada da fila (o Drive entra na Task 3 da fatia 6c).
-const PROCESSADORES: Partial<Record<IntegracaoFila, Processador>> = { trello: processarTrello };
+// Integração sem processador não é tomada da fila.
+const PROCESSADORES: Partial<Record<IntegracaoFila, Processador>> = { trello: processarTrello, drive: processarDrive };
 
 const substitutos = new Map<IntegracaoFila, Processador | null>();
 
