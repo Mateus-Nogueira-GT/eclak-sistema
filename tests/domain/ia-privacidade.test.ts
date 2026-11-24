@@ -115,4 +115,8 @@ describe("protegerTexto", () => {
       "total R$ 1.234,56, R$ 12.345.678,00 e R$ 123.456.789,00; 1234,56; USD 120000; pedido 123456789012; 14/08/2027 10:30.";
     expect(protegerTexto(t, { nascimentos: ["1980-03-07"], documentos: ["YA1234567"] })).toBe(t);
   });
+  it("data seguida de número não vira telefone pela metade", () => {
+    expect(protegerTexto("07.03.1980 1980-03-07", { nascimentos: ["1980-03-07"] })).toBe("[NASCIMENTO] [NASCIMENTO]");
+    expect(protegerTexto("Chegada 14-08-2027 1030")).toBe("Chegada 14-08-2027 1030");
+  });
 });
