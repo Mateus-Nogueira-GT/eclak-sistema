@@ -415,7 +415,8 @@ export function EditorRoteiro({
                 <SeletorFuso value={doc.fuso} onChange={(v) => mudar((d) => ({ ...d, fuso: v }))} />
               </Campo>
             </div>
-            <Campo label="Sua viagem" className="mt-4">
+            {/* O botão e a sugestão ficam fora do <label> do Campo (não entram no nome acessível do campo). */}
+            <div className="mt-4">
               <ComReescrita
                 ligada={iaLigada}
                 texto={doc.abertura}
@@ -424,19 +425,21 @@ export function EditorRoteiro({
                 roteiroId={roteiro.id}
                 onUsar={(abertura) => mudar((d) => ({ ...d, abertura }))}
               >
-                <textarea
-                  value={doc.abertura}
-                  maxLength={4000}
-                  rows={4}
-                  onChange={(e) => {
-                    const abertura = e.target.value;
-                    mudar((d) => ({ ...d, abertura }));
-                  }}
-                  className={inputCls}
-                  placeholder="Texto de abertura do roteiro ao cliente"
-                />
+                <Campo label="Sua viagem">
+                  <textarea
+                    value={doc.abertura}
+                    maxLength={4000}
+                    rows={4}
+                    onChange={(e) => {
+                      const abertura = e.target.value;
+                      mudar((d) => ({ ...d, abertura }));
+                    }}
+                    className={inputCls}
+                    placeholder="Texto de abertura do roteiro ao cliente"
+                  />
+                </Campo>
               </ComReescrita>
-            </Campo>
+            </div>
           </Card>
 
           <Card className="px-6 py-5">
