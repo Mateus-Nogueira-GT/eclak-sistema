@@ -36,7 +36,7 @@
 - **R7 Primeira tela:** `/visao-geral` passa a ser o primeiro item de `ROTAS_POR_PERFIL` de `diretor` e `fin_estrategico` (é para onde `/` redireciona e para onde o logo leva).
 - **R8 Menu:** área "Gestão" ganha "Visão geral" (antes de "Aprovações"); área "Financeiro" ganha "Relatórios" (depois de "Fluxo de caixa").
 - **R9 Exportação:** CSV UTF-8 com BOM, separador `;`, decimal com vírgula, sem separador de milhar, datas `dd/mm/aaaa`, por route handler `GET /financeiro/relatorios/planilha?rel=…&de=…&ate=…` com `exigirPerfil`. PDF = página `/financeiro/relatorios/imprimir?…` no padrão de `src/app/(app)/financeiro/faturas/[id]/imprimir/page.tsx` (o navegador imprime).
-- **R10 Períodos da Visão geral:** `30d` (padrão), `90d`, `mes`, `mes_anterior`, `ano`, via `?periodo=`; período anterior de mesma duração em dias (para `mes`/`mes_anterior`/`ano`: o mês/ano anterior inteiro) para a variação do vendido. Relatórios: `?de=AAAA-MM&ate=AAAA-MM` (padrão: mês atual; máximo 24 meses).
+- **R10 Períodos da Visão geral:** `30d` (padrão), `90d`, `mes`, `mes_anterior`, `ano`, via `?periodo=`; período anterior de mesma duração (spec §5.1 vence a versão anterior deste ruling): `30d`/`90d` os dias logo antes; `mes` o mesmo trecho do mês anterior (1–23/11 → 1–23/10, dia limitado ao fim do mês); `ano` o mesmo trecho do ano anterior (1/1–23/11/2025); `mes_anterior` o mês inteiro antes dele; para a variação do vendido. Relatórios: `?de=AAAA-MM&ate=AAAA-MM` (padrão: mês atual; máximo 24 meses).
 
 ## Review Focus
 
@@ -72,7 +72,7 @@
 
 - [ ] **Step 1: Testes que falham** em `tests/domain/paineis.test.ts`:
   - `intervaloDoPeriodo("30d", "2026-11-23")` → `{ de: "2026-10-25", ate: "2026-11-23" }`; `"mes"` → `2026-11-01..2026-11-23`; `"mes_anterior"` → `2026-10-01..2026-10-31`; `"ano"` → `2026-01-01..2026-11-23`; `"90d"` → `de: "2026-08-26"`.
-  - `intervaloAnterior("30d", {de:"2026-10-25",ate:"2026-11-23"})` → `{ de: "2026-09-25", ate: "2026-10-24" }`; `intervaloAnterior("mes", {de:"2026-11-01",ate:"2026-11-23"})` → `2026-10-01..2026-10-31`; `"ano"` → `2025-01-01..2025-12-31`.
+  - `intervaloAnterior("30d", {de:"2026-10-25",ate:"2026-11-23"})` → `{ de: "2026-09-25", ate: "2026-10-24" }`; `intervaloAnterior("mes", {de:"2026-11-01",ate:"2026-11-23"})` → `2026-10-01..2026-10-23`; `"ano"` → `2025-01-01..2025-11-23`; `"mes_anterior"` → o mês inteiro antes.
   - `intervaloDeMeses("2026-02","2026-02")` → `2026-02-01..2026-02-28`; `("2026-03","2026-01")` lança; `("2024-01","2026-01")` lança (25 meses).
   - `variacaoPct(1100n, 1000n)` → `"10.0"`; `(0n, 0n)` → `null`; `(500n, 1000n)` → `"-50.0"`.
   - `margemPonderada([{final:190n,receita:1000n},{final:10n,receita:1000n}])` → `"10.0"`; `([])` → `null`.

@@ -125,7 +125,7 @@ tests/domain, tests/integracao (integração roda contra Supabase local e TRUNCA
 - **R7** `/visao-geral` é a primeira rota de Diretor e Financeiro estratégico (para onde `/` e o logo levam).
 - **R8** menu: "Visão geral" em Gestão (antes de Aprovações); "Relatórios" em Financeiro (depois de Fluxo de caixa).
 - **R9** CSV UTF-8 com BOM, `;`, decimal com vírgula, datas `dd/mm/aaaa`, por route handler com `exigirPerfil`; PDF por página de impressão.
-- **R10** períodos da Visão geral por `?periodo=` (`30d` padrão, `90d`, `mes`, `mes_anterior`, `ano`) com comparação do vendido com o período anterior; relatórios por `?de=AAAA-MM&ate=AAAA-MM` (padrão mês atual, máximo 24 meses).
+- **R10** períodos da Visão geral por `?periodo=` (`30d` padrão, `90d`, `mes`, `mes_anterior`, `ano`) com comparação do vendido com o período anterior de mesma duração (spec §5.1): `mes` contra o mesmo trecho do mês anterior (1–23/11 contra 1–23/10), `ano` contra o mesmo trecho do ano anterior, `mes_anterior` contra o mês inteiro antes, `30d`/`90d` contra os dias logo antes; relatórios por `?de=AAAA-MM&ate=AAAA-MM` (padrão mês atual, máximo 24 meses).
 
 Perguntas abertas para o Mateus (spec da 6, §8; não bloqueiam): (1) os critérios de período, principalmente a DRE pelo mês do aceite e não pelo mês da viagem; (2) a Visão geral também para o Financeiro operacional (Valeska)? No protótipo, não; (3) 6b: quais bancos e um OFX de exemplo; (4) 6c: qual integração primeiro.
 

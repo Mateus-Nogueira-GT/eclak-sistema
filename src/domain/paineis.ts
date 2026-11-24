@@ -59,7 +59,11 @@ export function intervaloDoPeriodo(p: PeriodoPainel, hoje: string): Intervalo {
   }
 }
 
-/** Período de comparação: mesma duração em dias (30d/90d); mês ou ano anterior inteiro nos demais. */
+/**
+ * Período de comparação, de mesma duração (spec §5.1): 30d/90d, os dias logo antes; `mes`, o mesmo trecho do mês
+ * anterior (1–23/11 → 1–23/10, o dia limitado ao fim do mês); `ano`, o mesmo trecho do ano anterior; `mes_anterior`,
+ * o mês inteiro antes dele.
+ */
 export function intervaloAnterior(p: PeriodoPainel, atual: Intervalo): Intervalo {
   switch (p) {
     case "30d":
@@ -71,14 +75,13 @@ export function intervaloAnterior(p: PeriodoPainel, atual: Intervalo): Intervalo
       return { de: somarDias(ate, -dias), ate };
     }
     case "mes":
+      return { de: somarMeses(primeiroDoMes(atual.de), -1), ate: somarMeses(atual.ate, -1) };
     case "mes_anterior": {
       const de = somarMeses(primeiroDoMes(atual.de), -1);
       return { de, ate: ultimoDoMes(de) };
     }
-    case "ano": {
-      const ano = Number(atual.de.slice(0, 4)) - 1;
-      return { de: `${ano}-01-01`, ate: `${ano}-12-31` };
-    }
+    case "ano":
+      return { de: `${Number(atual.de.slice(0, 4)) - 1}-01-01`, ate: somarMeses(atual.ate, -12) };
   }
 }
 

@@ -41,10 +41,18 @@ describe("intervaloAnterior", () => {
       ate: "2026-10-24",
     });
   });
-  it("mes, mes_anterior e ano: mês/ano anterior inteiro", () => {
-    expect(intervaloAnterior("mes", { de: "2026-11-01", ate: "2026-11-23" })).toEqual({ de: "2026-10-01", ate: "2026-10-31" });
+  it("mes e ano: o mesmo trecho do mês/ano anterior", () => {
+    expect(intervaloAnterior("mes", { de: "2026-11-01", ate: "2026-11-23" })).toEqual({ de: "2026-10-01", ate: "2026-10-23" });
+    expect(intervaloAnterior("ano", { de: "2026-01-01", ate: "2026-11-23" })).toEqual({ de: "2025-01-01", ate: "2025-11-23" });
+  });
+  it("mes e ano: dia limitado ao fim do mês anterior; janeiro volta a dezembro", () => {
+    expect(intervaloAnterior("mes", { de: "2026-03-01", ate: "2026-03-31" })).toEqual({ de: "2026-02-01", ate: "2026-02-28" });
+    expect(intervaloAnterior("mes", { de: "2026-01-01", ate: "2026-01-15" })).toEqual({ de: "2025-12-01", ate: "2025-12-15" });
+    expect(intervaloAnterior("ano", { de: "2028-01-01", ate: "2028-02-29" })).toEqual({ de: "2027-01-01", ate: "2027-02-28" });
+  });
+  it("mes_anterior: o mês inteiro antes dele", () => {
     expect(intervaloAnterior("mes_anterior", { de: "2026-10-01", ate: "2026-10-31" })).toEqual({ de: "2026-09-01", ate: "2026-09-30" });
-    expect(intervaloAnterior("ano", { de: "2026-01-01", ate: "2026-11-23" })).toEqual({ de: "2025-01-01", ate: "2025-12-31" });
+    expect(intervaloAnterior("mes_anterior", { de: "2026-01-01", ate: "2026-01-31" })).toEqual({ de: "2025-12-01", ate: "2025-12-31" });
   });
 });
 
