@@ -135,10 +135,11 @@ const escaparLike = (t: string) => t.replace(/[\\%_]/g, (c) => `\\${c}`);
  * Filtros comuns à lista, à contagem e aos totais (sem lado, situação e período). As compras de uma fatura do
  * cartão corporativo (`fatura_cartao_id`) não aparecem: a lista mostra a linha da fatura no lugar delas. A cancelada
  * (pagamento de conta cancelada, que não conta na fatura) continua visível no filtro Canceladas.
+ * Com `compras = "incluir"` (o detalhe de uma categoria da DRE, por competência) as compras aparecem uma a uma.
  * Origem "viagem" = parcelas, pagamentos e comissões; "manual" = o resto (lançamentos à mão e faturas do cartão).
  */
 function filtrosComuns(f: FiltroLancamentos): SQL[] {
-  const c: SQL[] = [or(isNull(lf.faturaCartaoId), eq(lf.statusBase, "cancelado"))!];
+  const c: SQL[] = f.compras === "incluir" ? [] : [or(isNull(lf.faturaCartaoId), eq(lf.statusBase, "cancelado"))!];
   if (f.categoriaId) c.push(eq(lf.categoriaId, f.categoriaId));
   if (f.grupo) c.push(eq(categoriasFinanceiras.grupo, f.grupo));
   if (f.centro) c.push(eq(lf.centro, f.centro));

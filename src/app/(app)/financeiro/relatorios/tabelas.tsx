@@ -20,9 +20,9 @@ const mes = (data: string) => data.slice(0, 7);
 export function hrefConta(contaId: string, i: Intervalo) {
   return `/financeiro/lancamentos?lado=todos&base=baixa&de=${i.de}&ate=${i.ate}&contaBancariaId=${contaId}`;
 }
-/** Lançamentos manuais de uma categoria da DRE, pela competência do período. */
+/** Lançamentos manuais de uma categoria da DRE, pela competência do período, com as compras no cartão uma a uma. */
 export function hrefCategoria(categoriaId: string, i: Intervalo) {
-  return `/financeiro/lancamentos?lado=todos&base=competencia&origem=manual&de=${i.de}&ate=${i.ate}&categoriaId=${categoriaId}`;
+  return `/financeiro/lancamentos?lado=todos&base=competencia&origem=manual&de=${i.de}&ate=${i.ate}&categoriaId=${categoriaId}&compras=incluir`;
 }
 
 /**

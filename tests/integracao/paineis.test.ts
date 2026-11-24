@@ -19,6 +19,9 @@ import { obterVisaoGeral, relatorioBancos, relatorioConsultores, relatorioContas
 import { regrasVigentes } from "@/server/queries/regras";
 import { margensVendidas, obterViagemVendida } from "@/server/queries/vendas";
 import { GET } from "@/app/(app)/financeiro/relatorios/planilha/route";
+import { hrefCategoria } from "@/app/(app)/financeiro/relatorios/tabelas";
+import { filtroDaUrl } from "@/domain/financeiro-entrada";
+import { listarLancamentos } from "@/server/queries/financeiro";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
 import { cartaoCorporativo, contaBancaria, cotacao, item, souza, vendida } from "../helpers/venda";
 
@@ -296,6 +299,8 @@ describe("relatórios", () => {
 
     const real = (await margensVendidas([x.viagemId])).get(x.viagemId)!.real;
     if ("erro" in real) throw new Error("margem sem cálculo no fixture");
+    // O fixture tem custo fixo: o resultado abaixo prova que ele fica fora.
+    expect(real.fixo > 0n).toBe(true);
     const valor = (rotulo: string) => r.linhas.find((l) => l.rotulo === rotulo)!.valor;
     expect(valor("Receita de viagens")).toBe(real.receita);
     expect(valor("(-) Custo dos fornecedores")).toBe(-real.custo);
@@ -304,6 +309,16 @@ describe("relatórios", () => {
     expect(r.resultado).toBe(real.receita - real.custo - real.imposto - real.taxas - 200000n - 30000n - 15000n);
     expect(valor("(=) Resultado do período")).toBe(r.resultado);
     expect(r.semMargem).toEqual([]);
+
+    // O link da categoria na DRE abre a lista com as compras do cartão uma a uma; sem o filtro, a lista as esconde.
+    const papelaria = categorias.find((l) => l.rotulo === "Papelaria")!;
+    const href = new URL(hrefCategoria(papelaria.categoriaId!, JANEIRO), "http://x");
+    const filtro = filtroDaUrl(Object.fromEntries(href.searchParams), hojeEmCuiaba());
+    expect(filtro.compras).toBe("incluir");
+    const comCompras = await comSessao(fin, () => listarLancamentos(filtro));
+    expect(comCompras.linhas.map((l) => [l.origem, l.valorPrevisto, l.faturaCartaoId !== null])).toEqual([["manual", 30000n, true]]);
+    const semCompras = await comSessao(fin, () => listarLancamentos({ ...filtro, compras: undefined }));
+    expect(semCompras.linhas).toEqual([]);
 
     // Mês sem nada: só os totais, zerados.
     const vazio = await comSessao(fin, () => relatorioDre(intervaloDeMeses("2027-03", "2027-03")));
