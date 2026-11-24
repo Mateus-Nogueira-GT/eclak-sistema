@@ -17,6 +17,7 @@ import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
 import { itensViagem, roteiros, viagens } from "@/server/db/schema";
+import { agendarEnvios, enfileirarChecklistDoRoteiro } from "@/server/integracoes/eventos";
 import { criarTarefasAutomaticas } from "@/server/operacao/tarefas-automaticas";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
@@ -256,13 +257,19 @@ export async function marcarEnviadoAoCliente(roteiroId: string): Promise<{ ok: t
 /**
  * Aprovado pelo cliente (de `rascunho` ou `aguardando_cliente`, D16): grava quem e quando e cria as 3 tarefas do
  * roteiro na mesma transação. O `for update` serializa aprovações simultâneas; o índice único não deixa duplicar.
+ * Com o Trello ligado, o checklist "Tarefas do roteiro" entra na fila na mesma transação.
  */
 export async function aprovarRoteiro(roteiroId: string): Promise<{ ok: true; tarefasCriadas: number } | Falha> {
-  return mudarStatus(roteiroId, "Erro ao aprovar o roteiro", async (tx, r, v, usuarioId) => {
+  let enfileirou = false;
+  const res = await mudarStatus(roteiroId, "Erro ao aprovar o roteiro", async (tx, r, v, usuarioId) => {
     if (r.status === "aprovado") return JA_APROVADO;
-    const tarefasCriadas = await criarTarefasAutomaticas(tx, usuarioId, v, tarefasDoRoteiro(), "roteiro");
+    const doRoteiro = tarefasDoRoteiro();
+    const tarefasCriadas = await criarTarefasAutomaticas(tx, usuarioId, v, doRoteiro, "roteiro");
+    enfileirou = (await enfileirarChecklistDoRoteiro(tx, v.id, doRoteiro.map((x) => x.item))) !== null;
     return { colunas: { status: "aprovado", aprovadoEm: new Date(), aprovadoPor: usuarioId }, extra: { tarefasCriadas } };
   });
+  if (res.ok && enfileirou) agendarEnvios();
+  return res;
 }
 
 /** `aprovado` → `aguardando_cliente`; limpa quem e quando aprovou. As tarefas criadas ficam. */

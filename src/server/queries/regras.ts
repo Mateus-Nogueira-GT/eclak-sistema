@@ -27,6 +27,11 @@ export async function garantirVersaoInicial(tx: Transacao): Promise<void> {
  */
 export async function regrasVigentes(em?: Date): Promise<RegrasVigentes> {
   await exigirPerfil();
+  return lerRegrasVigentes(em);
+}
+
+/** Núcleo de `regrasVigentes`. Uso interno, sem checagem de acesso: só o agendador do daily (cron, sem sessão). */
+export async function lerRegrasVigentes(em?: Date): Promise<RegrasVigentes> {
   const buscar = async () => {
     const [v] = await db
       .select()

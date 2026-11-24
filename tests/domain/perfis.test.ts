@@ -30,6 +30,13 @@ describe("perfis", () => {
       expect(podeAcessar(p, "/viagensX")).toBe(false);
     }
   });
+  it("admin › integrações: só o diretor acessa", () => {
+    expect(podeAcessar("diretor", "/admin/integracoes")).toBe(true);
+    expect(podeAcessar("diretor", "/admin/integracoesX")).toBe(false);
+    for (const p of PERFIS_VALORES.filter((x) => x !== "diretor")) {
+      expect(podeAcessar(p, "/admin/integracoes")).toBe(false);
+    }
+  });
   it("aprovações: só o diretor acessa", () => {
     expect(podeAcessar("diretor", "/aprovacoes")).toBe(true);
     expect(podeAcessar("diretor", "/aprovacoes/x")).toBe(true);
@@ -65,5 +72,13 @@ describe("perfis", () => {
       expect(podeAcessar(p, "/roteiros")).toBe(true);
       expect(podeAcessar(p, "/dailies/x")).toBe(true);
     }
+  });
+  it("visão geral: primeira tela do Diretor e do Financeiro estratégico; relatórios nos três do financeiro", () => {
+    expect(ROTAS_POR_PERFIL.diretor[0]).toBe("/visao-geral");
+    expect(ROTAS_POR_PERFIL.fin_estrategico[0]).toBe("/visao-geral");
+    for (const p of ["diretor", "fin_estrategico"] as const) expect(podeAcessar(p, "/visao-geral")).toBe(true);
+    for (const p of ["fin_operacional", "consultor", "operacional"] as const) expect(podeAcessar(p, "/visao-geral")).toBe(false);
+    expect(podeAcessar("fin_operacional", "/financeiro/relatorios")).toBe(true);
+    expect(podeAcessar("consultor", "/financeiro/relatorios")).toBe(false);
   });
 });

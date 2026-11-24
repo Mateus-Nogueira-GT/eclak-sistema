@@ -232,6 +232,8 @@ export const filtroLancamentosSchema = z.strictObject({
   contaBancariaId: opcional(uuid),
   origem: opcional(z.enum(["viagem", "manual"], { error: "Origem inválida" })),
   busca: opcional(z.string().trim().max(100, "Busca muito longa")),
+  /** "incluir": mostra também as compras no cartão corporativo uma a uma (o detalhe de uma categoria da DRE). */
+  compras: opcional(z.enum(["incluir"], { error: "Filtro de compras inválido" })),
   pagina: z.number({ error: "Página inválida" }).int("Página inválida").min(1, "Página inválida"),
 });
 export type FiltroLancamentos = z.infer<typeof filtroLancamentosSchema>;
@@ -276,3 +278,18 @@ export const cartaoSchema = z.strictObject({
   centro,
 });
 export type CartaoValidado = z.output<typeof cartaoSchema>;
+
+// ---------- Conciliação do extrato OFX (fatia 6b) ----------
+
+export const MSG_MOTIVO_IGNORAR = "Informe o motivo (3 a 200 caracteres)";
+const MSG_CATEGORIA = "Escolha a categoria";
+
+/** Lançamento criado a partir de uma transação do extrato: o resto (lado, valor, datas, conta) vem da transação. */
+export const lancamentoDaTransacaoSchema = z.strictObject({
+  categoriaId: z.string({ error: MSG_CATEGORIA }).uuid(MSG_CATEGORIA),
+  descricao: obrigatorio("Informe a descrição", 200),
+  centro,
+});
+
+/** Motivo de ignorar uma transação do extrato. */
+export const motivoIgnorarSchema = z.string({ error: MSG_MOTIVO_IGNORAR }).trim().min(3, MSG_MOTIVO_IGNORAR).max(200, MSG_MOTIVO_IGNORAR);

@@ -1,9 +1,10 @@
 // Exclusões do proxy. A mesma regra vale no `config.matcher` (literal, exigido pelo Next)
-// e em `deveProteger`, usada pelo próprio proxy como segunda camada.
+// e em `deveProteger`, usada pelo próprio proxy como segunda camada. `/api/cron/` passa sem sessão: a rota confere
+// o `CRON_SECRET` (src/server/cron.ts).
 export const MATCHER_PROXY =
-  "/((?!_next/static|_next/image|favicon\\.ico$|logo-eclak\\.png$|login(?:/|$)|auth/confirmar(?:/|$)).*)";
+  "/((?!_next/static|_next/image|favicon\\.ico$|logo-eclak\\.png$|login(?:/|$)|auth/confirmar(?:/|$)|api/cron/).*)";
 
-const EXCLUIDOS = /^\/(?:_next\/static|_next\/image|favicon\.ico$|logo-eclak\.png$|login(?:\/|$)|auth\/confirmar(?:\/|$))/;
+const EXCLUIDOS = /^\/(?:_next\/static|_next\/image|favicon\.ico$|logo-eclak\.png$|login(?:\/|$)|auth\/confirmar(?:\/|$)|api\/cron\/)/;
 
 export function deveProteger(pathname: string): boolean {
   return !EXCLUIDOS.test(pathname);

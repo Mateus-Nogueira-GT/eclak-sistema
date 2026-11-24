@@ -31,6 +31,7 @@ import {
   trazerHoteisEVoos,
 } from "@/server/actions/roteiros";
 import type { RoteiroTela } from "@/server/queries/operacao";
+import { ComReescrita } from "../reescrever";
 import { DocumentoRoteiro, NOTA_VOOS, ROTULO_STATUS_ROTEIRO, TOM_STATUS_ROTEIRO } from "./previa";
 
 type Aviso = { msg: string; tipo: "erro" | "conflito" | "ok" } | null;
@@ -226,6 +227,7 @@ export function EditorRoteiro({
   fim,
   roteiro,
   aniversarios,
+  iaLigada,
 }: {
   viagemId: string;
   destino: string;
@@ -233,6 +235,8 @@ export function EditorRoteiro({
   fim: string;
   roteiro: RoteiroTela;
   aniversarios: Aniversario[];
+  /** "Reescrever com IA" só aparece com a IA configurada. */
+  iaLigada: boolean;
 }) {
   const router = useRouter();
   const [pendente, iniciar] = useTransition();
@@ -411,19 +415,31 @@ export function EditorRoteiro({
                 <SeletorFuso value={doc.fuso} onChange={(v) => mudar((d) => ({ ...d, fuso: v }))} />
               </Campo>
             </div>
-            <Campo label="Sua viagem" className="mt-4">
-              <textarea
-                value={doc.abertura}
-                maxLength={4000}
-                rows={4}
-                onChange={(e) => {
-                  const abertura = e.target.value;
-                  mudar((d) => ({ ...d, abertura }));
-                }}
-                className={inputCls}
-                placeholder="Texto de abertura do roteiro ao cliente"
-              />
-            </Campo>
+            {/* O botão e a sugestão ficam fora do <label> do Campo (não entram no nome acessível do campo). */}
+            <div className="mt-4">
+              <ComReescrita
+                ligada={iaLigada}
+                texto={doc.abertura}
+                finalidade="abertura"
+                idioma={doc.idioma}
+                roteiroId={roteiro.id}
+                onUsar={(abertura) => mudar((d) => ({ ...d, abertura }))}
+              >
+                <Campo label="Sua viagem">
+                  <textarea
+                    value={doc.abertura}
+                    maxLength={4000}
+                    rows={4}
+                    onChange={(e) => {
+                      const abertura = e.target.value;
+                      mudar((d) => ({ ...d, abertura }));
+                    }}
+                    className={inputCls}
+                    placeholder="Texto de abertura do roteiro ao cliente"
+                  />
+                </Campo>
+              </ComReescrita>
+            </div>
           </Card>
 
           <Card className="px-6 py-5">
@@ -444,7 +460,7 @@ export function EditorRoteiro({
           </Card>
 
           {c.dias.map((d, i) => (
-            <EditorDia key={d.data} dia={d} onChange={(fn) => mudarDia(i, fn)} />
+            <EditorDia key={d.data} dia={d} onChange={(fn) => mudarDia(i, fn)} ia={{ ligada: iaLigada, idioma: doc.idioma, roteiroId: roteiro.id }} />
           ))}
 
           <div className="flex justify-end">
@@ -548,7 +564,15 @@ function TabelaVoos({ voos, onChange }: { voos: VooRoteiro[]; onChange: (v: VooR
   );
 }
 
-function EditorDia({ dia, onChange }: { dia: DiaRoteiro; onChange: (fn: (d: DiaRoteiro) => DiaRoteiro) => void }) {
+function EditorDia({
+  dia,
+  onChange,
+  ia,
+}: {
+  dia: DiaRoteiro;
+  onChange: (fn: (d: DiaRoteiro) => DiaRoteiro) => void;
+  ia: { ligada: boolean; idioma: Idioma; roteiroId: string };
+}) {
   const setItem = (i: number, p: Partial<ItemRoteiro>) => onChange((d) => ({ ...d, itens: d.itens.map((it, k) => (k === i ? { ...it, ...p } : it)) }));
   const dica = dia.dica ?? { tema: "", texto: "" };
   return (
@@ -601,15 +625,25 @@ function EditorDia({ dia, onChange }: { dia: DiaRoteiro; onChange: (fn: (d: DiaR
 
       <div className="mt-4 border-l-[3px] border-terracota bg-fundo px-4 py-3">
         <p className="text-[11px] font-bold uppercase tracking-[0.06em] text-texto">DICA ECLAK{dica.tema.trim() ? ` · ${dica.tema.trim().toUpperCase()}` : ""}</p>
-        <div className="mt-2 grid gap-2 sm:grid-cols-[200px_minmax(0,1fr)]">
+        <div className="mt-2 grid items-start gap-2 sm:grid-cols-[200px_minmax(0,1fr)]">
           <input aria-label="Tema da dica" placeholder="Tema" maxLength={40} value={dica.tema} onChange={(e) => { const tema = e.target.value; onChange((d) => ({ ...d, dica: { tema, texto: d.dica?.texto ?? "" } })); }} className={inputPequeno} />
-          <textarea aria-label="Texto da dica" placeholder="Texto da dica" rows={2} maxLength={1000} value={dica.texto} onChange={(e) => { const texto = e.target.value; onChange((d) => ({ ...d, dica: { tema: d.dica?.tema ?? "", texto } })); }} className={inputPequeno} />
+          <ComReescrita
+            {...ia}
+            texto={dica.texto}
+            finalidade="dica"
+            abaixo
+            onUsar={(texto) => onChange((d) => ({ ...d, dica: { tema: d.dica?.tema ?? "", texto } }))}
+          >
+            <textarea aria-label="Texto da dica" placeholder="Texto da dica" rows={2} maxLength={1000} value={dica.texto} onChange={(e) => { const texto = e.target.value; onChange((d) => ({ ...d, dica: { tema: d.dica?.tema ?? "", texto } })); }} className={inputPequeno} />
+          </ComReescrita>
         </div>
       </div>
 
       <div className="mt-4">
         <Rotulo>POR QUE ESCOLHEMOS</Rotulo>
-        <textarea aria-label="Por que escolhemos" rows={2} maxLength={1000} value={dia.porque ?? ""} onChange={(e) => { const porque = e.target.value; onChange((d) => ({ ...d, porque })); }} className={inputPequeno} />
+        <ComReescrita {...ia} texto={dia.porque ?? ""} finalidade="porque" onUsar={(porque) => onChange((d) => ({ ...d, porque }))}>
+          <textarea aria-label="Por que escolhemos" rows={2} maxLength={1000} value={dia.porque ?? ""} onChange={(e) => { const porque = e.target.value; onChange((d) => ({ ...d, porque })); }} className={inputPequeno} />
+        </ComReescrita>
       </div>
 
       <div className="mt-4">

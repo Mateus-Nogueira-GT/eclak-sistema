@@ -1,5 +1,5 @@
 /**
- * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores, os clientes fictícios do protótipo, três orçamentos (aguardando, aprovado e devolvido) e duas viagens vendidas (Ribeiro, em viagem; e uma conciliada), duas contas bancárias, lançamentos manuais do protótipo, a fatura da Ribeiro, um cartão corporativo com três compras, uma nota fiscal, as tarefas da venda, um roteiro aprovado e dois dailies.
+ * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores, os clientes fictícios do protótipo, três orçamentos (aguardando, aprovado e devolvido) e duas viagens vendidas (Ribeiro, em viagem; e uma conciliada), duas contas bancárias, lançamentos manuais do protótipo, a fatura da Ribeiro, um cartão corporativo com três compras, uma nota fiscal, as tarefas da venda, um roteiro aprovado, dois dailies e um extrato sintético (confere, diferença e tarifa pendente).
  * Recusa rodar se DATABASE_URL ou NEXT_PUBLIC_SUPABASE_URL não forem locais. Idempotente: o que já existe é pulado.
  */
 import { config } from "dotenv";
@@ -8,6 +8,7 @@ import postgres from "postgres";
 import { garantirBancoLocal } from "./local-guard";
 import { semearOrcamentos } from "./seed-orcamentos";
 import { semearFinanceiro } from "./seed-financeiro";
+import { semearConciliacao } from "./seed-conciliacao";
 import { semearVendas } from "./seed-vendas";
 import { semearOperacao } from "./seed-operacao";
 
@@ -259,7 +260,8 @@ async function main() {
     const vendasNovas = await semearVendas(sql);
     const fin = await semearFinanceiro(sql);
     const op = await semearOperacao(sql);
-    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s), ${vendasNovas} viagem(ns) vendida(s), ${fin.lancamentos} lançamento(s), ${fin.faturas} fatura(s), ${fin.cartoes} cartão(ões) com ${fin.compras} compra(s), ${fin.notas} nota(s) fiscal(is), ${op.tarefas} tarefa(s), ${op.roteiros} roteiro(s) e ${op.dailies} daily(ies) criados.`);
+    const conciliadas = await semearConciliacao(sql);
+    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s), ${vendasNovas} viagem(ns) vendida(s), ${fin.lancamentos} lançamento(s), ${fin.faturas} fatura(s), ${fin.cartoes} cartão(ões) com ${fin.compras} compra(s), ${fin.notas} nota(s) fiscal(is), ${op.tarefas} tarefa(s), ${op.roteiros} roteiro(s) e ${op.dailies} daily(ies) e ${conciliadas} transação(ões) de extrato criados.`);
     console.log(`Logins: ${USUARIOS.map((u) => u.email).join(", ")} (senha ${SENHA})`);
   } finally {
     await sql.end();

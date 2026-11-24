@@ -16,6 +16,7 @@ import {
   salvarTextoDaily,
 } from "@/server/actions/dailies";
 import type { DailyTela } from "@/server/queries/operacao";
+import { ComReescrita } from "../reescrever";
 
 type Aviso = { msg: string; tipo: "erro" | "conflito" | "ok" } | null;
 type Resultado = { ok: true; atualizadoEm?: string } | { ok: false; erro: string; conflito?: true };
@@ -68,6 +69,7 @@ export function Dailies({
   usuarios,
   dias,
   diaInicial,
+  iaLigada,
 }: {
   roteiro: { id: string; idioma: Idioma; fuso: string };
   destino: string;
@@ -75,6 +77,8 @@ export function Dailies({
   usuarios: { id: string; nome: string }[];
   dias: DailyTela[];
   diaInicial: string;
+  /** "Reescrever com IA" só aparece com a IA configurada. */
+  iaLigada: boolean;
 }) {
   const [aberto, setAberto] = useState(diaInicial);
   const dia = dias.find((d) => d.data === aberto) ?? dias[0];
@@ -132,6 +136,7 @@ export function Dailies({
         usuarios={usuarios}
         dia={dia}
         aoMudarSujo={aoMudarSujo}
+        iaLigada={iaLigada}
       />
     </div>
   );
@@ -144,6 +149,7 @@ function PainelDia({
   usuarios,
   dia,
   aoMudarSujo,
+  iaLigada,
 }: {
   roteiro: { id: string; idioma: Idioma; fuso: string };
   destino: string;
@@ -151,6 +157,7 @@ function PainelDia({
   usuarios: { id: string; nome: string }[];
   dia: DailyTela;
   aoMudarSujo: (sujo: boolean) => void;
+  iaLigada: boolean;
 }) {
   const router = useRouter();
   const [pendente, iniciar] = useTransition();
@@ -321,15 +328,25 @@ function PainelDia({
               <label htmlFor={`texto-${dia.data}`} className="mb-1.5 block text-[11px] font-bold uppercase tracking-[0.06em] text-cinza">
                 Mensagem ao cliente
               </label>
-              <textarea
-                id={`texto-${dia.data}`}
-                value={texto}
-                onChange={(e) => setTexto(e.target.value)}
-                readOnly={enviado}
-                rows={20}
-                maxLength={8000}
-                className={cx(inputCls, "resize-y font-[inherit] leading-[1.55]", enviado && "bg-fundo text-cinza")}
-              />
+              {/* Enviado é só leitura: sem "Reescrever com IA". */}
+              <ComReescrita
+                ligada={iaLigada && !enviado}
+                texto={texto}
+                finalidade="daily"
+                idioma={roteiro.idioma}
+                roteiroId={roteiro.id}
+                onUsar={setTexto}
+              >
+                <textarea
+                  id={`texto-${dia.data}`}
+                  value={texto}
+                  onChange={(e) => setTexto(e.target.value)}
+                  readOnly={enviado}
+                  rows={20}
+                  maxLength={8000}
+                  className={cx(inputCls, "resize-y font-[inherit] leading-[1.55]", enviado && "bg-fundo text-cinza")}
+                />
+              </ComReescrita>
               {enviado && <p className="mt-1.5 text-[13px] text-cinza">Daily já enviado: desfaça o envio para editar.</p>}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {!enviado && (

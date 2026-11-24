@@ -1,13 +1,27 @@
 "use server";
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { nomesDaSaudacao, textoDoDaily } from "@/domain/daily";
 import { comPerfil, ehUuid } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
-import { clientes, dailies, pessoas, roteiros, usuarios, viagemPassageiros, viagens } from "@/server/db/schema";
+import { dailies, roteiros, usuarios, viagens } from "@/server/db/schema";
+import {
+  CONCORRENCIA,
+  conferirVersao,
+  ehFalha,
+  gerarDailyNaTransacao,
+  inserirDoDia,
+  JA_ENVIADO,
+  NAO_ENCONTRADO,
+  NAO_VENDIDA,
+  roteiroDoDia,
+  semId,
+  travarDoDia,
+  type DailyDb,
+  type Falha,
+} from "@/server/operacao/dailies";
 import { regrasVigentes } from "@/server/queries/regras";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
@@ -16,20 +30,7 @@ import { regrasVigentes } from "@/server/queries/regras";
 // (revisado, enviado, desfazer) gravam só as próprias colunas, para não invalidar um texto aberto na tela.
 // Nenhuma recusa pela data (D26): a data só escolhe o botão na tela.
 
-type Falha = { ok: false; erro: string; campos?: Record<string, string>; conflito?: true };
 type Gravado = { ok: true; id: string; atualizadoEm: string };
-
-const SEM_ROTEIRO: Falha = { ok: false, erro: "Crie o roteiro antes dos dailies" };
-const FORA_DO_ROTEIRO: Falha = { ok: false, erro: "Dia fora do roteiro" };
-const NAO_VENDIDA: Falha = { ok: false, erro: "A viagem ainda não foi vendida" };
-const NAO_ENCONTRADO: Falha = { ok: false, erro: "Daily não encontrado" };
-const JA_ENVIADO: Falha = { ok: false, erro: "Daily já enviado: desfaça o envio para editar" };
-const CONCORRENCIA: Falha = { ok: false, erro: "Este daily foi alterado por outra pessoa. Recarregue a página.", conflito: true };
-
-type DailyDb = typeof dailies.$inferSelect;
-type RoteiroDb = typeof roteiros.$inferSelect;
-
-const ehFalha = (x: unknown): x is Falha => typeof x === "object" && x !== null && "ok" in x && (x as Falha).ok === false;
 
 const codigoDe = (e: unknown): string | undefined => {
   const x = e as { code?: string; cause?: { code?: string } } | null;
@@ -41,13 +42,6 @@ function erroDeBanco(mensagem: string, e: unknown): Error {
   console.error(mensagem, { code: codigoDe(e) });
   return new Error(mensagem);
 }
-
-const semId = (r: DailyDb) => Object.fromEntries(Object.entries(r).filter(([k]) => k !== "id"));
-
-const conferirVersao = (d: DailyDb, esperado: string | undefined) =>
-  !!esperado && new Date(esperado).getTime() === d.atualizadoEm.getTime();
-
-const ehData = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 const textoSchema = z.string().trim().min(1, "Escreva a mensagem").max(8000, "Texto muito longo");
 const internoSchema = z.object({
@@ -61,63 +55,6 @@ function revalidar(viagemId: string) {
 }
 
 /**
- * Roteiro lido `for share` e a viagem dele, vendida e não excluída; a data precisa ser um dia do roteiro. O lock
- * compartilhado faz um `salvarRoteiro` concorrente (que trava o roteiro `for update`) esperar o fim desta transação,
- * então o texto gerado nunca sai de um conteúdo já substituído sem o aviso de "roteiro mudou". Sem ciclo de locks:
- * ninguém trava um daily e depois o roteiro.
- */
-async function roteiroDoDia(tx: Transacao, roteiroId: string, data: string): Promise<{ r: RoteiroDb } | Falha> {
-  if (!ehUuid(roteiroId)) return SEM_ROTEIRO;
-  const [r] = await tx.select().from(roteiros).where(eq(roteiros.id, roteiroId)).for("share");
-  if (!r) return SEM_ROTEIRO;
-  const [v] = await tx
-    .select({ status: viagens.status })
-    .from(viagens)
-    .where(and(eq(viagens.id, r.viagemId), isNull(viagens.excluidoEm)));
-  if (!v) return SEM_ROTEIRO;
-  if (v.status !== "vendida") return NAO_VENDIDA;
-  if (!ehData(data) || !r.conteudo.dias.some((d) => d.data === data)) return FORA_DO_ROTEIRO;
-  return { r };
-}
-
-/** Linha do dia travada, ou null se ainda não existe. */
-async function travarDoDia(tx: Transacao, roteiroId: string, data: string): Promise<DailyDb | null> {
-  const [d] = await tx
-    .select()
-    .from(dailies)
-    .where(and(eq(dailies.roteiroId, roteiroId), eq(dailies.data, data)))
-    .for("update");
-  return d ?? null;
-}
-
-/**
- * Cria a linha do dia; se outra pessoa a criou no meio tempo (índice único), é conflito. Devolve a linha criada.
- */
-async function inserirDoDia(tx: Transacao, valores: typeof dailies.$inferInsert): Promise<DailyDb | Falha> {
-  const [novo] = await tx.insert(dailies).values(valores).onConflictDoNothing({ target: [dailies.roteiroId, dailies.data] }).returning();
-  return novo ?? CONCORRENCIA;
-}
-
-/** Primeiros nomes dos passageiros (pessoas não removidas, ordem do cadastro) ou o nome do grupo. */
-async function nomesDaViagem(tx: Transacao, viagemId: string): Promise<string> {
-  const [c] = await tx
-    .select({ grupo: clientes.grupo })
-    .from(viagens)
-    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
-    .where(eq(viagens.id, viagemId));
-  const ps = await tx
-    .select({ nome: pessoas.nome })
-    .from(viagemPassageiros)
-    .innerJoin(pessoas, eq(pessoas.id, viagemPassageiros.pessoaId))
-    .where(and(eq(viagemPassageiros.viagemId, viagemId), isNull(pessoas.removidoEm)))
-    .orderBy(asc(pessoas.ordem), asc(pessoas.nome));
-  return nomesDaSaudacao(
-    ps.map((p) => p.nome),
-    c?.grupo ?? "",
-  );
-}
-
-/**
  * Monta o texto do dia com o modelo (`textoDoDaily`) e o encerramento vigente e grava `estado = gerado`. Cria a linha
  * se ainda não existe; se existe (pendente, ou "Gerar de novo"), exige `atualizadoEmEsperado`. Daily enviado recusa.
  */
@@ -127,37 +64,7 @@ export async function gerarDaily(roteiroId: string, data: string, atualizadoEmEs
     const encerramento = (await regrasVigentes()).valores.encerramentoDaily;
     let r: { viagemId: string; d: DailyDb } | Falha;
     try {
-      r = await db.transaction(async (tx) => {
-        const x = await roteiroDoDia(tx, roteiroId, data);
-        if (ehFalha(x)) return x;
-        const dia = x.r.conteudo.dias.find((d) => d.data === data)!;
-        const texto = textoDoDaily({
-          data,
-          idioma: x.r.idioma,
-          nomes: await nomesDaViagem(tx, x.r.viagemId),
-          dia,
-          hoteis: x.r.conteudo.hoteis,
-          encerramento,
-        });
-        const agora = new Date();
-        const colunas = { estado: "gerado" as const, texto, geradoEm: agora, geradoPor: usuario.id, atualizadoEm: agora };
-        const antes = await travarDoDia(tx, roteiroId, data);
-        if (!antes) {
-          const novo = await inserirDoDia(tx, { roteiroId, data, ...colunas });
-          if (ehFalha(novo)) return novo;
-          await registrarAuditoria(tx, { usuarioId: usuario.id, tabela: "dailies", registroId: novo.id, acao: "criar", depois: semId(novo) });
-          return { viagemId: x.r.viagemId, d: novo };
-        }
-        if (antes.estado === "enviado") return JA_ENVIADO;
-        if (!conferirVersao(antes, atualizadoEmEsperado)) return CONCORRENCIA;
-        const [depois] = await tx
-          .update(dailies)
-          .set({ ...colunas, revisadoEm: null, revisadoPor: null })
-          .where(eq(dailies.id, antes.id))
-          .returning();
-        await registrarAuditoria(tx, { usuarioId: usuario.id, tabela: "dailies", registroId: antes.id, acao: "alterar", antes: semId(antes), depois: semId(depois) });
-        return { viagemId: x.r.viagemId, d: depois };
-      });
+      r = await db.transaction((tx) => gerarDailyNaTransacao(tx, { roteiroId, data, usuarioId: usuario.id, encerramento, atualizadoEmEsperado }));
     } catch (e) {
       throw erroDeBanco("Erro ao gerar o daily", e);
     }

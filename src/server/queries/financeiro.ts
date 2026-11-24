@@ -96,7 +96,7 @@ export type LinhaLancamento = {
   forma: string;
   exigeIndividual: boolean;
   repasse: boolean;
-  /** Compra numa fatura do cartão corporativo (só aparece cancelada: a ativa sai pela linha da fatura). */
+  /** Compra numa fatura do cartão corporativo (só aparece cancelada ou com `compras = "incluir"`: senão sai pela linha da fatura). */
   faturaCartaoId: string | null;
   situacao: Situacao;
   categoria: { grupo: string; nome: string };
@@ -110,7 +110,7 @@ export type LinhaLancamento = {
 export type ListaLancamentos = { linhas: LinhaLancamento[]; totalLinhas: number; totais: TotaisLancamentos };
 
 /** Situação derivada (nunca gravada): cancelada, baixada, vencida (< hoje), vence hoje, a vencer. */
-const situacaoSql = (hoje: string) => sql<Situacao>`(case
+export const situacaoSql = (hoje: string) => sql<Situacao>`(case
   when ${lf.statusBase} = 'cancelado' then 'cancelada'
   when ${lf.statusBase} = 'baixado' then 'baixada'
   when ${lf.vencimento} < ${hoje}::date then 'vencida'
@@ -135,10 +135,11 @@ const escaparLike = (t: string) => t.replace(/[\\%_]/g, (c) => `\\${c}`);
  * Filtros comuns à lista, à contagem e aos totais (sem lado, situação e período). As compras de uma fatura do
  * cartão corporativo (`fatura_cartao_id`) não aparecem: a lista mostra a linha da fatura no lugar delas. A cancelada
  * (pagamento de conta cancelada, que não conta na fatura) continua visível no filtro Canceladas.
+ * Com `compras = "incluir"` (o detalhe de uma categoria da DRE, por competência) as compras aparecem uma a uma.
  * Origem "viagem" = parcelas, pagamentos e comissões; "manual" = o resto (lançamentos à mão e faturas do cartão).
  */
 function filtrosComuns(f: FiltroLancamentos): SQL[] {
-  const c: SQL[] = [or(isNull(lf.faturaCartaoId), eq(lf.statusBase, "cancelado"))!];
+  const c: SQL[] = f.compras === "incluir" ? [] : [or(isNull(lf.faturaCartaoId), eq(lf.statusBase, "cancelado"))!];
   if (f.categoriaId) c.push(eq(lf.categoriaId, f.categoriaId));
   if (f.grupo) c.push(eq(categoriasFinanceiras.grupo, f.grupo));
   if (f.centro) c.push(eq(lf.centro, f.centro));

@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { Search } from "lucide-react";
-import { Card, PageHeader, inputCls } from "@/components/ui";
+import { Card, PageHeader } from "@/components/ui";
 import { exigirPerfil } from "@/server/auth";
 import { listarClientes, obterCliente } from "@/server/queries/clientes";
 import { FormularioOrcamento } from "../formulario";
 
 type Busca = { cliente?: string | string[]; busca?: string | string[] };
 const um = (v?: string | string[]) => (Array.isArray(v) ? v[0] : v) ?? "";
+// Não importar `inputCls` de "@/components/ui": o módulo é "use client" e, numa página de servidor, a constante vira referência de cliente.
+const campoCls = "w-full rounded-[5px] border border-[#C9CDD1] bg-white px-3 py-2 text-[14px] text-texto outline-none focus:border-verde";
 
 export default async function Pagina({ searchParams }: { searchParams: Promise<Busca> }) {
   const sp = await searchParams;
@@ -45,7 +47,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<B
       <form method="get" className="mb-4 flex items-center gap-3">
         <label className="flex flex-1 items-center gap-2 rounded-[5px] border border-[#C9CDD1] bg-white px-3 py-2 focus-within:border-verde">
           <Search size={16} className="text-cinza" />
-          <input name="busca" aria-label="Buscar cliente" defaultValue={busca} placeholder="Nome, CPF, telefone ou código" className={`${inputCls} !border-0 !p-0`} />
+          <input name="busca" aria-label="Buscar cliente" defaultValue={busca} placeholder="Nome, CPF, telefone ou código" className={`${campoCls} !border-0 !p-0`} />
         </label>
         <button type="submit" className="cursor-pointer rounded-[5px] border border-[#C9CDD1] px-3.5 py-2 text-[14px] font-semibold text-texto hover:border-verde hover:text-verde">Buscar</button>
       </form>

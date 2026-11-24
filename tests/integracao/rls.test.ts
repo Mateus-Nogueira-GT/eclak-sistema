@@ -151,6 +151,17 @@ describe("RLS: anon não lê nada", () => {
     await sql`insert into tarefas (viagem_id, categoria, item, ordem) values (${v.id}, 'conferir', 'Teste', 1)`;
     const [rot] = await sql`insert into roteiros (viagem_id, idioma, fuso, conteudo) values (${v.id}, 'italiano', 'Europe/Rome', '{"dias":[],"hoteis":[],"voos":[]}') returning id`;
     await sql`insert into dailies (roteiro_id, data) values (${rot.id}, '2027-08-14')`;
+    // Conciliação (fatia 6b): um extrato e uma transação.
+    const [ext] = await sql`insert into extratos (conta_bancaria_id, arquivo_nome, arquivo_hash, transacoes, repetidas, importado_por)
+              values (${cb.id}, 'teste.ofx', 'hash-rls', 1, 0, ${u.id}) returning id`;
+    await sql`insert into extrato_transacoes (extrato_id, conta_bancaria_id, fitid, data, valor, descricao)
+              values (${ext.id}, ${cb.id}, 'F1', '2027-01-10', 100, 'Teste')`;
+    // Integrações (fatia 6c): um envio na fila.
+    await sql`insert into integracao_envios (integracao, tipo, viagem_id, chave, payload)
+              values ('trello', 'cartao_viagem', ${v.id}, ${"venda:" + v.id}, '{}')`;
+    // IA (fatia 6c): um uso registrado.
+    await sql`insert into ia_usos (usuario_id, recurso, modelo, tokens_entrada, tokens_saida)
+              values (${u.id}, 'reescrever:dica', 'claude-opus-5-5', 10, 5)`;
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from lancamentos_financeiros`;
     expect(n).toBeGreaterThan(0);
   });
@@ -184,6 +195,10 @@ describe("RLS: anon não lê nada", () => {
     "tarefas",
     "roteiros",
     "dailies",
+    "extratos",
+    "extrato_transacoes",
+    "integracao_envios",
+    "ia_usos",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
@@ -192,7 +207,7 @@ describe("RLS: anon não lê nada", () => {
   }
 
   it("tabelas do financeiro com RLS ligado", async () => {
-    const tabelas = ["categorias_financeiras", "contas_bancarias", "lancamentos", "faturas_contador", "faturas", "faturas_versoes", "anexos", "notas_fiscais", "cartoes_corporativos", "faturas_cartao"];
+    const tabelas = ["categorias_financeiras", "contas_bancarias", "lancamentos", "faturas_contador", "faturas", "faturas_versoes", "anexos", "notas_fiscais", "cartoes_corporativos", "faturas_cartao", "extratos", "extrato_transacoes"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
@@ -200,6 +215,13 @@ describe("RLS: anon não lê nada", () => {
 
   it("tabelas da operação com RLS ligado", async () => {
     const tabelas = ["tarefas", "roteiros", "dailies"];
+    const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
+      select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
+    expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
+  });
+
+  it("tabelas das integrações com RLS ligado", async () => {
+    const tabelas = ["integracao_envios", "ia_usos"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
