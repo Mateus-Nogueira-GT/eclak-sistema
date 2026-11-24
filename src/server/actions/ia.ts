@@ -9,6 +9,7 @@ import { db } from "@/server/db/client";
 import { iaUsos, pessoas, roteiros, viagemPassageiros, viagens } from "@/server/db/schema";
 import { ErroIntegracao } from "@/server/integracoes/http";
 import { provedorIA } from "@/server/integracoes/ia";
+import { ERRO_DA_CLASSE } from "@/server/ia/erros";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint). Qualquer usuário ativo.
 // "Reescrever com IA": nada é gravado no roteiro nem no daily (a pessoa decide usar e depois salva). O texto sai daqui
@@ -24,14 +25,6 @@ const DESLIGADA: Falha = { ok: false, erro: "A IA não está configurada" };
 const SEM_RESPOSTA: Falha = { ok: false, erro: "A IA não respondeu a este pedido" };
 const ROTEIRO_NAO_ENCONTRADO: Falha = { ok: false, erro: "Roteiro não encontrado" };
 const LONGA_DEMAIS: Falha = { ok: false, erro: "A sugestão passou do tamanho do campo. Tente de novo." };
-
-const ERRO_DA_CLASSE: Record<ErroIntegracao["classe"], string> = {
-  rede: "Sem conexão com a IA agora. Tente de novo em instantes.",
-  limite: "Limite de uso da IA atingido. Tente de novo em alguns minutos.",
-  autenticacao: "A chave da IA foi recusada. Avise o Diretor.",
-  recusado: "A IA recusou o pedido. Tente de novo.",
-  servidor: "A IA não respondeu agora. Tente de novo em instantes.",
-};
 
 /** Tamanho máximo de cada campo (a sugestão precisa caber nele). */
 const LIMITE: Record<Finalidade, number> = { abertura: 4000, dica: 1000, porque: 1000, daily: 8000 };

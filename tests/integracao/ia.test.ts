@@ -171,6 +171,33 @@ describe("adaptador Claude (SDK com fetch falso)", () => {
     const { f } = apiFalsa("rede");
     await expect(provedorClaude(CFG, { fetch: f }).responder(pedido)).rejects.toMatchObject({ classe: "rede", status: null });
   });
+
+  it.each(["AbortError", "TimeoutError"])("%s cru durante a leitura do corpo vira rede", async (nome) => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // Cabeçalhos chegam (200), o corpo é abortado no meio: o SDK repassa o erro do stream sem embrulhar.
+    const f = (async () =>
+      new Response(
+        new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode('{"id":"msg'));
+            c.error(new DOMException("abortado", nome));
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      )) as typeof fetch;
+    await expect(provedorClaude(CFG, { fetch: f }).responder(pedido)).rejects.toMatchObject({ classe: "rede", status: null });
+  });
+
+  it("prazo do pedido (prazoMs) encurta o prazo total", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = ((_: unknown, init?: RequestInit) =>
+      new Promise<Response>((_ok, falha) => {
+        init?.signal?.addEventListener("abort", () => falha(init.signal?.reason ?? new DOMException("abortado", "AbortError")));
+      })) as typeof fetch;
+    const inicio = Date.now();
+    await expect(provedorClaude(CFG, { fetch: f }).responder({ ...pedido, prazoMs: 50 })).rejects.toMatchObject({ classe: "rede" });
+    expect(Date.now() - inicio).toBeLessThan(2000);
+  });
 });
 
 describe("provedorIA", () => {

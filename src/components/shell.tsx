@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
-import { LogOut } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { LogOut, MessagesSquare } from "lucide-react";
 import { podeAcessar, ROTAS_POR_PERFIL, type Perfil } from "@/domain/perfis";
 import { sair } from "@/app/(app)/actions";
+import { ChatIA } from "./chat-ia";
 import { cx } from "./ui";
 
 type Item = { href: string; label: string };
@@ -66,14 +67,18 @@ export function Shell({
   perfil,
   nome,
   perfilNome,
+  iaLigada,
   children,
 }: {
   perfil: Perfil;
   nome: string;
   perfilNome: string;
+  /** IA configurada no servidor: só então o botão do chat aparece. */
+  iaLigada: boolean;
   children: ReactNode;
 }) {
   const path = usePathname();
+  const [chatAberto, setChatAberto] = useState(false);
   const visiveis = areas
     .map((a) => ({ ...a, itens: a.itens.filter((i) => podeAcessar(perfil, i.href)) }))
     .filter((a) => a.itens.length);
@@ -100,6 +105,16 @@ export function Shell({
               })}
             </nav>
             <div className="ml-auto flex items-center gap-3">
+              {iaLigada && (
+                <button
+                  type="button"
+                  onClick={() => setChatAberto(true)}
+                  aria-expanded={chatAberto}
+                  className="flex cursor-pointer items-center gap-2 rounded-[5px] border border-linha px-3 py-1.5 text-[14px] font-medium text-verde hover:bg-fundo"
+                >
+                  <MessagesSquare size={16} /> Chat com IA
+                </button>
+              )}
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-verde text-[13px] font-bold text-white">{nome[0]}</span>
               <span className="hidden text-left leading-tight md:block">
                 <span className="block text-[13.5px] font-bold text-texto">{nome}</span>
@@ -126,6 +141,7 @@ export function Shell({
           </nav>
         </div>
       </header>
+      {iaLigada && <ChatIA aberto={chatAberto} onFechar={() => setChatAberto(false)} perfilNome={perfilNome} />}
       <main className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-4 pb-20 pt-6 md:px-8 md:pt-9 print:max-w-none print:p-0">{children}</main>
     </div>
   );

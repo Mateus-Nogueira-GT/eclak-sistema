@@ -21,6 +21,8 @@ export type PedidoIA = {
   esforco: EsforcoIA;
   /** Padrão 4000. */
   maxTokens?: number;
+  /** Prazo deste pedido em ms; nunca passa de `PRAZO_IA_MS` (o chat usa para caber no prazo da conversa). */
+  prazoMs?: number;
 };
 
 export type RespostaIA = {
@@ -59,6 +61,8 @@ function classeDoErro(e: unknown): ErroIntegracao {
   if (e instanceof Anthropic.APIConnectionError) return new ErroIntegracao("rede", null);
   // Prazo total estourado (o sinal de `AbortSignal.timeout` abortou o pedido): também é `rede`.
   if (e instanceof Anthropic.APIUserAbortError) return new ErroIntegracao("rede", null);
+  // O sinal abortou durante a leitura do corpo (cabeçalhos já chegaram): o SDK repassa o erro cru do stream.
+  if (e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError")) return new ErroIntegracao("rede", null);
   if (e instanceof Anthropic.APIError && typeof e.status === "number") return new ErroIntegracao(classificarStatus(e.status), e.status);
   return new ErroIntegracao("servidor", null);
 }
@@ -93,7 +97,7 @@ export function provedorClaude(cfg: ConfigIA, opcoes: { fetch?: Buscar; timeoutM
             messages: p.mensagens,
             ...(p.ferramentas?.length ? { tools: p.ferramentas, tool_choice: { type: "auto" as const } } : {}),
           },
-          { signal: AbortSignal.timeout(opcoes.prazoMs ?? PRAZO_IA_MS) },
+          { signal: AbortSignal.timeout(Math.min(p.prazoMs ?? PRAZO_IA_MS, opcoes.prazoMs ?? PRAZO_IA_MS)) },
         );
       } catch (e) {
         const erro = classeDoErro(e);
