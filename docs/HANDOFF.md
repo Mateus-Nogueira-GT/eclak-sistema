@@ -279,6 +279,7 @@ Teste de auditoria sem `orderBy`; sem teste de concorrência no "esta e as próx
 - O sinal do valor vem só de `TRNAMT`; `TRNTYPE` (DEBIT/CREDIT) é guardado mas não usado para conferir o sinal.
 - `desfazerImportacao` audita transação por transação (um INSERT de auditoria por linha): extrato com milhares de transações fica lento.
 - A confirmação de "outra conta" compara com todos os extratos anteriores da conta: conta que recebe de propósito extratos de dois bancos pergunta em toda importação.
+- Desfazer um extrato apaga também as transações que um extrato posterior sobreposto contou como "repetidas" (o posterior não guardou cópia própria). Para recuperá-las, reimporte o arquivo desfeito (se estava certo) ou desfaça também o posterior e reimporte os dois. No uso principal (arquivo da conta errada) os FITIDs não colidem.
 
 Outras pendências menores acumuladas (não bloqueiam): teste de RLS aceita qualquer erro; `comSessao` nos testes depende de `fileParallelism: false`; auditoria guarda CPF/passaporte (anotar na política de LGPD); trava global de CPF serializa cadastros; telefones só brasileiros; lista de orçamentos sem paginação; sugestão de custo de referência conta cotações, não itens; "Passeio guiado" virou "Passeio" no tipo de item; validação de data duplicada entre formulário e domínio de regras.
 
