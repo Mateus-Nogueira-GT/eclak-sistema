@@ -278,3 +278,18 @@ export const cartaoSchema = z.strictObject({
   centro,
 });
 export type CartaoValidado = z.output<typeof cartaoSchema>;
+
+// ---------- Conciliação do extrato OFX (fatia 6b) ----------
+
+export const MSG_MOTIVO_IGNORAR = "Informe o motivo (3 a 200 caracteres)";
+const MSG_CATEGORIA = "Escolha a categoria";
+
+/** Lançamento criado a partir de uma transação do extrato: o resto (lado, valor, datas, conta) vem da transação. */
+export const lancamentoDaTransacaoSchema = z.strictObject({
+  categoriaId: z.string({ error: MSG_CATEGORIA }).uuid(MSG_CATEGORIA),
+  descricao: obrigatorio("Informe a descrição", 200),
+  centro,
+});
+
+/** Motivo de ignorar uma transação do extrato. */
+export const motivoIgnorarSchema = z.string({ error: MSG_MOTIVO_IGNORAR }).trim().min(3, MSG_MOTIVO_IGNORAR).max(200, MSG_MOTIVO_IGNORAR);
