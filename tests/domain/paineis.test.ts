@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  diferencaPp,
   intervaloAnterior,
   intervaloDeMeses,
   intervaloDoPeriodo,
@@ -7,6 +8,7 @@ import {
   montarDre,
   ordenarAvisos,
   paraCsv,
+  pctAbaixoDe,
   RESPONSAVEL_AVISO,
   variacaoPct,
   type Aviso,
@@ -156,5 +158,22 @@ describe("paraCsv", () => {
   });
   it("centavos negativos pequenos", () => {
     expect(paraCsv(["v"], [[-5n]])).toContain("-0,05");
+  });
+});
+
+describe("diferencaPp e pctAbaixoDe", () => {
+  it("diferença com sinal e uma casa, aceitando 1 ou 3 casas", () => {
+    expect(diferencaPp("12.5", "19.0")).toBe("-6.5");
+    expect(diferencaPp("19.0", "12.5")).toBe("6.5");
+    expect(diferencaPp("-3.2", "4.0")).toBe("-7.2");
+    expect(diferencaPp("10.0", "10.000")).toBe("0.0");
+    expect(diferencaPp("10.0", "9.975")).toBe("0.0");
+    expect(diferencaPp("10.0", "9.949")).toBe("0.1");
+  });
+  it("compara percentuais com sinal", () => {
+    expect(pctAbaixoDe("18.9", "19.000")).toBe(true);
+    expect(pctAbaixoDe("19.0", "19.000")).toBe(false);
+    expect(pctAbaixoDe("-1.0", "0.0")).toBe(true);
+    expect(() => pctAbaixoDe("abc", "1")).toThrow();
   });
 });

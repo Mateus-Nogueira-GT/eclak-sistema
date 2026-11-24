@@ -1,3 +1,4 @@
+import { arredondar } from "./decimal";
 import { pct1 } from "./precificacao";
 import { diasNoMes, lerData, somarDias, somarMeses } from "./venda";
 
@@ -98,6 +99,26 @@ export function margemPonderada(itens: { final: bigint; receita: bigint }[]): st
     receita += i.receita;
   }
   return receita === 0n ? null : pct1(final, receita);
+}
+
+/** Percentual em texto com sinal ("-5.3", "19.000") → milésimos de ponto (inteiro). */
+function milesimosPct(p: string): bigint {
+  const r = /^(-?)(\d+)(?:\.(\d{1,3}))?$/.exec(p.trim());
+  if (!r) throw new Error("Percentual inválido");
+  const v = BigInt(r[2]) * 1000n + BigInt((r[3] ?? "").padEnd(3, "0"));
+  return r[1] ? -v : v;
+}
+
+/** Diferença `a − b` em pontos percentuais, com uma casa ("-2.5"). */
+export function diferencaPp(a: string, b: string): string {
+  const d = arredondar(milesimosPct(a) - milesimosPct(b), 100n);
+  const abs = d < 0n ? -d : d;
+  return `${d < 0n ? "-" : ""}${abs / 10n}.${abs % 10n}`;
+}
+
+/** `a` < `b`, comparando percentuais em texto ("12.5" < "19.000"). */
+export function pctAbaixoDe(a: string, b: string): boolean {
+  return milesimosPct(a) < milesimosPct(b);
 }
 
 export type LinhaEmpresaDre = { lado: "pagar" | "receber"; grupo: string; categoria: string; categoriaId: string; valor: bigint };
