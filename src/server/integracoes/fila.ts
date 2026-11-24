@@ -15,6 +15,7 @@ import { db, type Transacao } from "@/server/db/client";
 import { integracaoEnvios, type ErroEnvio } from "@/server/db/schema";
 import { estadoIntegracao } from "./config";
 import { ErroIntegracao, type Buscar } from "./http";
+import { processarTrello } from "./trello";
 
 // Fila de envios às integrações (outbox). `enfileirar` roda na transação do evento; `processarFila` toma os envios
 // numa transação curta (FOR UPDATE SKIP LOCKED → `enviando`), faz a chamada externa FORA de qualquer transação e
@@ -55,8 +56,8 @@ export type DepsProcessador = {
  */
 export type Processador = (envio: EnvioTomado, deps: DepsProcessador) => Promise<unknown>;
 
-// Preenchido pelas integrações (Tasks 2 e 3 da fatia 6c). Integração sem processador não é tomada da fila.
-const PROCESSADORES: Partial<Record<IntegracaoFila, Processador>> = {};
+// Integração sem processador não é tomada da fila (o Drive entra na Task 3 da fatia 6c).
+const PROCESSADORES: Partial<Record<IntegracaoFila, Processador>> = { trello: processarTrello };
 
 const substitutos = new Map<IntegracaoFila, Processador | null>();
 
@@ -81,14 +82,17 @@ export type EventoFila = {
 
 /**
  * Põe o envio na fila, na transação do evento. Só quando a integração está configurada agora (nada acumula enquanto
- * desligada). A mesma `chave` na mesma integração não entra de novo (idempotência).
+ * desligada). A mesma `chave` na mesma integração não entra de novo (idempotência). Devolve o id do envio criado,
+ * ou null quando nada entrou (desligada ou a chave já estava na fila).
  */
-export async function enfileirar(tx: Transacao, e: EventoFila): Promise<void> {
-  if (!estadoIntegracao(e.integracao).configurada) return;
-  await tx
+export async function enfileirar(tx: Transacao, e: EventoFila): Promise<string | null> {
+  if (!estadoIntegracao(e.integracao).configurada) return null;
+  const [l] = await tx
     .insert(t)
     .values({ integracao: e.integracao, tipo: e.tipo, viagemId: e.viagemId, chave: e.chave, payload: e.payload })
-    .onConflictDoNothing({ target: [t.integracao, t.chave] });
+    .onConflictDoNothing({ target: [t.integracao, t.chave] })
+    .returning({ id: t.id });
+  return l?.id ?? null;
 }
 
 function erroDe(e: unknown): ErroEnvio {

@@ -42,6 +42,7 @@ import {
   versoesPrecificacao,
   viagens,
 } from "@/server/db/schema";
+import { agendarEnvios, enfileirarCartaoDaViagem } from "@/server/integracoes/eventos";
 import { criarTarefasAutomaticas } from "@/server/operacao/tarefas-automaticas";
 import { regrasDaVersao } from "@/server/queries/regras";
 import { travarViagem } from "@/server/trava-viagem";
@@ -183,6 +184,7 @@ export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): P
     const e = p.data;
 
     let r: { id: string } | Falha;
+    let enfileirou = false;
     try {
       r = await db.transaction(async (tx) => {
         const t = await travarAprovada(tx, viagemId, JA_VENDIDA);
@@ -320,7 +322,10 @@ export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): P
 
         await mudarViagem(tx, usuario.id, v, { status: "vendida", vendidaEm: agora }, agora);
         // As 5 tarefas da venda nascem na mesma transação (viagem travada); "venda" = o dia de `vendidaEm` em Cuiabá.
-        await criarTarefasAutomaticas(tx, usuario.id, v, tarefasDaVenda(hojeEmCuiaba(agora), v.inicio), "venda");
+        const daVenda = tarefasDaVenda(hojeEmCuiaba(agora), v.inicio);
+        await criarTarefasAutomaticas(tx, usuario.id, v, daVenda, "venda");
+        // Cartão no Trello (se ligado): entra na fila nesta transação; a chamada vai depois do commit.
+        enfileirou = (await enfileirarCartaoDaViagem(tx, viagemId, daVenda.map((x) => x.item))) !== null;
         return { id: venda.id };
       });
     } catch (x) {
@@ -329,6 +334,7 @@ export async function fecharVenda(viagemId: string, dados: FechamentoEntrada): P
     }
     if (ehFalha(r)) return r;
     revalidar(viagemId);
+    if (enfileirou) agendarEnvios();
     return { ok: true, id: r.id };
   });
 }
