@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Card, CardHeader, PageHeader, inputCls } from "@/components/ui";
+import { Card, CardHeader, PageHeader } from "@/components/ui";
 import { rotuloMes, rotuloPeriodoMeses, RELATORIOS, RELATORIOS_TIPOS } from "@/domain/paineis";
 import { somarMeses } from "@/domain/venda";
 import { ErroAcesso } from "@/server/auth";
@@ -8,6 +8,9 @@ import { carregarRelatorio, parametrosDoRelatorio, type RelatorioCarregado } fro
 import { relatorioConsultores } from "@/server/queries/paineis";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { TabelaRelatorio } from "./tabelas";
+
+// Não importar `inputCls` de "@/components/ui": o módulo é "use client" e, numa página de servidor, a constante vira referência de cliente.
+const campoCls = "rounded-[5px] border border-[#C9CDD1] bg-white px-3 py-2 text-[14px] text-texto outline-none focus:border-verde";
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 
@@ -63,13 +66,13 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
             <input type="hidden" name="rel" value={rel} />
             <label className="text-[13px] text-cinza">
               De
-              <select name="de" defaultValue={periodo.de} className={cx(inputCls, "mt-1 !w-auto")}>
+              <select name="de" defaultValue={periodo.de} className={cx(campoCls, "mt-1")}>
                 {meses.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
               </select>
             </label>
             <label className="text-[13px] text-cinza">
               Até
-              <select name="ate" defaultValue={periodo.ate} className={cx(inputCls, "mt-1 !w-auto")}>
+              <select name="ate" defaultValue={periodo.ate} className={cx(campoCls, "mt-1")}>
                 {meses.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
               </select>
             </label>

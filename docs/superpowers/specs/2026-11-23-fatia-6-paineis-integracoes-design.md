@@ -82,7 +82,7 @@ Mostra até 8; se houver mais, "e mais N avisos", cada grupo com seu link. Sem a
 | Contas a pagar | linhas a pagar com vencimento no período, não canceladas: vencimento, pessoa, descrição, categoria, origem, valor, situação; total por situação | lista filtrada / viagem |
 | Contas a receber | idem, a receber | idem |
 | Volume por banco | por conta bancária: entradas, saídas e saldo do período (baixas no período) + saldo atual | lista filtrada pela conta e pela data da baixa |
-| Margem por viagem | viagens com aceite no período: código, cliente, destino, preço, margem planejada, margem real, diferença em pontos | viagem |
+| Margem por viagem | viagens com aceite no período: código, cliente, destino, valor vendido (o mesmo número da tela da viagem), margem planejada, margem real, diferença em pontos | viagem |
 | Vendas por consultor | por consultor da viagem: viagens fechadas, valor vendido, margem real média (ponderada pela receita) | Margem por viagem filtrada |
 
 Exportar: "Planilha" baixa CSV (UTF-8 com BOM, `;` como separador, valores em reais com vírgula, para abrir direto no Excel em pt-BR); "PDF" abre a versão para impressão do mesmo relatório.

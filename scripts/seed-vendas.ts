@@ -239,7 +239,8 @@ async function semearRibeiro(sql: Sql, ctx: Contexto, contaBancariaId: string): 
       alteracao: "Primeira versão do roteiro.",
     },
     async (tx, c) => {
-      const aceiteEm = somarDias(hoje, -50);
+      // Aceite nos últimos 30 dias (e no mês corrente): a Visão geral e a DRE do mês têm o que mostrar.
+      const aceiteEm = somarDias(hoje, -20);
       const l = await fechar(tx, ctx, c, cli.id, {
         aceiteEm,
         faturaNome: "Ricardo Ribeiro",
