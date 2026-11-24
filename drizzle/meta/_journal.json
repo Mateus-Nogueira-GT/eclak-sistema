@@ -302,6 +302,20 @@
       "when": 1795515665229,
       "tag": "0042_integracao_envios_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795521861362,
+      "tag": "0043_ia_usos",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795521861976,
+      "tag": "0044_ia_usos_rls",
+      "breakpoints": true
     }
   ]
 }

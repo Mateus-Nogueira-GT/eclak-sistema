@@ -12,3 +12,4 @@ export * from "./cartoes";
 export * from "./operacao";
 export * from "./conciliacao";
 export * from "./integracoes";
+export * from "./ia";

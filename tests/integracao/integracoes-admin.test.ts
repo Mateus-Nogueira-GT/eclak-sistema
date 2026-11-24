@@ -129,6 +129,7 @@ describe("obterIntegracoes", () => {
     }
     expect(por.trello.testavel).toBe(true);
     expect(por.drive.testavel).toBe(true);
+    expect(por.ia.testavel).toBe(true);
     expect(por.hotelaria.testavel).toBe(false);
     expect(por.agendador.testavel).toBe(false);
     expect(r.fila).toEqual({ pendentes: [], falhas: [], enviadosRecentes: [] });
