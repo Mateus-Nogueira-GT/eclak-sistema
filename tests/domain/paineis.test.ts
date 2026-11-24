@@ -13,6 +13,8 @@ import {
   ordenarAvisos,
   paraCsv,
   pctAbaixoDe,
+  RELATORIOS,
+  RELATORIOS_TIPOS,
   RESPONSAVEL_AVISO,
   variacaoPct,
   type Aviso,
@@ -149,6 +151,11 @@ describe("ordenarAvisos", () => {
     const r = ordenarAvisos([av("aprovacao", "1"), av("pagar", "2"), av("caixa", "3"), av("margem", "4"), av("caixa", "5"), av("comissao", "6"), av("parcela", "7")]);
     expect(r.map((a) => a.titulo)).toEqual(["3", "5", "4", "7", "6", "2", "1"]);
   });
+  it("conciliação fica entre pagar e aprovação, com o Financeiro como responsável", () => {
+    const r = ordenarAvisos([av("aprovacao", "1"), av("conciliacao", "2"), av("pagar", "3"), av("caixa", "4")]);
+    expect(r.map((a) => a.titulo)).toEqual(["4", "3", "2", "1"]);
+    expect(RESPONSAVEL_AVISO.conciliacao).toBe("Financeiro");
+  });
   it("responsável por tipo", () => {
     expect(RESPONSAVEL_AVISO.caixa).toBe("Gestão");
     expect(RESPONSAVEL_AVISO.margem).toBe("Gestão");
@@ -248,6 +255,27 @@ describe("relatórios: período, arquivo e linhas do CSV", () => {
     expect(positiva.linhas[0][6]).toBe("2,0");
     // A tela continua com o cabeçalho "Diferença".
     expect(CABECALHOS.margens.at(-1)).toBe("Diferença");
+  });
+  it("conciliação extrato x sistema: colunas, valores e totais por situação", () => {
+    expect(RELATORIOS_TIPOS).toContain("conciliacao");
+    expect(RELATORIOS.conciliacao).toEqual({ nome: "Conciliação extrato x sistema", descricao: "Extrato OFX conferido com as baixas do sistema" });
+    const r = linhasCsv("conciliacao", {
+      linhas: [
+        { data: "2026-11-06", conta: "Itaú", contaId: "c1", descricao: "PIX Expedia", valorExtrato: 182400n, valorSistema: 182400n, situacao: "Confere" },
+        { data: "2026-11-10", conta: "Itaú", contaId: "c1", descricao: "TARIFA", valorExtrato: -3500n, valorSistema: null, situacao: "Não conciliado" },
+      ],
+      totais: [
+        { tipo: "confere", rotulo: "Confere", qtd: 1, valor: 182400n },
+        { tipo: "nao_conciliado", rotulo: "Não conciliado", qtd: 1, valor: -3500n },
+      ],
+    });
+    expect(r.cabecalho).toEqual(["Data", "Conta", "Lançamento no extrato", "Extrato (R$)", "Sistema (R$)", "Situação"]);
+    expect(r.linhas).toEqual([
+      ["06/11/2026", "Itaú", "PIX Expedia", 182400n, 182400n, "Confere"],
+      ["10/11/2026", "Itaú", "TARIFA", -3500n, null, "Não conciliado"],
+      ["Total", "", "1 transação", 182400n, null, "Confere"],
+      ["Total", "", "1 transação", -3500n, null, "Não conciliado"],
+    ]);
   });
   it("vendas por consultor", () => {
     const r = linhasCsv("consultores", {

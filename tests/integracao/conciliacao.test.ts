@@ -28,7 +28,9 @@ import {
   ignorarTransacao,
   importarExtrato,
 } from "@/server/actions/conciliacao";
+import { GET } from "@/app/(app)/financeiro/relatorios/planilha/route";
 import { obterConciliacao, pendentesParaAviso } from "@/server/queries/conciliacao";
+import { obterVisaoGeral, relatorioConciliacao } from "@/server/queries/paineis";
 import { listarLancamentos } from "@/server/queries/financeiro";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
 import { cartaoCorporativo, contaBancaria, vendida } from "../helpers/venda";
@@ -521,6 +523,113 @@ describe("conciliação do extrato OFX", () => {
       const v4 = await transacao("V4");
       expect(await comSessao(c.fin, () => ignorarTransacao(v4.id, "Estornada"))).toEqual({ ok: true });
       expect(await pendentesParaAviso(hoje)).toEqual({ qtd: 2, valor: 3500n });
+    });
+  });
+
+  describe("pendentesParaAviso: contas", () => {
+    it("só conta transações de contas ativas e não excluídas", async () => {
+      const hoje = hojeEmCuiaba();
+      const outra = await contaBancaria(c.fin, "Bradesco");
+      await importar(ofx([{ fitid: "A1", data: somarDias(hoje, -10), valor: "-10.00", nome: "A" }], "20200101", "20991231"));
+      await importar(ofx([{ fitid: "B1", data: somarDias(hoje, -10), valor: "-20.00", nome: "B" }], "20200101", "20991231"), outra);
+      expect(await pendentesParaAviso(hoje)).toEqual({ qtd: 2, valor: 3000n });
+      await db.update(contasBancarias).set({ ativa: false }).where(eq(contasBancarias.id, outra));
+      expect(await pendentesParaAviso(hoje)).toEqual({ qtd: 1, valor: 1000n });
+      await db.update(contasBancarias).set({ excluidoEm: new Date() }).where(eq(contasBancarias.id, c.conta));
+      expect(await pendentesParaAviso(hoje)).toEqual({ qtd: 0, valor: 0n });
+    });
+  });
+
+  describe("relatório, planilha e aviso na Visão geral", () => {
+    const intervalo = { de: "2026-11-01", ate: "2026-11-30" };
+    const url = (q: string) => new Request(`http://localhost/financeiro/relatorios/planilha?${q}`);
+
+    /** Confere (+1.824,00), Diferença (-4.202,00 no extrato x -4.200,00 no sistema) e uma tarifa pendente. */
+    async function cenario() {
+      const receber = await manualBaixado("1824,00", "2026-11-06", "receber");
+      const pagar = await manualBaixado("4200,00", "2026-11-10", "pagar");
+      await importar(
+        ofx([
+          { fitid: "R1", data: "2026-11-06", valor: "1824.00", nome: "PIX COMISSAO EXPEDIA" },
+          { fitid: "R2", data: "2026-11-10", valor: "-4202.00", nome: "ALUGUEL ESCRITORIO" },
+          { fitid: "R3", data: "2026-11-12", valor: "-35.00", nome: "TARIFA BANCARIA" },
+        ]),
+      );
+      for (const [fitid, id] of [["R1", receber], ["R2", pagar]] as const) {
+        const t = await transacao(fitid);
+        expect(await comSessao(c.fin, () => confirmarPar(t.id, "manual", id))).toEqual({ ok: true });
+      }
+    }
+
+    it("relatorioConciliacao: as três situações, valores e totais; filtro por conta", async () => {
+      await cenario();
+      const r = await comSessao(c.fin, () => relatorioConciliacao(intervalo));
+      expect(r.linhas.map((l) => [l.data, l.conta, l.descricao, l.valorExtrato, l.valorSistema, l.situacao])).toEqual([
+        ["2026-11-06", "Itaú", "PIX COMISSAO EXPEDIA", 182400n, 182400n, "Confere"],
+        ["2026-11-10", "Itaú", "ALUGUEL ESCRITORIO", -420200n, -420000n, "Diferença de R$ 2,00"],
+        ["2026-11-12", "Itaú", "TARIFA BANCARIA", -3500n, null, "Não conciliado"],
+      ]);
+      expect(r.totais.map((t) => [t.tipo, t.qtd, t.valor])).toEqual([
+        ["confere", 1, 182400n],
+        ["diferenca", 1, -420200n],
+        ["nao_conciliado", 1, -3500n],
+      ]);
+      const outra = await contaBancaria(c.fin, "Bradesco");
+      expect((await comSessao(c.fin, () => relatorioConciliacao(intervalo, outra))).linhas).toEqual([]);
+      expect((await comSessao(c.fin, () => relatorioConciliacao(intervalo, c.conta))).linhas).toHaveLength(3);
+      expect((await comSessao(c.fin, () => relatorioConciliacao({ de: "2026-12-01", ate: "2026-12-31" }))).linhas).toEqual([]);
+    });
+
+    it("planilha: CSV com BOM e ponto e vírgula; consultor e operacional recebem 403", async () => {
+      await cenario();
+      const resposta = await comSessao(c.fin, () => GET(url("rel=conciliacao&de=2026-11&ate=2026-11")));
+      expect(resposta.status).toBe(200);
+      expect(resposta.headers.get("content-disposition")).toBe('attachment; filename="relatorio-conciliacao-2026-11.csv"');
+      const bytes = new Uint8Array(await resposta.arrayBuffer());
+      expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+      const texto = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
+      expect(texto.startsWith("\uFEFFData;Conta;Lançamento no extrato;Extrato (R$);Sistema (R$);Situação\r\n")).toBe(true);
+      expect(texto).toContain("06/11/2026;Itaú;PIX COMISSAO EXPEDIA;1824,00;1824,00;Confere");
+      expect(texto).toContain("10/11/2026;Itaú;ALUGUEL ESCRITORIO;-4202,00;-4200,00;Diferença de R$ 2,00");
+      expect(texto).toContain("12/11/2026;Itaú;TARIFA BANCARIA;-35,00;;Não conciliado");
+
+      for (const perfil of ["consultor", "operacional"] as const) {
+        const u = await criarUsuarioTeste(perfil);
+        const negada = await comSessao(u.id, () => GET(url("rel=conciliacao&de=2026-11&ate=2026-11")));
+        expect(negada.status).toBe(403);
+        expect(await negada.text()).toBe("");
+        await expect(comSessao(u.id, () => relatorioConciliacao(intervalo))).rejects.toBeInstanceOf(ErroAcesso);
+      }
+    });
+
+    it("Visão geral: aviso 'sem par no sistema' só com pendente de mais de 3 dias; some sem pendência", async () => {
+      const hoje = hojeEmCuiaba();
+      const diretor = await criarUsuarioTeste("diretor");
+      expect((await comSessao(diretor.id, () => obterVisaoGeral("mes"))).avisos.some((a) => a.tipo === "conciliacao")).toBe(false);
+      await importar(
+        ofx(
+          [
+            { fitid: "N1", data: somarDias(hoje, -2), valor: "-50.00", nome: "RECENTE" },
+            { fitid: "N2", data: somarDias(hoje, -9), valor: "-35.00", nome: "TARIFA BANCARIA" },
+            { fitid: "N3", data: somarDias(hoje, -8), valor: "10.00", nome: "RENDIMENTO" },
+          ],
+          "20200101",
+          "20991231",
+        ),
+      );
+      const v = await comSessao(diretor.id, () => obterVisaoGeral("mes"));
+      const a = v.avisos.find((x) => x.tipo === "conciliacao");
+      expect(a).toMatchObject({
+        titulo: "2 transações do extrato sem par no sistema",
+        detalhe: "R$ 45,00 em transações sem par",
+        href: "/financeiro/conciliacao?situacao=nao_conciliado",
+        responsavel: "Financeiro",
+        agregado: true,
+      });
+      const um = await importar(ofx([{ fitid: "N4", data: somarDias(hoje, -30), valor: "-1.00", nome: "ANTIGA" }], "20200101", "20991231"), c.conta);
+      expect(um.novas).toBe(1);
+      const v2 = await comSessao(diretor.id, () => obterVisaoGeral("mes"));
+      expect(v2.avisos.find((x) => x.tipo === "conciliacao")?.titulo).toBe("3 transações do extrato sem par no sistema");
     });
   });
 

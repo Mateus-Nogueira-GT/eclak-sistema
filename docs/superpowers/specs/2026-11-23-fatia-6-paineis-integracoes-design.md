@@ -103,6 +103,6 @@ Cada uma é independente e precisa de conta e de "sim" do Mateus antes de criar 
 
 ## 8. Perguntas para o Mateus (não bloqueiam a 6a)
 1. Critérios de período do §5.1 (principalmente DRE pelo mês do aceite e não pelo mês da viagem).
-2. A Visão geral também para o Financeiro operacional (Valeska)? No protótipo, não.
+2. A Visão geral também para o Financeiro operacional (Valeska)? No protótipo, não. **Respondida: a Visão geral não aparece para a Valeska (Mateus, 24/11/2026).**
 3. 6b: quais bancos e um OFX de exemplo.
 4. 6c: qual integração primeiro.

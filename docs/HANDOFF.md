@@ -4,7 +4,7 @@ Atualizado em 23/11/2026. Leia este arquivo inteiro antes de mexer no código. E
 
 ## 1. Em uma frase
 
-O sistema real da ECLAK Viagens (agência de turismo de alto padrão de Rondonópolis-MT, diretor Augusto Kraemer) está sendo construído **por fatias**. As fatias **1, 2, 3a, 3b, 4a e 4b estão prontas, revisadas e mergeadas em `main`** (PRs #1 a #6, em 23/11/2026, com o "sim" do Mateus; a 4b — fluxo de caixa, reserva, anexos, notas fiscais e cartão corporativo — entrou pelo PR #6). **A fatia 5a (Operação: tarefas, roteiro e dailies) está pronta na branch `claude/fatia-5a-operacao`**, já integrada com `main` (merge de `main` com a 4b, migrações da 5a regeneradas depois das da 4b); PR [#7](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/7) aberto, base `main`, esperando o "sim" do Mateus para o merge. **A fatia 6a (Painéis: Visão geral e Relatórios) está pronta na branch `claude/fatia-6a-paineis`** (empilhada sobre a 5a; PR [#8](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/8) com base `claude/fatia-5a-operacao` até o #7 entrar). **A 5b (Reembolsos, Estoque, Caixa de experiência, Avisos) segue esperando o retorno do grupo e da Valeska (§8); a 6b (extrato OFX e conciliação) precisa de um OFX de exemplo e dos bancos; a 6c (integrações) precisa de credenciais e do "sim" do Mateus**. Nada foi publicado (sem Railway, sem Supabase de produção).
+O sistema real da ECLAK Viagens (agência de turismo de alto padrão de Rondonópolis-MT, diretor Augusto Kraemer) está sendo construído **por fatias**. As fatias **1, 2, 3a, 3b, 4a e 4b estão prontas, revisadas e mergeadas em `main`** (PRs #1 a #6, em 23/11/2026, com o "sim" do Mateus; a 4b — fluxo de caixa, reserva, anexos, notas fiscais e cartão corporativo — entrou pelo PR #6). **A fatia 5a (Operação: tarefas, roteiro e dailies) está pronta na branch `claude/fatia-5a-operacao`**, já integrada com `main` (merge de `main` com a 4b, migrações da 5a regeneradas depois das da 4b); PR [#7](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/7) aberto, base `main`, esperando o "sim" do Mateus para o merge. **A fatia 6a (Painéis: Visão geral e Relatórios) está pronta na branch `claude/fatia-6a-paineis`** (empilhada sobre a 5a; PR [#8](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/8) com base `claude/fatia-5a-operacao` até o #7 entrar). **A 5b (Reembolsos, Estoque, Caixa de experiência, Avisos) segue esperando o retorno do grupo e da Valeska (§8); **a fatia 6b (extrato OFX e conciliação) está pronta na branch `claude/fatia-6b-conciliacao`** (empilhada sobre a 6a; PR a abrir, testada só com OFX sintéticos: falta um OFX real de cada banco); a 6c (integrações) precisa de credenciais e do "sim" do Mateus**. Nada foi publicado (sem Railway, sem Supabase de produção).
 
 ## 2. Onde está cada coisa
 
@@ -29,6 +29,7 @@ Os PRs #1 a #6 foram mergeados em `main` em ordem (merge commit, branches mantid
 | 4b Caixa, reserva, anexos e cartão corporativo | `claude/fatia-4b-caixa` | [#6](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/6) |
 | 5a Operação (tarefas, roteiro, dailies) | `claude/fatia-5a-operacao` | [#7](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/7) (base `main`, merge só com o "sim" do Mateus) |
 | 6a Painéis (Visão geral e Relatórios) | `claude/fatia-6a-paineis` | [#8](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/8), base `claude/fatia-5a-operacao` até o #7 entrar (depois, `main`) |
+| 6b Extrato OFX e conciliação | `claude/fatia-6b-conciliacao` | a abrir (base `claude/fatia-6a-paineis`) |
 
 **Integração da 5a com a 4b (feita em 23/11/2026).** A 5a foi construída sobre `main` sem a 4b, e as duas fatias criaram migrações com os mesmos números. Em vez de renomear, as migrações da 5a foram apagadas num commit, `main` (com a 4b) foi mergeada na branch da 5a e as migrações foram **regeneradas** depois das da 4b (0035_operacao e 0036_operacao_rls), com o SQL custom de RLS, índices parciais e CHECKs colado sem mudança. Motivo: o `drizzle-kit migrate` registra no banco só o `created_at` da última migração aplicada e **pula as entradas do journal mais antigas que ela**, então uma migração renumerada mas com data antiga nunca rodaria num banco que já tem a 4b. Quem tinha banco local da 5a antiga precisa de `npx supabase db reset && npm run db:migrate`.
 
@@ -44,6 +45,8 @@ Os PRs #1 a #6 foram mergeados em `main` em ordem (merge commit, branches mantid
 - Plano da 4b: `docs/superpowers/plans/2026-11-23-fatia-4b-caixa.md` (tem os 12 rulings).
 - Desenho da fatia 6 (6a, 6b, 6c): `docs/superpowers/specs/2026-11-23-fatia-6-paineis-integracoes-design.md` (a 6b e a 6c são esboços; §8 tem as perguntas).
 - Plano da 6a: `docs/superpowers/plans/2026-11-23-fatia-6a-paineis.md` (tem os rulings R1 a R10 e a seção "Para a 6b e a 6c").
+- Desenho das fatias 6b e 6c: `docs/superpowers/specs/2026-11-24-fatia-6b-6c-design.md` (§4 a 6b, §6 os rulings R-B1 a R-B3 e R-C1 a R-C4).
+- Planos: `docs/superpowers/plans/2026-11-24-fatia-6b-conciliacao.md` e `docs/superpowers/plans/2026-11-24-fatia-6c-integracoes.md`.
 - `README.md`: como rodar, banco local, seed, convite/senha, RLS e **passo a passo do deploy** (ainda não executado).
 - Protótipo, para regras e visual: `eclak-mockup/PRODUCT.md`, `eclak-mockup/DESIGN.md`, `eclak-mockup/src/app/**`, `eclak-mockup/src/lib/**`.
 
@@ -79,9 +82,14 @@ src/server/operacao/        criarTarefasAutomaticas (server-only, usada pela ven
 src/domain/paineis.ts    períodos, DRE, avisos, agregações e CSV dos painéis (puro)
 src/server/queries/paineis.ts  leituras da Visão geral e dos relatórios (só leitura; margem sempre por margensVendidas)
 src/server/relatorios.ts   parâmetros da URL, escolha da leitura e montagem das tabelas dos relatórios (usado pela tela, pelo CSV e pela impressão)
+src/domain/ofx.ts, conciliacao.ts  leitor OFX (SGML/XML, charset 1252) e regras da conciliação (sugestão, situações); puros
+src/server/financeiro/lancamentos.ts  núcleo de criar e baixar lançamento (extraído de actions/financeiro.ts, usado também pela conciliação)
+src/server/financeiro/conciliacao.ts  leitura das candidatas na view e trava da transação do extrato
+src/server/actions/conciliacao.ts, queries/conciliacao.ts  importar extrato, confirmar, criar lançamento, ignorar, desfazer; leitura e aviso
+src/app/(app)/financeiro/conciliacao/  tela (page, envio, lista)
 src/app/(app)/       telas logadas; src/app/login, /auth/confirmar, /definir-senha
-drizzle/             migrações 0000–0036 (geradas + custom para RLS, índices, enums; 0026–0034 da 4b, 0035_operacao e 0036_operacao_rls da 5a)
-scripts/             seed-local, seed-orcamentos, seed-vendas, seed-financeiro, seed-operacao, criar-diretor, local-guard, postbuild
+drizzle/             migrações 0000–0039 (geradas + custom para RLS, índices, enums; 0026–0034 da 4b, 0035_operacao e 0036_operacao_rls da 5a, 0037_situacao_extrato_enum, 0038_extratos e 0039_extratos_rls da 6b)
+scripts/             seed-local, seed-orcamentos, seed-vendas, seed-financeiro, seed-operacao, seed-conciliacao, criar-diretor, local-guard, postbuild
 tests/domain, tests/integracao (integração roda contra Supabase local e TRUNCA o banco)
 ```
 
@@ -127,7 +135,13 @@ tests/domain, tests/integracao (integração roda contra Supabase local e TRUNCA
 - **R9** CSV UTF-8 com BOM, `;`, decimal com vírgula, datas `dd/mm/aaaa`, por route handler com `exigirPerfil`; PDF por página de impressão.
 - **R10** períodos da Visão geral por `?periodo=` (`30d` padrão, `90d`, `mes`, `mes_anterior`, `ano`) com comparação do vendido com o período anterior de mesma duração (spec §5.1): `mes` contra o mesmo trecho do mês anterior (1–23/11 contra 1–23/10), `ano` contra o mesmo trecho do ano anterior, `mes_anterior` contra o mês inteiro antes, `30d`/`90d` contra os dias logo antes; relatórios por `?de=AAAA-MM&ate=AAAA-MM` (padrão mês atual, máximo 24 meses).
 
-Perguntas abertas para o Mateus (spec da 6, §8; não bloqueiam): (1) os critérios de período, principalmente a DRE pelo mês do aceite e não pelo mês da viagem; (2) a Visão geral também para o Financeiro operacional (Valeska)? No protótipo, não; (3) 6b: quais bancos e um OFX de exemplo; (4) 6c: qual integração primeiro.
+Perguntas abertas para o Mateus (spec da 6, §8; não bloqueiam): (1) os critérios de período, principalmente a DRE pelo mês do aceite e não pelo mês da viagem; (2) **respondida: "Visão geral não aparece para a Valeska" (Mateus, 24/11/2026)**; (3) 6b: quais bancos e um OFX de exemplo (a 6b foi feita com arquivos sintéticos); (4) 6c: qual integração primeiro.
+
+**Fatia 6b — Extrato OFX e conciliação** (branch `claude/fatia-6b-conciliacao`, empilhada sobre a 6a). A Valeska importa o OFX de cada conta em `/financeiro/conciliacao` e confere cada transação com as baixas da lista única. Migrações 0037 (enum `situacao_extrato`), 0038 (tabelas `extratos` e `extrato_transacoes`, CHECKs de coerência e índice único parcial por baixa conciliada) e 0039 (RLS). Leitor OFX 1.x/2.x com charset 1252/ISO-8859-1 (testado com arquivo SGML real de banco brasileiro, sintético). Importação idempotente: arquivo idêntico recusado pelo hash; extrato sobreposto traz só as transações novas (única por conta + FITID) e o resumo conta as repetidas. Situações exibidas: Confere, Diferença de R$ x, Não conciliado, Ignorado e "A baixa mudou: confira". Relatório "Conciliação extrato x sistema" (`rel=conciliacao`, filtro opcional `conta`, planilha e impressão) e aviso `conciliacao` na Visão geral (entre `pagar` e `aprovacao`, responsável Financeiro, só transação pendente com mais de 3 dias, contas ativas). Seed: extrato sintético com as 3 situações. Rulings (spec §6), para o Mateus conferir:
+- **R-B1** o arquivo OFX não é guardado, só as transações e o hash (o bucket `anexos` só aceita PDF/PNG/JPEG; guardar exige bucket novo, uma migração).
+- **R-B2** desfazer uma baixa não é bloqueado; a conciliação é conferida na leitura e a transação aparece como "A baixa mudou: confira" (bloquear exigiria mexer nos 5 núcleos de baixa). Não há trava na baixa lida da view; o índice único parcial é a fonte da verdade contra a mesma baixa em duas transações.
+- **R-B3** sugestão pelo mesmo valor de caixa (líquido) e até 3 dias (`DIAS_SUGESTAO`), sem sugestão se o empate na distância é exato; escolha manual até 10 dias (`DIAS_ESCOLHA`); aviso após 3 dias (`DIAS_AVISO`).
+- Rulings das Tarefas 3 e 4 (relatórios das tarefas em `.superpowers/sdd/2026-11-24-fatia-6b-conciliacao/`): lançamento criado a partir da transação é manual, forma "Débito em conta" (nunca cartão, que tiraria do caixa); valor 0 e data futura são recusados; descrição editável até 200 caracteres (a do extrato vai até 255 e a tela corta); a auditoria da importação é uma linha em `extratos` (as mudanças de situação auditam `extrato_transacoes`); `totais` do período inteiro antes do filtro de situação; aviso soma valores em módulo e só das contas ativas e não excluídas; desfazer a conciliação de um lançamento criado pela transação deixa o lançamento baixado (desfaz-se pela lista); `confirmarPar` sem pré-checagem de "já conciliada" (mensagem vem do 23505); situação "A baixa mudou" devolve `linha` nula; candidatas lidas por `baixado_em` na janela do período ± 10 dias; `criarLancamentoDaTransacao` valida por Zod; motivo de ignorar de 3 a 200 caracteres; parâmetros inválidos da URL da tela caem nos padrões sem erro.
 
 ## 6. Decisões tomadas (todas)
 
@@ -189,7 +203,7 @@ Fatia 5a (Claude, **conferir com o Mateus**; D1–D32 completas no spec `docs/su
 
 ## 8. Próximo passo
 
-**Fatia 6 (painéis e integrações):** a 6a está pronta (ver §5). PR #8 aberto (base `claude/fatia-5a-operacao`); depois do merge do #7, trocar a base do #8 para `main`. Merge só com o "sim" do Mateus. A **6b** (extrato OFX e conciliação) precisa de um OFX de exemplo e de quais bancos; ela acrescenta o relatório de conciliação e o aviso "pagamento não conciliado" em `RELATORIOS` e em `ordenarAvisos` (tipo novo `conciliacao`, entre `pagar` e `aprovacao`). A **6c** (integrações: Trello, Drive, IA, agendador do daily etc.) precisa de credenciais e do "sim" do Mateus. A **5b** continua esperando a Valeska e o grupo.
+**Fatia 6 (painéis e integrações):** a 6a está pronta (ver §5). PR #8 aberto (base `claude/fatia-5a-operacao`); depois do merge do #7, trocar a base do #8 para `main`. Merge só com o "sim" do Mateus. A **6b** (extrato OFX e conciliação) está pronta na branch `claude/fatia-6b-conciliacao` (ver §5), testada só com OFX sintéticos: falta um OFX real de cada banco para conferir o leitor e a regra do valor líquido de cartão; PR a abrir com base `claude/fatia-6a-paineis`. A **6c** (integrações: Trello, Drive, IA, agendador do daily etc.) precisa de credenciais e do "sim" do Mateus. A **5b** continua esperando a Valeska e o grupo.
 
 **Imediato:** abrir o PR da `claude/fatia-5a-operacao` com `--base main` (só com o "sim" do Mateus) e revisar; a 4b já está em `main` (PR #6) e a 5a já foi integrada com ela (ver §2). Depois, a **5b**, que **depende do retorno do grupo e da Valeska** sobre Reembolsos, Estoque, Caixa de experiência e Avisos por setor, e do **texto oficial de encerramento do daily** (entra por Admin › Parâmetros, sem código). Escopo e perguntas no spec `docs/superpowers/specs/2026-11-23-fatia-5-operacao-design.md` §6 e no fim do plano da 5a ("Para a 5b e a fatia 6"):
 - Reembolsos e Estoque com lançamentos na lista única da 4a (categorias "Reembolso a cliente", "Reembolso de fornecedor", "Caixa de experiência", "Papelaria").
@@ -273,6 +287,7 @@ npm run dev               # abrir em localhost (127.0.0.1 não fica interativo n
 - `.env.local` (não versionado): `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SITE_URL` (ver `.env.example`).
 - Usuários do seed: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`, senha `eclak-local`.
 - Testes: `npm run lint && npm run typecheck && npm test && npm run test:integracao && npm run build` (uma execução de integração por vez: a trava do global setup recusa a segunda). Últimos números (23/11/2026, branch `claude/fatia-5a-operacao` integrada com `main` e a 4b): 363 testes de domínio (23 arquivos) e 425 de integração (26 arquivos), tudo verde, build ok, seed duas vezes sem duplicar. **A integração trunca o banco local**: rodar `npm run seed:local` depois.
+- Números da 6b (24/11/2026, branch `claude/fatia-6b-conciliacao`): 457 testes de domínio (26 arquivos) e 463 de integração (28 arquivos), lint, typecheck e build ok, seed duas vezes sem duplicar (a segunda cria 0 transações de extrato).
 - Migração nova: `npm run db:generate` (gerada) ou `npx drizzle-kit generate --custom --name <nome>` (RLS, índices, enums); validar do zero (`npx supabase db reset` + `npm run db:migrate`) e sobre banco populado.
 - Next gera `AGENTS.md` no dev: está no `.gitignore`.
 

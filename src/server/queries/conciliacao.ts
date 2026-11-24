@@ -163,8 +163,8 @@ export async function obterConciliacao(filtro: FiltroConciliacao): Promise<Conci
 }
 
 /**
- * Transações pendentes com data de mais de `DIAS_AVISO` dias (o aviso "sem par no sistema"), de todas as contas;
- * `valor` = soma dos valores em módulo. Sem checagem de acesso: chamada por `obterVisaoGeral`, que já checa.
+ * Transações pendentes com data de mais de `DIAS_AVISO` dias (o aviso "sem par no sistema") das contas ativas e não
+ * excluídas; `valor` = soma dos valores em módulo. Sem checagem de acesso: chamada por `obterVisaoGeral`, que já checa.
  */
 export async function pendentesParaAviso(hoje: string): Promise<{ qtd: number; valor: bigint }> {
   const [r] = await db
@@ -173,6 +173,14 @@ export async function pendentesParaAviso(hoje: string): Promise<{ qtd: number; v
       valor: sql<string>`coalesce(sum(abs(${extratoTransacoes.valor})), 0)::bigint`,
     })
     .from(extratoTransacoes)
-    .where(and(eq(extratoTransacoes.situacao, "pendente"), lt(extratoTransacoes.data, somarDias(hoje, -DIAS_AVISO))));
+    .innerJoin(contasBancarias, eq(contasBancarias.id, extratoTransacoes.contaBancariaId))
+    .where(
+      and(
+        eq(extratoTransacoes.situacao, "pendente"),
+        lt(extratoTransacoes.data, somarDias(hoje, -DIAS_AVISO)),
+        eq(contasBancarias.ativa, true),
+        isNull(contasBancarias.excluidoEm),
+      ),
+    );
   return { qtd: r.qtd, valor: BigInt(r.valor) };
 }

@@ -11,11 +11,11 @@ import { TabelaRelatorio } from "../tabelas";
 // Impressão do relatório: só o título, o período (e o consultor, se filtrado) e a tabela, sem links.
 export default async function Pagina({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const hoje = hojeEmCuiaba();
-  const { rel, periodo, consultorId } = parametrosDoRelatorio(await searchParams, hoje);
+  const { rel, periodo, consultorId, contaId } = parametrosDoRelatorio(await searchParams, hoje);
   let carregado: RelatorioCarregado;
   let nomeConsultor: string | undefined;
   try {
-    carregado = await carregarRelatorio(rel, periodo.intervalo, consultorId);
+    carregado = await carregarRelatorio(rel, periodo.intervalo, consultorId, contaId);
     if (consultorId) nomeConsultor = await nomeDoConsultor(consultorId);
   } catch (e) {
     if (e instanceof ErroAcesso) redirect("/sem-acesso");

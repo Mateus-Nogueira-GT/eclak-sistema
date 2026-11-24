@@ -48,7 +48,7 @@ Toda tabela de `public` tem RLS ligado e nenhuma política para `anon`/`authenti
 
 ## Seed local
 
-`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Também semeia o financeiro (contas Banco do Brasil e Bradesco PJ, lançamentos manuais do protótipo com datas relativas a hoje, alguns já baixados, a fatura da Família Ribeiro, o cartão "Visa Corporativo" final 4821 com três compras no ciclo atual e uma nota fiscal sem PDF) e a operação (as 5 tarefas da venda em toda viagem vendida; na Família Ribeiro, tarefas manuais do protótipo, roteiro aprovado com Florença e Veneza preenchidos e dois dailies). A venda da Família Ribeiro tem aceite 20 dias antes de hoje (com a entrada em Pix recebida no aceite), de modo que a Visão geral (últimos 30 dias) e a DRE do mês corrente mostram vendido, recebido, pago e os dois blocos. Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
+`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Também semeia o financeiro (contas Banco do Brasil e Bradesco PJ, lançamentos manuais do protótipo com datas relativas a hoje, alguns já baixados, a fatura da Família Ribeiro, o cartão "Visa Corporativo" final 4821 com três compras no ciclo atual e uma nota fiscal sem PDF) e a operação (as 5 tarefas da venda em toda viagem vendida; na Família Ribeiro, tarefas manuais do protótipo, roteiro aprovado com Florença e Veneza preenchidos e dois dailies) e a conciliação (um extrato sintético na conta Banco do Brasil com uma transação que confere, uma com diferença de R$ 2,00 e uma tarifa pendente). A venda da Família Ribeiro tem aceite 20 dias antes de hoje (com a entrada em Pix recebida no aceite), de modo que a Visão geral (últimos 30 dias) e a DRE do mês corrente mostram vendido, recebido, pago e os dois blocos. Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
 
 ## Operação
 
@@ -82,6 +82,16 @@ Só leitura (sem tabela nova). "Hoje" é sempre `America/Cuiaba`.
 - **Relatórios** (`/financeiro/relatorios?rel=…`, Diretor e os dois financeiros): DRE, Contas a pagar, Contas a receber, Volume por banco, Margem por viagem e Vendas por consultor, com período `?de=AAAA-MM&ate=AAAA-MM` (padrão: mês atual; máximo 24 meses). Cada linha abre a lista de lançamentos filtrada ou a viagem. **Planilha** em CSV (`/financeiro/relatorios/planilha?rel=…`: UTF-8 com BOM, `;`, decimal com vírgula) e **PDF** pela impressão do navegador (`/financeiro/relatorios/imprimir?rel=…`).
 - Consultor e Operacional não têm acesso a nenhuma das duas telas (`/sem-acesso`).
 - Os critérios de período e de DRE estão em `docs/HANDOFF.md` (seção da fatia 6a, rulings R1 a R10).
+
+## Conciliação do extrato
+
+`/financeiro/conciliacao` (Diretor e os dois financeiros; no menu, depois de "Contas bancárias").
+
+- **Como importar:** escolha a conta, o período e envie o arquivo OFX que o banco gera (até 5 MB; aceita OFX 1.x em SGML e 2.x em XML, em UTF-8 ou Windows-1252/ISO-8859-1). O sistema mostra quantas transações são novas e quantas já estavam. Reenviar o mesmo arquivo na mesma conta é recusado; um extrato que se sobrepõe a outro só traz o que ainda não existe (a transação é única por conta e identificador do banco).
+- **O que é guardado:** só as transações (data, valor com sinal, descrição, identificador do banco) e o resumo da importação (nome do arquivo, período, quem importou, contagens) com o hash do arquivo para recusar repetição. **O arquivo OFX em si não é guardado.**
+- **Conferência:** cada transação é comparada com as baixas da conta (mesmo valor de caixa e até 3 dias de diferença para a sugestão; escolha manual até 10 dias). A Valeska confirma o par, escolhe outra baixa, cria o lançamento a partir da transação (tarifa, IOF, rendimento) ou ignora com um motivo, e pode desfazer. Situações: Confere, Diferença de R$ x, Não conciliado, Ignorado e "A baixa mudou: confira" (a baixa foi desfeita ou alterada depois de conciliar).
+- **Fora da tela:** o relatório "Conciliação extrato x sistema" (`/financeiro/relatorios?rel=conciliacao`, com planilha e impressão, por conta opcional) e um aviso na Visão geral quando há transação do extrato sem par há mais de 3 dias (contas ativas).
+- **Seed local:** um extrato sintético na conta Banco do Brasil (uma transação que confere, uma com diferença e uma tarifa pendente); rodar o seed de novo não duplica.
 
 ## Deploy (produção)
 
