@@ -27,12 +27,19 @@ const areas: { titulo: string; itens: Item[] }[] = [
       { href: "/fornecedores", label: "Fornecedores" },
     ],
   },
-  { titulo: "Gestão", itens: [{ href: "/aprovacoes", label: "Aprovações" }] },
+  {
+    titulo: "Gestão",
+    itens: [
+      { href: "/visao-geral", label: "Visão geral" },
+      { href: "/aprovacoes", label: "Aprovações" },
+    ],
+  },
   {
     titulo: "Financeiro",
     itens: [
       { href: "/financeiro/lancamentos", label: "Lançamentos" },
       { href: "/financeiro/caixa", label: "Fluxo de caixa" },
+      { href: "/financeiro/relatorios", label: "Relatórios" },
       { href: "/financeiro/faturas", label: "Faturas" },
       { href: "/financeiro/notas-fiscais", label: "Notas fiscais" },
       { href: "/financeiro/categorias", label: "Categorias" },

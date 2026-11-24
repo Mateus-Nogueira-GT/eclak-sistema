@@ -232,6 +232,8 @@ export const filtroLancamentosSchema = z.strictObject({
   contaBancariaId: opcional(uuid),
   origem: opcional(z.enum(["viagem", "manual"], { error: "Origem inválida" })),
   busca: opcional(z.string().trim().max(100, "Busca muito longa")),
+  /** "incluir": mostra também as compras no cartão corporativo uma a uma (o detalhe de uma categoria da DRE). */
+  compras: opcional(z.enum(["incluir"], { error: "Filtro de compras inválido" })),
   pagina: z.number({ error: "Página inválida" }).int("Página inválida").min(1, "Página inválida"),
 });
 export type FiltroLancamentos = z.infer<typeof filtroLancamentosSchema>;

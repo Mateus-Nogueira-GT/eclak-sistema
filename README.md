@@ -48,7 +48,7 @@ Toda tabela de `public` tem RLS ligado e nenhuma política para `anon`/`authenti
 
 ## Seed local
 
-`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Também semeia o financeiro (contas Banco do Brasil e Bradesco PJ, lançamentos manuais do protótipo com datas relativas a hoje, alguns já baixados, a fatura da Família Ribeiro, o cartão "Visa Corporativo" final 4821 com três compras no ciclo atual e uma nota fiscal sem PDF) e a operação (as 5 tarefas da venda em toda viagem vendida; na Família Ribeiro, tarefas manuais do protótipo, roteiro aprovado com Florença e Veneza preenchidos e dois dailies). Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
+`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Também semeia o financeiro (contas Banco do Brasil e Bradesco PJ, lançamentos manuais do protótipo com datas relativas a hoje, alguns já baixados, a fatura da Família Ribeiro, o cartão "Visa Corporativo" final 4821 com três compras no ciclo atual e uma nota fiscal sem PDF) e a operação (as 5 tarefas da venda em toda viagem vendida; na Família Ribeiro, tarefas manuais do protótipo, roteiro aprovado com Florença e Veneza preenchidos e dois dailies). A venda da Família Ribeiro tem aceite 20 dias antes de hoje (com a entrada em Pix recebida no aceite), de modo que a Visão geral (últimos 30 dias) e a DRE do mês corrente mostram vendido, recebido, pago e os dois blocos. Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
 
 ## Operação
 
@@ -73,6 +73,15 @@ Visível aos cinco perfis (nenhum valor de custo, margem ou comissão aparece ne
 - **Anexos**: PDF, PNG ou JPEG de até 10 MB (tipo conferido pelos bytes) em qualquer linha da lista, nas faturas do cartão e nas notas fiscais. Ficam no bucket privado `anexos` do Supabase Storage; o download usa URL assinada de 60 segundos.
 - **Notas fiscais** (`/financeiro/notas-fiscais`): número único entre as não canceladas, CPF/CNPJ validado, cancelamento com motivo (a nota nunca é apagada), PDF anexo e filtros por período e destinatário.
 - **Cartões corporativos** (`/financeiro/cartoes`): cadastro com final, dias de fechamento e vencimento (1 a 28), conta de débito e centro. Compras (lançamento a pagar em Cartão de crédito com o cartão, ou pagamento de viagem na forma Cartão corporativo) caem na fatura do ciclo. A fatura é uma só linha na lista e no caixa; a baixa quita todas as compras com uma saída no banco (compras em moeda estrangeira pedem o valor em reais cobrado, que vira o câmbio efetivo) e pode ser desfeita.
+
+## Painéis (Visão geral e Relatórios)
+
+Só leitura (sem tabela nova). "Hoje" é sempre `America/Cuiaba`.
+
+- **Visão geral** (`/visao-geral`, só Diretor e Financeiro estratégico; é a primeira tela deles): avisos "Para decidir hoje" (caixa negativo, margem abaixo da referência, parcelas e comissões vencidas, contas a pagar vencidas ou a vencer em 7 dias, aprovações pendentes; até 8 e "e mais N avisos"), números do período (vendido, margem real × planejada, recebido, pago, resultado de caixa), reserva de caixa, saldo semana a semana das próximas 8 semanas e as viagens que mais perderam margem. Período por `?periodo=` (`30d`, `90d`, `mes`, `mes_anterior`, `ano`).
+- **Relatórios** (`/financeiro/relatorios?rel=…`, Diretor e os dois financeiros): DRE, Contas a pagar, Contas a receber, Volume por banco, Margem por viagem e Vendas por consultor, com período `?de=AAAA-MM&ate=AAAA-MM` (padrão: mês atual; máximo 24 meses). Cada linha abre a lista de lançamentos filtrada ou a viagem. **Planilha** em CSV (`/financeiro/relatorios/planilha?rel=…`: UTF-8 com BOM, `;`, decimal com vírgula) e **PDF** pela impressão do navegador (`/financeiro/relatorios/imprimir?rel=…`).
+- Consultor e Operacional não têm acesso a nenhuma das duas telas (`/sem-acesso`).
+- Os critérios de período e de DRE estão em `docs/HANDOFF.md` (seção da fatia 6a, rulings R1 a R10).
 
 ## Deploy (produção)
 

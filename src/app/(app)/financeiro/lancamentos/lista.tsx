@@ -293,8 +293,8 @@ export function ListaLancamentos(p: Props) {
             <option value="viagem">Só de viagens</option>
             <option value="manual">Só lançados à mão e faturas do cartão</option>
           </Select>
-          {(f.situacao || f.categoriaId || f.grupo || f.centro || f.contaBancariaId || f.origem || f.busca) && (
-            <Link href={urlDe(f, { situacao: undefined, categoriaId: undefined, grupo: undefined, centro: undefined, contaBancariaId: undefined, origem: undefined, busca: undefined })} className="py-2 text-[13px] font-semibold text-verde hover:underline" onClick={() => { setBusca(""); limparSelecao(); }}>
+          {(f.situacao || f.categoriaId || f.grupo || f.centro || f.contaBancariaId || f.origem || f.busca || f.compras) && (
+            <Link href={urlDe(f, { situacao: undefined, categoriaId: undefined, grupo: undefined, centro: undefined, contaBancariaId: undefined, origem: undefined, busca: undefined, compras: undefined })} className="py-2 text-[13px] font-semibold text-verde hover:underline" onClick={() => { setBusca(""); limparSelecao(); }}>
               Limpar filtros
             </Link>
           )}
@@ -399,7 +399,8 @@ export function ListaLancamentos(p: Props) {
                       )}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3">
-                      <Badge tom={TOM[l.situacao]}>{rotuloSituacao(l.situacao, l.lado)}</Badge>
+                      {/* Compra no cartão em aberto: o vencimento é a data da compra; quem vence é a fatura. */}
+                      {l.faturaCartaoId && l.statusBase === "em_aberto" ? <Badge tom="cinza">Na fatura</Badge> : <Badge tom={TOM[l.situacao]}>{rotuloSituacao(l.situacao, l.lado)}</Badge>}
                       {baixada && l.baixadoEm && <span className="block text-[12px] text-cinza">em {dataBr(l.baixadoEm)}{l.contaBancaria ? ` · ${l.contaBancaria}` : ""}</span>}
                       {!l.transitaCaixa && <span className="block text-[12px] text-cinza">Fora do caixa</span>}
                     </td>
@@ -408,6 +409,8 @@ export function ListaLancamentos(p: Props) {
                         <Link href={`/viagens/${l.viagemId}`} className="font-semibold text-verde hover:underline">Viagem {l.viagemCodigo}</Link>
                       ) : l.origem === "fatura_cartao" ? (
                         <Link href={`/financeiro/cartoes?fatura=${l.id}`} className="font-semibold text-verde hover:underline">Compras do cartão</Link>
+                      ) : l.faturaCartaoId && l.statusBase !== "cancelado" ? (
+                        <Link href={`/financeiro/cartoes?fatura=${l.faturaCartaoId}`} className="font-semibold text-verde hover:underline">Na fatura do cartão</Link>
                       ) : (
                         <span className="text-cinza">Lançado à mão</span>
                       )}
