@@ -6,6 +6,7 @@ import {
   custosDoSnapshot,
   envioSchema,
   formaSchema,
+  MSG_SEM_ANTECIPACAO,
   resultadoDaVersao,
   rotuloForma,
   type CotacaoSnapshot,
@@ -18,13 +19,19 @@ import { REGRAS_INICIAIS as R } from "@/domain/regras";
 describe("forma de pagamento da versão", () => {
   const s = formaSchema(10);
 
-  it("normaliza: antecipação só no crédito; pix e cartão direto só em 1x", () => {
-    expect(s.parse({ tipo: "credito", parcelas: 6, antecipado: true })).toEqual({ tipo: "credito", parcelas: 6, antecipado: true });
+  it("normaliza: pix e cartão direto só em 1x; sem antecipação na proposta", () => {
     expect(s.parse({ tipo: "credito", parcelas: 6, antecipado: false })).toEqual({ tipo: "credito", parcelas: 6 });
-    expect(s.parse({ tipo: "boleto", parcelas: 4, antecipado: true })).toEqual({ tipo: "boleto", parcelas: 4 });
     expect(s.parse({ tipo: "pix", parcelas: 1 })).toEqual({ tipo: "pix", parcelas: 1 });
     expect(s.safeParse({ tipo: "pix", parcelas: 2 }).success).toBe(false);
     expect(s.safeParse({ tipo: "cartao_fornecedor", parcelas: 3 }).success).toBe(false);
+  });
+
+  it("antecipação não é escolhida na proposta nem na venda (Augusto, 23/11/2026): recusa com mensagem", () => {
+    for (const tipo of ["credito", "boleto"] as const) {
+      const r = s.safeParse({ tipo, parcelas: 6, antecipado: true });
+      expect(r.success).toBe(false);
+      expect(r.error?.issues[0].message).toBe(MSG_SEM_ANTECIPACAO);
+    }
   });
 
   it("parcelas de 1 ao parcelamento máximo dos Parâmetros", () => {

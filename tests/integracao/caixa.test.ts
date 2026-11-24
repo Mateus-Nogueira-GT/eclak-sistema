@@ -68,7 +68,6 @@ async function contaComSaldo(uid: string, nome: string, saldoInicial: string, sa
   return r.id;
 }
 
-const CREDITO_ANTECIPADO = { tipo: "credito", parcelas: 3, antecipado: true } as const;
 const CREDITO_3X = { tipo: "credito", parcelas: 3 } as const;
 
 describe("colunas de caixa da view", () => {
@@ -144,19 +143,9 @@ describe("colunas de caixa da view", () => {
     expect((await linha("parcela", p.id)).valorCaixaBaixado).toBe(p.valor);
   });
 
-  it("crédito com antecipação: todas as parcelas de cartão em aberto caem no primeiro vencimento em aberto", async () => {
-    const x = await vendida({ forma: CREDITO_ANTECIPADO });
-    const cb = await contaBancaria(x.fin.id);
-    expect(x.parcelas).toHaveLength(3);
-    const [p1, p2, p3] = x.parcelas;
-    for (const p of x.parcelas) expect((await linha("parcela", p.id)).dataCaixa).toBe(p1.vencimento);
-    // Recebida a primeira, as abertas passam a cair no vencimento da segunda.
-    const d = { recebidaEm: hojeEmCuiaba(), valorRecebido: reais(p1.valor), taxaEfetiva: null, observacao: null, contaBancariaId: cb };
-    expect(await comSessao(x.fin.id, () => baixarParcela(p1.id, d))).toEqual({ ok: true });
-    expect((await linha("parcela", p2.id)).dataCaixa).toBe(p2.vencimento);
-    expect((await linha("parcela", p3.id)).dataCaixa).toBe(p2.vencimento);
-    // Sem antecipação, cada uma no seu vencimento.
+  it("crédito parcelado: cada parcela no seu vencimento (sem antecipação automática, Augusto 23/11/2026)", async () => {
     const y = await vendida({ forma: CREDITO_3X });
+    expect(y.parcelas).toHaveLength(3);
     for (const p of y.parcelas) expect((await linha("parcela", p.id)).dataCaixa).toBe(p.vencimento);
   });
 });

@@ -3,6 +3,7 @@ import { REGRAS_INICIAIS as R } from "@/domain/regras";
 import { arredondar } from "@/domain/decimal";
 import {
   FORMAS_SIMULADOR,
+  INDICES_FORMAS_PROPOSTA,
   custoAVista,
   custoLiquido,
   margemDaAprovacao,
@@ -95,6 +96,16 @@ describe("taxaDaForma", () => {
       "7.7367",
     ]);
     expect(FORMAS_SIMULADOR.every((f) => taxaDaForma(f.forma, R).fixo === 0n)).toBe(true);
+  });
+
+  it("6x com antecipação fica só como referência: não é forma de proposta (Augusto, 23/11/2026)", () => {
+    expect(FORMAS_SIMULADOR.filter((f) => f.soReferencia).map((f) => f.rotulo)).toEqual(["6x com antecipação"]);
+    expect(INDICES_FORMAS_PROPOSTA.map((i) => FORMAS_SIMULADOR[i].rotulo)).toEqual([
+      "Pix / cartão direto no fornecedor",
+      "Crédito 1x",
+      "Crédito 2x a 6x (referência)",
+      "Crédito 7x a 10x",
+    ]);
   });
 
   it("boleto 4x: sem percentual, R$ 2,50 por boleto", () => {

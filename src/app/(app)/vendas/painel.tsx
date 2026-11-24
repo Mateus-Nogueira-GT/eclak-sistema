@@ -85,7 +85,6 @@ function RespostaCliente({ p, hoje }: { p: PropostaLista; hoje: string }) {
 
   const [tipo, setTipo] = useState<FormaPagamento["tipo"]>(aprovada.tipo);
   const [parcelas, setParcelas] = useState(aprovada.parcelas);
-  const [antecipado, setAntecipado] = useState(!!aprovada.antecipado);
   const [aceiteEm, setAceiteEm] = useState(hoje);
   const [primeiro, setPrimeiro] = useState(hoje);
   const [faturaNome, setFaturaNome] = useState(p.titularNome);
@@ -99,7 +98,7 @@ function RespostaCliente({ p, hoje }: { p: PropostaLista; hoje: string }) {
 
   const umaParcela = tipo === "pix" || tipo === "cartao_fornecedor";
   const qtd = umaParcela ? 1 : parcelas;
-  const forma: FormaPagamento = { tipo, parcelas: qtd, ...(tipo === "credito" && antecipado ? { antecipado: true } : {}) };
+  const forma: FormaPagamento = { tipo, parcelas: qtd };
   const diferente = !mesmaForma(forma, aprovada);
   const total = BigInt(p.precoCliente);
 
@@ -115,7 +114,6 @@ function RespostaCliente({ p, hoje }: { p: PropostaLista; hoje: string }) {
     const novo = v as FormaPagamento["tipo"];
     setTipo(novo);
     if (novo === "pix" || novo === "cartao_fornecedor") setParcelas(1);
-    if (novo !== "credito") setAntecipado(false);
     setLocalErro(null);
   }
 
@@ -247,12 +245,6 @@ function RespostaCliente({ p, hoje }: { p: PropostaLista; hoje: string }) {
                   {msgCampo("fornecedorCartaoId")}
                   <span className="mt-1 block text-[12px] text-cinza">Ele fica com o custo dele e repassa a diferença à ECLAK.</span>
                 </Campo>
-              )}
-              {tipo === "credito" && (
-                <label className="flex items-center gap-2 text-[14px] text-texto sm:col-span-2 lg:col-span-4">
-                  <input type="checkbox" checked={antecipado} onChange={(e) => setAntecipado(e.target.checked)} />
-                  Com antecipação dos recebíveis
-                </label>
               )}
               <Campo label="Fatura em nome de" className="sm:col-span-1 lg:col-span-2">
                 <input className={cx(inputCls, marca("faturaNome"))} value={faturaNome} onChange={(e) => setFaturaNome(e.target.value)} />

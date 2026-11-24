@@ -320,7 +320,13 @@ const MAX_CENTAVOS = 999_999_999_999n;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const RATEIOS = ["por_dia", "por_faturamento", "por_viagem"] as const satisfies readonly Rateio[];
 
-/** Forma de pagamento: pix e cartão direto em 1x; boleto e crédito de 1 ao parcelamento máximo. */
+export const MSG_SEM_ANTECIPACAO =
+  "A antecipação não é escolhida na proposta: ela é calculada no fluxo de caixa quando faltar caixa";
+
+/**
+ * Forma de pagamento: pix e cartão direto em 1x; boleto e crédito de 1 ao parcelamento máximo. Antecipação recusada:
+ * a ECLAK não antecipa recebíveis automaticamente (Augusto, 23/11/2026).
+ */
 export function formaSchema(parcelamentoMaximo: number) {
   return z
     .object(
@@ -334,10 +340,9 @@ export function formaSchema(parcelamentoMaximo: number) {
     .superRefine((f, ctx) => {
       const max = f.tipo === "pix" || f.tipo === "cartao_fornecedor" ? 1 : Math.min(parcelamentoMaximo, 10);
       if (f.parcelas < 1 || f.parcelas > max) ctx.addIssue({ code: "custom", message: "Parcelas inválidas", path: ["parcelas"] });
+      if (f.antecipado) ctx.addIssue({ code: "custom", message: MSG_SEM_ANTECIPACAO });
     })
-    .transform((f): FormaPagamento =>
-      f.tipo === "credito" && f.antecipado ? { tipo: "credito", parcelas: f.parcelas, antecipado: true } : { tipo: f.tipo, parcelas: f.parcelas },
-    );
+    .transform((f): FormaPagamento => ({ tipo: f.tipo, parcelas: f.parcelas }));
 }
 
 /** Reais em formato brasileiro; `positivo` recusa zero. */
