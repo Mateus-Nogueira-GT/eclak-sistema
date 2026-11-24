@@ -8,7 +8,7 @@ import { integracaoEnvios } from "@/server/db/schema";
 import { configTrello, type ConfigTrello } from "./config";
 // Só tipos: `fila.ts` importa o processador daqui (sem ciclo de valores).
 import type { DepsProcessador, EnvioTomado, Processador } from "./fila";
-import { chamar, ErroIntegracao, type Buscar } from "./http";
+import { chamar, ErroIntegracao, EsperaIntegracao, type Buscar } from "./http";
 
 // Trello: cliente REST (chave e token só no cabeçalho Authorization, nunca na URL) e o processador da fila.
 
@@ -151,27 +151,26 @@ async function cartaoDaViagem(cliente: ClienteTrello, envio: EnvioTomado, deps: 
   return checklistComItens(cliente, deps, base, CHECKLIST_VENDA, p.itens);
 }
 
-/** Id do cartão criado pelo envio `venda:<viagem>` já enviado; null se ainda não há. */
-async function cartaoEnviado(viagemId: string): Promise<string | null> {
+/**
+ * Id do cartão criado pelo envio `venda:<viagem>`. Ainda `pendente` ou `enviando`: espera sem gastar tentativa
+ * (`aguardando_cartao`). Sem envio do cartão, com falha ou enviado sem id: erro `servidor` (gasta tentativas e, no
+ * fim, `falhou`, para Reenviar depois do cartão).
+ */
+async function cartaoDaVenda(viagemId: string): Promise<string> {
   const [l] = await db
-    .select({ resultado: integracaoEnvios.resultado })
+    .select({ situacao: integracaoEnvios.situacao, resultado: integracaoEnvios.resultado })
     .from(integracaoEnvios)
-    .where(
-      and(
-        eq(integracaoEnvios.integracao, "trello"),
-        eq(integracaoEnvios.chave, chaveVenda(viagemId)),
-        eq(integracaoEnvios.situacao, "enviado"),
-      ),
-    );
-  return feitoDe(l?.resultado).cartaoId ?? null;
+    .where(and(eq(integracaoEnvios.integracao, "trello"), eq(integracaoEnvios.chave, chaveVenda(viagemId))));
+  if (l && (l.situacao === "pendente" || l.situacao === "enviando")) throw new EsperaIntegracao("aguardando_cartao");
+  const cartaoId = l?.situacao === "enviado" ? feitoDe(l.resultado).cartaoId : undefined;
+  if (!cartaoId) throw new ErroIntegracao("servidor", null);
+  return cartaoId;
 }
 
 async function checklistDoRoteiro(cliente: ClienteTrello, envio: EnvioTomado, deps: DepsProcessador): Promise<Feito> {
   const p = lerPayload(payloadRoteiro, envio.payload);
   const antes = feitoDe(envio.resultado);
-  const cartaoId = antes.cartaoId ?? (await cartaoEnviado(p.viagemId));
-  // O cartão da venda ainda não foi criado: tenta de novo depois (a espera da fila).
-  if (!cartaoId) throw new ErroIntegracao("servidor", null);
+  const cartaoId = antes.cartaoId ?? (await cartaoDaVenda(p.viagemId));
   return checklistComItens(cliente, deps, { ...antes, cartaoId }, CHECKLIST_ROTEIRO, p.itens);
 }
 

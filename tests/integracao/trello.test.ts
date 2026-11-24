@@ -9,7 +9,7 @@ vi.mock("@/server/integracoes/fila", async (original) => ({
 }));
 import { formatarCodigoViagem } from "@/domain/viagens";
 import { db } from "@/server/db/client";
-import { auditoria, clientes, integracaoEnvios, tarefas, vendas, viagens } from "@/server/db/schema";
+import { auditoria, clientes, integracaoEnvios, roteiros, tarefas, vendas, viagens } from "@/server/db/schema";
 import { processarDepois, processarFila } from "@/server/integracoes/fila";
 import { ErroIntegracao } from "@/server/integracoes/http";
 import { clienteTrello } from "@/server/integracoes/trello";
@@ -101,6 +101,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("clienteTrello", () => {
@@ -275,7 +276,6 @@ describe("processar o cartão", () => {
     // 6 chamadas de item: a do 429 e as 5 que entraram, cada item uma vez.
     expect(enviados.map((c) => c.corpo!.name)).toEqual([...ITENS_VENDA.slice(0, 3), ...ITENS_VENDA.slice(2)]);
     expect(await envioDe(`venda:${f.viagemId}`)).toMatchObject({ situacao: "enviado", resultado: { itens: 5 } });
-    vi.restoreAllMocks();
   });
 
   it("rede fora no cartão: pendente sem resultado; token inválido (401): falhou direto", async () => {
@@ -285,7 +285,6 @@ describe("processar o cartão", () => {
     expect(await envioDe(`venda:${f.viagemId}`)).toMatchObject({ situacao: "pendente", resultado: null, ultimoErro: { classe: "rede", status: null } });
     await processarFila({ agora: depois(2), buscar: trelloFalso(() => 401).buscar });
     expect(await envioDe(`venda:${f.viagemId}`)).toMatchObject({ situacao: "falhou", ultimoErro: { classe: "autenticacao", status: 401 } });
-    vi.restoreAllMocks();
   });
 
   it("payload inválido ou tipo desconhecido: falhou (recusado), sem chamar o Trello", async () => {
@@ -301,7 +300,6 @@ describe("processar o cartão", () => {
       ["falhou", { classe: "recusado", status: null }],
       ["falhou", { classe: "recusado", status: null }],
     ]);
-    vi.restoreAllMocks();
   });
 });
 
@@ -327,28 +325,42 @@ describe("aprovar roteiro", () => {
     expect(processarDepois).toHaveBeenCalledTimes(1);
   });
 
-  it("o checklist 'Tarefas do roteiro' vai no cartão da venda; sem cartão enviado ainda, tenta de novo depois", async () => {
+  it("o checklist 'Tarefas do roteiro' vai no cartão da venda; cartão na fila: aguarda sem gastar tentativa; cartão com falha: servidor", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const f = await vendida();
     await aprovar(f);
-    // O cartão ainda não saiu (a venda falhou): o roteiro espera, sem chamar o Trello.
-    await db.update(integracaoEnvios).set({ situacao: "falhou" }).where(eq(integracaoEnvios.chave, `venda:${f.viagemId}`));
     const t = trelloFalso();
-    expect(await processarFila({ agora, buscar: t.buscar })).toEqual({ enviados: 0, falhas: 1 });
+    // O cartão ainda está na fila (pendente, para mais tarde): o roteiro aguarda, sem chamar o Trello e sem contar.
+    await db.update(integracaoEnvios).set({ proximaEm: depois(60) }).where(eq(integracaoEnvios.chave, `venda:${f.viagemId}`));
+    expect(await processarFila({ agora, buscar: t.buscar })).toEqual({ enviados: 0, falhas: 0 });
+    const aguardando = await envioDe(`roteiro:${f.viagemId}`);
+    expect(aguardando).toMatchObject({
+      situacao: "pendente",
+      tentativas: 0,
+      ultimoErro: { classe: "aguardando", status: null, motivo: "aguardando_cartao" },
+    });
+    expect(aguardando.proximaEm).toEqual(depois(5));
+    // Várias esperas seguidas não chegam a `falhou`.
+    for (let i = 1; i <= 7; i++) await processarFila({ agora: depois(5 * i), buscar: t.buscar });
+    expect(await envioDe(`roteiro:${f.viagemId}`)).toMatchObject({ situacao: "pendente", tentativas: 0 });
     expect(t.chamadas).toEqual([]);
-    expect(await envioDe(`roteiro:${f.viagemId}`)).toMatchObject({ situacao: "pendente", ultimoErro: { classe: "servidor", status: null } });
+
+    // O cartão falhou: o roteiro gasta tentativa (servidor).
+    await db.update(integracaoEnvios).set({ situacao: "falhou" }).where(eq(integracaoEnvios.chave, `venda:${f.viagemId}`));
+    expect(await processarFila({ agora: depois(41), buscar: t.buscar })).toEqual({ enviados: 0, falhas: 1 });
+    expect(t.chamadas).toEqual([]);
+    expect(await envioDe(`roteiro:${f.viagemId}`)).toMatchObject({ situacao: "pendente", tentativas: 1, ultimoErro: { classe: "servidor", status: null } });
 
     await db
       .update(integracaoEnvios)
       .set({ situacao: "enviado", enviadoEm: agora, resultado: { cartaoId: "card77", url: null, checklistId: "chk78", itens: 5 } })
       .where(eq(integracaoEnvios.chave, `venda:${f.viagemId}`));
-    expect(await processarFila({ agora: depois(2), buscar: t.buscar })).toEqual({ enviados: 1, falhas: 0 });
+    expect(await processarFila({ agora: depois(43), buscar: t.buscar })).toEqual({ enviados: 1, falhas: 0 });
     expect(t.chamadas.map((c) => [c.caminho, c.corpo])).toEqual([
       ["/1/checklists", { idCard: "card77", name: "Tarefas do roteiro" }],
       ...ITENS_ROTEIRO.map((name) => ["/1/checklists/chk1/checkItems", { name }]),
     ]);
     expect(await envioDe(`roteiro:${f.viagemId}`)).toMatchObject({ situacao: "enviado", resultado: { cartaoId: "card77", checklistId: "chk1", itens: 3 } });
-    vi.restoreAllMocks();
   });
 
   it("Trello desligado na aprovação: não enfileira", async () => {
@@ -357,7 +369,6 @@ describe("aprovar roteiro", () => {
     await aprovar(f);
     expect(await envios()).toEqual([]);
     expect(processarDepois).not.toHaveBeenCalled();
-
   });
 
   it("vendida com o Trello desligado e aprovada com ele ligado: entra na fila e espera o cartão (Reenviar depois)", async () => {
@@ -372,7 +383,6 @@ describe("aprovar roteiro", () => {
     expect(await processarFila({ agora, buscar: t.buscar })).toEqual({ enviados: 0, falhas: 1 });
     expect(t.chamadas).toEqual([]);
     expect(await envioDe(`roteiro:${g.viagemId}`)).toMatchObject({ situacao: "pendente", ultimoErro: { classe: "servidor", status: null } });
-    vi.restoreAllMocks();
   });
 });
 
@@ -419,5 +429,75 @@ describe("enviarViagemAoTrello", () => {
 
     expect(await comSessao(f.d.id, () => enviarViagemAoTrello(f.viagemId))).toEqual({ ok: false, erro: "Esta viagem já foi enviada ao Trello" });
     expect(await envios()).toHaveLength(1);
+  });
+
+  async function roteiroAprovado(f: Awaited<ReturnType<typeof vendida>>) {
+    const c = await comSessao(f.u.id, () => criarRoteiro(f.viagemId, { idioma: "italiano", fuso: "Europe/Rome" }));
+    if (!c.ok || !("id" in c)) throw new Error(c.ok ? "sem id" : c.erro);
+    const a = await comSessao(f.u.id, () => aprovarRoteiro(c.id));
+    if (!a.ok) throw new Error(a.erro);
+  }
+
+  it("vendida e roteiro aprovado com o Trello desligado: o botão leva o cartão e o checklist do roteiro", async () => {
+    desligarTrello();
+    const f = await vendida();
+    await roteiroAprovado(f);
+    await db
+      .update(tarefas)
+      .set({ excluidoEm: new Date() })
+      .where(and(eq(tarefas.viagemId, f.viagemId), eq(tarefas.chave, "roteiro.trem")));
+    ligarTrello();
+    expect(await comSessao(f.d.id, () => enviarViagemAoTrello(f.viagemId))).toEqual({ ok: true });
+    const r = await envioDe(`roteiro:${f.viagemId}`);
+    expect(r).toMatchObject({
+      tipo: "checklist_roteiro",
+      situacao: "pendente",
+      payload: { viagemId: f.viagemId, itens: ["Reserva de passeios", "Compra de ingressos"] },
+    });
+    const aud = await db.select().from(auditoria).where(eq(auditoria.registroId, r.id));
+    expect(aud).toHaveLength(1);
+    expect(aud[0]).toMatchObject({ usuarioId: f.d.id, tabela: "integracao_envios", acao: "criar" });
+
+    // Os dois saem: o cartão e, nele, o checklist do roteiro (que aguarda o cartão se for tomado antes).
+    const t = trelloFalso();
+    await processarFila({ agora, buscar: t.buscar });
+    await processarFila({ agora: depois(6), buscar: t.buscar });
+    expect(await envioDe(`venda:${f.viagemId}`)).toMatchObject({ situacao: "enviado", resultado: { cartaoId: "card1" } });
+    expect(await envioDe(`roteiro:${f.viagemId}`)).toMatchObject({ situacao: "enviado", resultado: { cartaoId: "card1", itens: 2 } });
+    expect(t.chamadas.filter((c) => c.caminho === "/1/cards")).toHaveLength(1);
+    expect(t.chamadas.filter((c) => c.corpo?.name === "Tarefas do roteiro")).toEqual([
+      expect.objectContaining({ corpo: { idCard: "card1", name: "Tarefas do roteiro" } }),
+    ]);
+  });
+
+  it("vendida desligado, roteiro aprovado ligado e já em falhou: o botão cria o cartão e volta o roteiro para pendente", async () => {
+    desligarTrello();
+    const f = await vendida();
+    ligarTrello();
+    await roteiroAprovado(f);
+    await db
+      .update(integracaoEnvios)
+      .set({ situacao: "falhou", tentativas: 6, ultimoErro: { classe: "servidor", status: null } })
+      .where(eq(integracaoEnvios.chave, `roteiro:${f.viagemId}`));
+    const antes = await envioDe(`roteiro:${f.viagemId}`);
+    expect(await comSessao(f.d.id, () => enviarViagemAoTrello(f.viagemId))).toEqual({ ok: true });
+    expect(await envioDe(`venda:${f.viagemId}`)).toMatchObject({ situacao: "pendente" });
+    const depoisDoBotao = await envioDe(`roteiro:${f.viagemId}`);
+    expect(depoisDoBotao).toMatchObject({ id: antes.id, situacao: "pendente", tentativas: 0, payload: antes.payload });
+    expect(depoisDoBotao.proximaEm.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+    expect(await envios()).toHaveLength(2);
+    const aud = await db.select().from(auditoria).where(eq(auditoria.registroId, antes.id));
+    expect(aud.map((a) => [a.usuarioId, a.acao, (a.depois as { situacao: string }).situacao])).toEqual([[f.d.id, "alterar", "pendente"]]);
+  });
+
+  it("roteiro não aprovado: só o cartão", async () => {
+    desligarTrello();
+    const f = await vendida();
+    const c = await comSessao(f.u.id, () => criarRoteiro(f.viagemId, { idioma: "italiano", fuso: "Europe/Rome" }));
+    if (!c.ok) throw new Error(c.erro);
+    expect((await db.select().from(roteiros).where(eq(roteiros.viagemId, f.viagemId)))[0].status).toBe("rascunho");
+    ligarTrello();
+    expect(await comSessao(f.d.id, () => enviarViagemAoTrello(f.viagemId))).toEqual({ ok: true });
+    expect((await envios()).map((e) => e.chave)).toEqual([`venda:${f.viagemId}`]);
   });
 });

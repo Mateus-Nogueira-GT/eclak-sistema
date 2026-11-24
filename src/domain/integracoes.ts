@@ -42,6 +42,17 @@ export function repete(classe: ClasseErro): boolean {
   return classe === "rede" || classe === "limite" || classe === "servidor";
 }
 
+/**
+ * Espera que não é erro: o envio depende de outro que ainda não saiu (o checklist do roteiro espera o cartão da
+ * venda). Não gasta tentativa; volta a ser tentado depois de `ESPERA_AGUARDANDO_MIN`.
+ */
+export const MOTIVOS_ESPERA = ["aguardando_cartao"] as const;
+export type MotivoEspera = (typeof MOTIVOS_ESPERA)[number];
+export const ESPERA_AGUARDANDO_MIN = 5;
+export const ROTULO_MOTIVO_ESPERA: Record<MotivoEspera, string> = {
+  aguardando_cartao: "Aguardando o cartão da venda",
+};
+
 export const ROTULO_CLASSE_ERRO: Record<ClasseErro, string> = {
   rede: "rede",
   autenticacao: "autenticação",

@@ -6,7 +6,7 @@ import type { Transacao } from "@/server/db/client";
 import { clientes, pessoas, viagens } from "@/server/db/schema";
 import { urlDoSite } from "@/server/site";
 import { estadoIntegracao } from "./config";
-import { enfileirar, processarDepois } from "./fila";
+import { inserirEnvio, processarDepois, type EventoFila } from "./fila";
 import type { PayloadCartao, PayloadRoteiro } from "./trello";
 
 // Eventos do sistema que viram envio às integrações. Rodam na transação do evento (fechar venda, aprovar roteiro);
@@ -51,12 +51,8 @@ function site(): string {
   }
 }
 
-/**
- * Venda fechada (ou "Enviar para o Trello"): envio `venda:<viagem>` com o cartão e os itens do checklist "Tarefas
- * da venda". Devolve o id do envio criado; null se o Trello está desligado ou a viagem já tinha envio.
- */
-export async function enfileirarCartaoDaViagem(tx: Transacao, viagemId: string, itens: string[]): Promise<string | null> {
-  if (!estadoIntegracao("trello").configurada) return null;
+/** Envio `venda:<viagem>` (cartão + "Tarefas da venda"), sem conferir a configuração; null se a viagem não existe. */
+export async function eventoCartaoDaViagem(tx: Transacao, viagemId: string, itens: string[]): Promise<EventoFila | null> {
   const dados = await dadosDoCartao(tx, viagemId);
   if (!dados) return null;
   const payload: PayloadCartao = {
@@ -65,17 +61,33 @@ export async function enfileirarCartaoDaViagem(tx: Transacao, viagemId: string, 
     descricao: descricaoDoCartao(site(), viagemId),
     itens,
   };
-  return enfileirar(tx, { integracao: "trello", tipo: "cartao_viagem", viagemId, chave: chaveVenda(viagemId), payload });
+  return { integracao: "trello", tipo: "cartao_viagem", viagemId, chave: chaveVenda(viagemId), payload };
+}
+
+/** Envio `roteiro:<viagem>` ("Tarefas do roteiro" no cartão da venda), sem conferir a configuração. */
+export function eventoChecklistDoRoteiro(viagemId: string, itens: string[]): EventoFila {
+  const payload: PayloadRoteiro = { viagemId, itens };
+  return { integracao: "trello", tipo: "checklist_roteiro", viagemId, chave: chaveRoteiro(viagemId), payload };
 }
 
 /**
- * Roteiro aprovado: envio `roteiro:<viagem>` com o checklist "Tarefas do roteiro" no cartão da venda. Se o cartão
- * ainda não saiu, o processador espera (erro `servidor`) e, esgotadas as tentativas, o envio fica em Reenviar.
+ * Venda fechada: envio `venda:<viagem>` com o cartão e os itens do checklist "Tarefas da venda". Devolve o id do
+ * envio criado; null se o Trello está desligado ou a viagem já tinha envio.
+ */
+export async function enfileirarCartaoDaViagem(tx: Transacao, viagemId: string, itens: string[]): Promise<string | null> {
+  if (!estadoIntegracao("trello").configurada) return null;
+  const evento = await eventoCartaoDaViagem(tx, viagemId, itens);
+  return evento ? inserirEnvio(tx, evento) : null;
+}
+
+/**
+ * Roteiro aprovado: envio `roteiro:<viagem>` com o checklist "Tarefas do roteiro" no cartão da venda. Enquanto o
+ * cartão está na fila, o processador espera sem gastar tentativa; sem cartão (ou com falha), gasta as tentativas e
+ * o envio fica em Reenviar.
  */
 export async function enfileirarChecklistDoRoteiro(tx: Transacao, viagemId: string, itens: string[]): Promise<string | null> {
   if (!estadoIntegracao("trello").configurada) return null;
-  const payload: PayloadRoteiro = { viagemId, itens };
-  return enfileirar(tx, { integracao: "trello", tipo: "checklist_roteiro", viagemId, chave: chaveRoteiro(viagemId), payload });
+  return inserirEnvio(tx, eventoChecklistDoRoteiro(viagemId, itens));
 }
 
 /** Depois do commit do evento: manda o que entrou na fila. Nunca lança (o evento já está gravado; o cron repete). */

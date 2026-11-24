@@ -3,18 +3,21 @@ import { after } from "next/server";
 import { and, asc, eq, inArray, lt, lte, sql } from "drizzle-orm";
 import {
   ENVIANDO_PRESO_MIN,
+  ESPERA_AGUARDANDO_MIN,
   INTEGRACOES_FILA,
   LOTE_FILA,
   MAX_TENTATIVAS,
   proximaTentativa,
   repete,
+  type ClasseErro,
   type IntegracaoFila,
+  type MotivoEspera,
 } from "@/domain/integracoes";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
 import { integracaoEnvios, type ErroEnvio } from "@/server/db/schema";
 import { estadoIntegracao } from "./config";
-import { ErroIntegracao, type Buscar } from "./http";
+import { ErroIntegracao, EsperaIntegracao, type Buscar } from "./http";
 import { processarTrello } from "./trello";
 
 // Fila de envios às integrações (outbox). `enfileirar` roda na transação do evento; `processarFila` toma os envios
@@ -87,6 +90,14 @@ export type EventoFila = {
  */
 export async function enfileirar(tx: Transacao, e: EventoFila): Promise<string | null> {
   if (!estadoIntegracao(e.integracao).configurada) return null;
+  return inserirEnvio(tx, e);
+}
+
+/**
+ * Como `enfileirar`, sem conferir a configuração: só para quem já conferiu nesta mesma transação (uma conferência só,
+ * para a resposta "não configurado" e a gravação não divergirem). Devolve o id criado ou null (a chave já existia).
+ */
+export async function inserirEnvio(tx: Transacao, e: EventoFila): Promise<string | null> {
   const [l] = await tx
     .insert(t)
     .values({ integracao: e.integracao, tipo: e.tipo, viagemId: e.viagemId, chave: e.chave, payload: e.payload })
@@ -95,12 +106,14 @@ export async function enfileirar(tx: Transacao, e: EventoFila): Promise<string |
   return l?.id ?? null;
 }
 
-function erroDe(e: unknown): ErroEnvio {
+type ErroServico = { classe: ClasseErro; status: number | null };
+
+function erroDe(e: unknown): ErroServico {
   return e instanceof ErroIntegracao ? { classe: e.classe, status: e.status } : { classe: "servidor", status: null };
 }
 
 /** Log sem corpo, sem mensagem e sem segredo: integração, classe e status. */
-function logarFalha(integracao: IntegracaoFila, erro: ErroEnvio): void {
+function logarFalha(integracao: IntegracaoFila, erro: ErroServico): void {
   console.error(`[integracoes] ${integracao}: ${erro.classe}${erro.status === null ? "" : ` HTTP ${erro.status}`}`);
 }
 
@@ -213,7 +226,7 @@ async function gravarSucesso(envio: EnvioTomado, resultado: unknown, agora: Date
 }
 
 /** Devolve se gravou (false = o envio já não era desta execução). */
-async function gravarFalha(envio: EnvioTomado, erro: ErroEnvio, agora: Date): Promise<boolean> {
+async function gravarFalha(envio: EnvioTomado, erro: ErroServico, agora: Date): Promise<boolean> {
   const proxima = repete(erro.classe) ? proximaTentativa(envio.tentativas, agora) : null;
   return db.transaction(async (tx) => {
     const [l] = await tx
@@ -232,6 +245,32 @@ async function gravarFalha(envio: EnvioTomado, erro: ErroEnvio, agora: Date): Pr
       registroId: l.id,
       acao: "alterar",
       antes: { situacao: "enviando", tentativas: l.tentativas },
+      depois: { ...situacaoAuditada(l), proximaEm: proxima },
+    });
+    return true;
+  });
+}
+
+/**
+ * O envio depende de outro que ainda não saiu: volta a `pendente` daqui a `ESPERA_AGUARDANDO_MIN` sem gastar a
+ * tentativa (a tomada a tinha contado) e com o motivo em `ultimo_erro`. Devolve se gravou.
+ */
+async function gravarEspera(envio: EnvioTomado, motivo: MotivoEspera, agora: Date): Promise<boolean> {
+  const proxima = new Date(agora.getTime() + ESPERA_AGUARDANDO_MIN * 60_000);
+  const espera: ErroEnvio = { classe: "aguardando", status: null, motivo };
+  return db.transaction(async (tx) => {
+    const [l] = await tx
+      .update(t)
+      .set({ situacao: "pendente", proximaEm: proxima, ultimoErro: espera, tentativas: sql`greatest(${t.tentativas} - 1, 0)` })
+      .where(aindaMeu(envio))
+      .returning();
+    if (!l) return false;
+    await registrarAuditoria(tx, {
+      usuarioId: null,
+      tabela: "integracao_envios",
+      registroId: l.id,
+      acao: "alterar",
+      antes: { situacao: "enviando", tentativas: envio.tentativas },
       depois: { ...situacaoAuditada(l), proximaEm: proxima },
     });
     return true;
@@ -281,15 +320,19 @@ export async function processarFila(
     // saiu (seria mandado de novo). O envio fica `enviando`, o cron o solta depois de 10 min e o resultado parcial
     // gravado pelo processador evita criar de novo.
     let resultado: unknown;
-    let erro: ErroEnvio | null = null;
+    let erro: ErroServico | null = null;
+    let espera: MotivoEspera | null = null;
     try {
       if (!processador) throw new ErroIntegracao("servidor", null);
       resultado = await processador(envio, deps);
     } catch (e) {
-      erro = erroDe(e);
+      if (e instanceof EsperaIntegracao) espera = e.motivo;
+      else erro = erroDe(e);
     }
     try {
-      if (erro) {
+      // Espera não é envio nem falha: não conta em nenhum dos dois.
+      if (espera) await gravarEspera(envio, espera, relogio());
+      else if (erro) {
         logarFalha(envio.integracao, erro);
         if (await gravarFalha(envio, erro, relogio())) falhas++;
       } else if (await gravarSucesso(envio, resultado, relogio())) {
@@ -328,26 +371,29 @@ export function processarDepois(): void {
  * (null = sistema). Devolve se mudou.
  */
 export async function reenviar(envioId: string, usuarioId: string | null = null): Promise<boolean> {
-  return db.transaction(async (tx) => {
-    const [antes] = await tx
-      .select()
-      .from(t)
-      .where(and(eq(t.id, envioId), inArray(t.situacao, ["falhou", "pendente"])))
-      .for("update");
-    if (!antes) return false;
-    const [l] = await tx
-      .update(t)
-      .set({ situacao: "pendente", tentativas: 0, proximaEm: sql`now()` })
-      .where(eq(t.id, envioId))
-      .returning();
-    await registrarAuditoria(tx, {
-      usuarioId,
-      tabela: "integracao_envios",
-      registroId: l.id,
-      acao: "alterar",
-      antes: situacaoAuditada(antes),
-      depois: situacaoAuditada(l),
-    });
-    return true;
+  return db.transaction((tx) => reenviarNaTransacao(tx, envioId, usuarioId));
+}
+
+/** `reenviar` dentro da transação de quem chama (ex.: "Enviar para o Trello" retomando o checklist do roteiro). */
+export async function reenviarNaTransacao(tx: Transacao, envioId: string, usuarioId: string | null): Promise<boolean> {
+  const [antes] = await tx
+    .select()
+    .from(t)
+    .where(and(eq(t.id, envioId), inArray(t.situacao, ["falhou", "pendente"])))
+    .for("update");
+  if (!antes) return false;
+  const [l] = await tx
+    .update(t)
+    .set({ situacao: "pendente", tentativas: 0, proximaEm: sql`now()` })
+    .where(eq(t.id, envioId))
+    .returning();
+  await registrarAuditoria(tx, {
+    usuarioId,
+    tabela: "integracao_envios",
+    registroId: l.id,
+    acao: "alterar",
+    antes: situacaoAuditada(antes),
+    depois: situacaoAuditada(l),
   });
+  return true;
 }

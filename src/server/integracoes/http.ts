@@ -1,5 +1,5 @@
 import "server-only";
-import { TIMEOUT_MS, classificarStatus, type ClasseErro } from "@/domain/integracoes";
+import { TIMEOUT_MS, classificarStatus, type ClasseErro, type MotivoEspera } from "@/domain/integracoes";
 
 // Chamada HTTP das integrações: `fetch` injetável (os testes passam um falso), timeout e erro classificado. O corpo
 // de uma resposta de erro nunca é lido nem guardado (pode ecoar o token); só a classe e o status saem daqui.
@@ -18,6 +18,16 @@ export class ErroIntegracao extends Error {
     this.name = "ErroIntegracao";
     this.classe = classe;
     this.status = status;
+  }
+}
+
+/** O processador ainda não pode mandar (depende de outro envio): a fila espera sem gastar tentativa. */
+export class EsperaIntegracao extends Error {
+  readonly motivo: MotivoEspera;
+  constructor(motivo: MotivoEspera) {
+    super(`Envio aguardando: ${motivo}`);
+    this.name = "EsperaIntegracao";
+    this.motivo = motivo;
   }
 }
 

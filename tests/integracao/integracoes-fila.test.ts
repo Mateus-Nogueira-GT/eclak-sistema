@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { auditoria, integracaoEnvios } from "@/server/db/schema";
-import { ErroIntegracao } from "@/server/integracoes/http";
+import { ErroIntegracao, EsperaIntegracao } from "@/server/integracoes/http";
 import {
   definirProcessadorParaTestes,
   enfileirar,
@@ -213,6 +213,25 @@ describe("processarFila", () => {
     await processarFila({ agora: depois(2) });
     expect(chamadas.map((c) => c.resultado)).toEqual([null, { cartaoId: "c1" }]);
     expect(await ler(e.id)).toMatchObject({ situacao: "enviado", tentativas: 2, resultado: { cartaoId: "c1", checklistId: "k1" } });
+  });
+
+  it("espera (depende de outro envio): pendente em +5 min, sem gastar tentativa nem contar, com o motivo; auditado", async () => {
+    definirProcessadorParaTestes("trello", async () => {
+      throw new EsperaIntegracao("aguardando_cartao");
+    });
+    const e = await inserir({ tentativas: 2, resultado: { cartaoId: "c1" } });
+    expect(await processarFila({ agora })).toEqual({ enviados: 0, falhas: 0 });
+    const r = await ler(e.id);
+    expect(r).toMatchObject({
+      situacao: "pendente",
+      tentativas: 2,
+      resultado: { cartaoId: "c1" },
+      ultimoErro: { classe: "aguardando", status: null, motivo: "aguardando_cartao" },
+    });
+    expect(r.proximaEm).toEqual(depois(5));
+    const aud = await db.select().from(auditoria).where(eq(auditoria.registroId, e.id));
+    expect(aud).toHaveLength(1);
+    expect(aud[0]).toMatchObject({ usuarioId: null, acao: "alterar" });
   });
 
   it("processador que não devolve nada mantém o resultado", async () => {
