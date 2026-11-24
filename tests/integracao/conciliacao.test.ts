@@ -212,6 +212,16 @@ describe("conciliação do extrato OFX", () => {
       expect(await db.select().from(extratoTransacoes)).toHaveLength(6);
     });
 
+    it("ajustada continua repetida depois de desfazer a importação que tinha o FITID original", async () => {
+      const a = await importar(ofx([{ fitid: "X", data: "2026-11-01", valor: "-1.00", nome: "A" }]));
+      const b = ofx([{ fitid: "X", data: "2026-11-02", valor: "-2.00", nome: "B" }]);
+      expect(await importar(b)).toMatchObject({ novas: 1, ajustadas: 1 });
+      expect(await comSessao(c.fin, () => desfazerImportacao(a.extratoId))).toEqual({ ok: true });
+      // O FITID "X" ficou livre, mas (X, 02/11, −2,00) já está gravada como X#2026-11-02#-200.
+      expect(await importar(b + "\n")).toMatchObject({ novas: 0, repetidas: 1, ajustadas: 0 });
+      expect((await db.select().from(extratoTransacoes)).map((t) => t.fitid)).toEqual(["X#2026-11-02#-200"]);
+    });
+
     it("FITID repetido no mesmo arquivo: igual conta como repetida; diferente entra ajustada", async () => {
       const r = await importar(
         ofx([

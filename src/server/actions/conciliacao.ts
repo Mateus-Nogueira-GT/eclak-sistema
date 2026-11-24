@@ -103,29 +103,23 @@ type Gravar = TransacaoOfx & { fitidGravado: string; ajustada: boolean };
 const fitidAjustado = (t: TransacaoOfx) => `${t.fitid}#${t.data}#${t.valor}`;
 
 /**
- * Separa o que gravar do que já está na conta (`existentes`: FITID → data e valor gravados). FITID livre → nova;
- * FITID com a mesma data e valor (na conta ou antes no próprio arquivo) → repetida; com outra data ou valor → grava
- * com `fitid#data#valor` (ajustada), a não ser que esse também já exista (então é repetida: reimportação).
+ * Separa o que gravar do que já está na conta (`existentes`: FITID → data e valor gravados). Já gravada como
+ * `fitid#data#valor` → repetida (mesmo se o FITID original ficou livre, por exemplo depois de desfazer a importação
+ * que o tinha); FITID livre → nova; FITID com a mesma data e valor (na conta ou antes no próprio arquivo) →
+ * repetida; com outra data ou valor → grava com `fitid#data#valor` (ajustada).
  */
 function separarTransacoes(transacoes: TransacaoOfx[], existentes: Map<string, { data: string; valor: bigint }>): { gravar: Gravar[]; repetidas: number } {
   const vistos = new Map(existentes);
   const gravar: Gravar[] = [];
   let repetidas = 0;
   for (const t of transacoes) {
-    const igual = (e: { data: string; valor: bigint }) => e.data === t.data && e.valor === t.valor;
+    const ajustado = fitidAjustado(t);
     const original = vistos.get(t.fitid);
-    let fitid = t.fitid;
-    if (original) {
-      if (igual(original)) {
-        repetidas++;
-        continue;
-      }
-      fitid = fitidAjustado(t);
-      if (vistos.has(fitid)) {
-        repetidas++;
-        continue;
-      }
+    if (vistos.has(ajustado) || (original && original.data === t.data && original.valor === t.valor)) {
+      repetidas++;
+      continue;
     }
+    const fitid = original ? ajustado : t.fitid;
     vistos.set(fitid, { data: t.data, valor: t.valor });
     gravar.push({ ...t, fitidGravado: fitid, ajustada: fitid !== t.fitid });
   }
@@ -183,7 +177,8 @@ export async function importarExtrato(form: FormData) {
     let r: Importado | OutraConta | Falha;
     try {
       r = await db.transaction(async (tx): Promise<Importado | OutraConta | Falha> => {
-        // `no key update`: serializa as importações da conta sem barrar quem só referencia a conta (baixas).
+        // `no key update`: serializa as importações da conta sem barrar inserts que só referenciam a conta pela FK
+        // (as baixas, que conferem a conta com `for share`, esperam a importação terminar).
         const [conta] = await tx
           .select({ id: contasBancarias.id })
           .from(contasBancarias)

@@ -146,7 +146,8 @@ Perguntas abertas para o Mateus (spec da 6, §8; não bloqueiam): (1) os critér
   - **I1** o charset sai dos bytes, não do cabeçalho (bancos declaram `CHARSET:1252` e mandam UTF-8, ou `CHARSET:NONE` e mandam 1252): `TextDecoder("utf-8", { fatal: true })` e, se falha, windows-1252; texto só ASCII é igual nos dois, então o cabeçalho não desempata nada e foi tirado.
   - **I2** FITID já gravado na conta (ou antes no mesmo arquivo): mesma data e valor = repetida; outra data ou valor = grava com FITID `<fitid>#<data>#<valor em centavos>` e conta em `ajustadas` (reimportar o mesmo arquivo depois vê a ajustada como repetida). `extratos.transacoes` = gravadas (novas, incluindo as ajustadas); `ajustadas` só no retorno da action e no `depois` da auditoria (sem migração).
   - **I3** (a) se a conta já tem extrato com `banco_ofx` ou `conta_ofx` (não nulos) diferentes dos do arquivo, a importação recusa com "Este extrato parece ser de outra conta (banco X, final Y). Confirme para importar mesmo assim." e a tela mostra "Importar mesmo assim" (reenvia o mesmo arquivo com `confirmarOutraConta=1`); compara com todos os extratos anteriores, então depois de uma confirmação as próximas importações daquela conta voltam a perguntar enquanto houver extratos dos dois. (b) o histórico mostra banco e final da conta. (c) `desfazerImportacao(extratoId)` apaga as transações e o extrato (auditoria `excluir` com `antes` de cada um, na mesma transação), só com todas pendentes; senão "Desfaça as conciliações deste extrato antes". Botão "Desfazer importação" no histórico, com diálogo de confirmação.
-  - **M2** a importação trava a linha da conta (`for no key update`, que serializa importações da mesma conta sem barrar baixas que só referenciam a conta) e grava as transações ordenadas por FITID.
+  - **M2** a importação trava a linha da conta com `for no key update` (em vez do `for update` literal: serializa as importações da mesma conta e não barra inserts que só referenciam a conta pela FK; as actions que conferem a conta com `for share`, como as baixas, esperam a importação terminar) e grava as transações ordenadas por FITID.
+  - **I2 depois de desfazer** transação já gravada como `fitid#data#valor` é repetida mesmo se o FITID original ficou livre (desfeita a importação que o tinha), para não gravar o mesmo movimento duas vezes.
   - Relatório usa `obterConciliacao(…, { sugestoes: false })`: mesmas linhas, situações e totais da tela, sem calcular sugestão, opções nem histórico.
   - Seed: `conta_ofx` mascarada ('3456', como a importação grava); par já conciliado à mão → a transação do seed entra pendente.
 
@@ -262,9 +263,6 @@ Teste de auditoria sem `orderBy`; sem teste de concorrência no "esta e as próx
 - Verificação no navegador com os cinco perfis feita na onda final da revisão (23/11/2026); depois da integração com a 4b, smoke como Financeiro estratégico em /financeiro/caixa, /financeiro/cartoes, viagem vendida (trilha, entradas), roteiro, /tarefas e /dailies, sem erros.
 - `npm run test:integracao` tem trava: o global setup (`tests/integracao/trava-global.ts`) pega um advisory lock do Postgres e uma segunda execução simultânea falha logo com mensagem clara. Um `npx vitest run tests/integracao/…` avulso não passa pela trava.
 - Achados menores da revisão deixados para depois:
-  - (6b) Antes da produção: conseguir um OFX real de cada banco usado pela ECLAK e importar (charset, FITID, ACCTID, valor líquido de cartão).
-  - (6b) "A baixa mudou" e "Diferença" não geram aviso na Visão geral (só "sem par no sistema" gera).
-  - (6b) O sinal do valor vem só de `TRNAMT`; `TRNTYPE` (DEBIT/CREDIT) é guardado mas não usado para conferir o sinal.
   - `marcarEnviado` (e as outras mudanças de estado do daily) não confere a versão (`atualizado_em`); trava a linha e confere o estado, mas não detecta edição de texto feita por outra pessoa no meio tempo.
   - Testes de D5/D29 não distinguem o consultor da viagem de quem fechou a venda (no fixture são a mesma pessoa) nem usam `vendida_em` retroativa.
   - `ordem` das tarefas pode repetir sob concorrência (duas criações ao mesmo tempo).
@@ -274,6 +272,13 @@ Teste de auditoria sem `orderBy`; sem teste de concorrência no "esta e as próx
   - Testes de CHECK usam `toThrow()` genérico (não conferem o nome da restrição).
   - Desfazer a aprovação de um roteiro aprovado direto do rascunho leva a "Aguardando o cliente", não de volta a "Rascunho".
   - O seed reimplementa em SQL o insert das tarefas automáticas (mesma lista e mesmo ON CONFLICT, mas código duplicado de `criarTarefasAutomaticas`).
+
+### 8.5 Pendências menores da 6b (não bloqueiam)
+- Antes da produção: conseguir um OFX real de cada banco usado pela ECLAK e importar (charset, FITID, ACCTID, valor líquido de cartão).
+- "A baixa mudou" e "Diferença" não geram aviso na Visão geral (só "sem par no sistema" gera).
+- O sinal do valor vem só de `TRNAMT`; `TRNTYPE` (DEBIT/CREDIT) é guardado mas não usado para conferir o sinal.
+- `desfazerImportacao` audita transação por transação (um INSERT de auditoria por linha): extrato com milhares de transações fica lento.
+- A confirmação de "outra conta" compara com todos os extratos anteriores da conta: conta que recebe de propósito extratos de dois bancos pergunta em toda importação.
 
 Outras pendências menores acumuladas (não bloqueiam): teste de RLS aceita qualquer erro; `comSessao` nos testes depende de `fileParallelism: false`; auditoria guarda CPF/passaporte (anotar na política de LGPD); trava global de CPF serializa cadastros; telefones só brasileiros; lista de orçamentos sem paginação; sugestão de custo de referência conta cotações, não itens; "Passeio guiado" virou "Passeio" no tipo de item; validação de data duplicada entre formulário e domínio de regras.
 
@@ -297,7 +302,7 @@ npm run dev               # abrir em localhost (127.0.0.1 não fica interativo n
 - `.env.local` (não versionado): `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SITE_URL` (ver `.env.example`).
 - Usuários do seed: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`, senha `eclak-local`.
 - Testes: `npm run lint && npm run typecheck && npm test && npm run test:integracao && npm run build` (uma execução de integração por vez: a trava do global setup recusa a segunda). Últimos números (23/11/2026, branch `claude/fatia-5a-operacao` integrada com `main` e a 4b): 363 testes de domínio (23 arquivos) e 425 de integração (26 arquivos), tudo verde, build ok, seed duas vezes sem duplicar. **A integração trunca o banco local**: rodar `npm run seed:local` depois.
-- Números da 6b (24/11/2026, branch `claude/fatia-6b-conciliacao`, depois da revisão final): 464 testes de domínio (26 arquivos) e 472 de integração (28 arquivos), lint, typecheck e build ok, seed duas vezes sem duplicar (a segunda cria 0 transações de extrato); relatório "Conciliação extrato x sistema", importação de outra conta com confirmação e "Desfazer importação" conferidos no navegador.
+- Números da 6b (24/11/2026, branch `claude/fatia-6b-conciliacao`, depois da revisão final): 464 testes de domínio (26 arquivos) e 473 de integração (28 arquivos), lint, typecheck e build ok, seed duas vezes sem duplicar (a segunda cria 0 transações de extrato); relatório "Conciliação extrato x sistema", importação de outra conta com confirmação e "Desfazer importação" conferidos no navegador.
 - Migração nova: `npm run db:generate` (gerada) ou `npx drizzle-kit generate --custom --name <nome>` (RLS, índices, enums); validar do zero (`npx supabase db reset` + `npm run db:migrate`) e sobre banco populado.
 - Next gera `AGENTS.md` no dev: está no `.gitignore`.
 
