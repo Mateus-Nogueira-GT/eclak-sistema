@@ -1,4 +1,5 @@
 import "server-only";
+import { eq } from "drizzle-orm";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import {
   linhasCsv,
@@ -10,6 +11,8 @@ import {
   type PeriodoRelatorio,
   type Relatorio,
 } from "@/domain/paineis";
+import { db } from "@/server/db/client";
+import { contasBancarias } from "@/server/db/schema";
 import {
   relatorioBancos,
   relatorioConciliacao,
@@ -86,6 +89,8 @@ export async function gerarCsv(params: ParametrosRelatorio): Promise<{ nome: str
   const { rel, periodo, consultorId, contaId } = params;
   const dados = await ler(rel, periodo.intervalo, consultorId, contaId);
   const { cabecalho, linhas } = linhasCsv(rel, dados);
-  return { nome: nomeArquivoRelatorio(rel, periodo.de, periodo.ate, consultorId !== undefined), corpo: paraCsv(cabecalho, linhas) };
+  const [conta] = contaId ? await db.select({ nome: contasBancarias.nome }).from(contasBancarias).where(eq(contasBancarias.id, contaId)) : [];
+  const nomeConta = conta?.nome;
+  return { nome: nomeArquivoRelatorio(rel, periodo.de, periodo.ate, consultorId !== undefined, nomeConta), corpo: paraCsv(cabecalho, linhas) };
 }
 

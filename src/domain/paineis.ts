@@ -252,9 +252,15 @@ export function periodoDosRelatorios(de: string | undefined, ate: string | undef
   }
 }
 
-/** `relatorio-{rel}-{de}[_{ate}][-consultor].csv` (`-consultor` quando só as viagens de um consultor). */
-export function nomeArquivoRelatorio(rel: Relatorio, de: string, ate: string, porConsultor = false): string {
-  return `relatorio-${rel}-${de}${ate === de ? "" : `_${ate}`}${porConsultor ? "-consultor" : ""}.csv`;
+/** `relatorio-{rel}-{de}[_{ate}][-consultor].csv` (`-consultor` quando só as viagens de um consultor; `-conta-<nome>` quando só uma conta). */
+export function nomeArquivoRelatorio(rel: Relatorio, de: string, ate: string, porConsultor = false, conta?: string): string {
+  const slug = conta
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `relatorio-${rel}-${de}${ate === de ? "" : `_${ate}`}${porConsultor ? "-consultor" : ""}${slug ? `-conta-${slug}` : ""}.csv`;
 }
 
 export const CABECALHOS: Record<Relatorio, string[]> = {

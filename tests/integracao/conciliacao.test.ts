@@ -522,7 +522,7 @@ describe("conciliação do extrato OFX", () => {
       );
       const v4 = await transacao("V4");
       expect(await comSessao(c.fin, () => ignorarTransacao(v4.id, "Estornada"))).toEqual({ ok: true });
-      expect(await pendentesParaAviso(hoje)).toEqual({ qtd: 2, valor: 3500n });
+      expect(await pendentesParaAviso(hoje)).toMatchObject({ qtd: 2, valor: 3500n, contas: [{ contaId: c.conta, nome: "Itaú", maisAntiga: somarDias(hoje, -10) }] });
     });
   });
 
@@ -532,11 +532,11 @@ describe("conciliação do extrato OFX", () => {
       const outra = await contaBancaria(c.fin, "Bradesco");
       await importar(ofx([{ fitid: "A1", data: somarDias(hoje, -10), valor: "-10.00", nome: "A" }], "20200101", "20991231"));
       await importar(ofx([{ fitid: "B1", data: somarDias(hoje, -10), valor: "-20.00", nome: "B" }], "20200101", "20991231"), outra);
-      expect(await pendentesParaAviso(hoje)).toEqual({ qtd: 2, valor: 3000n });
+      expect(await pendentesParaAviso(hoje)).toMatchObject({ qtd: 2, valor: 3000n });
       await db.update(contasBancarias).set({ ativa: false }).where(eq(contasBancarias.id, outra));
-      expect(await pendentesParaAviso(hoje)).toEqual({ qtd: 1, valor: 1000n });
+      expect(await pendentesParaAviso(hoje)).toMatchObject({ qtd: 1, valor: 1000n });
       await db.update(contasBancarias).set({ excluidoEm: new Date() }).where(eq(contasBancarias.id, c.conta));
-      expect(await pendentesParaAviso(hoje)).toEqual({ qtd: 0, valor: 0n });
+      expect(await pendentesParaAviso(hoje)).toMatchObject({ qtd: 0, valor: 0n, contas: [] });
     });
   });
 
@@ -622,7 +622,7 @@ describe("conciliação do extrato OFX", () => {
       expect(a).toMatchObject({
         titulo: "2 transações do extrato sem par no sistema",
         detalhe: "R$ 45,00 em transações sem par",
-        href: "/financeiro/conciliacao?situacao=nao_conciliado",
+        href: `/financeiro/conciliacao?conta=${c.conta}&de=${somarDias(hoje, -9)}&ate=${hoje}&situacao=nao_conciliado`,
         responsavel: "Financeiro",
         agregado: true,
       });
@@ -630,6 +630,41 @@ describe("conciliação do extrato OFX", () => {
       expect(um.novas).toBe(1);
       const v2 = await comSessao(diretor.id, () => obterVisaoGeral("mes"));
       expect(v2.avisos.find((x) => x.tipo === "conciliacao")?.titulo).toBe("3 transações do extrato sem par no sistema");
+    });
+  });
+
+  describe("aviso com várias contas", () => {
+    it("abre a conta da pendência mais antiga, do dia dela até hoje, e diz que são 2 contas", async () => {
+      const hoje = hojeEmCuiaba();
+      const diretor = await criarUsuarioTeste("diretor");
+      const outra = await contaBancaria(c.fin, "Bradesco");
+      const mesPassado = somarDias(hoje, -35);
+      await importar(ofx([{ fitid: "M1", data: somarDias(hoje, -6), valor: "-10.00", nome: "A" }], "20200101", "20991231"));
+      await importar(ofx([{ fitid: "M2", data: mesPassado, valor: "-20.00", nome: "B" }], "20200101", "20991231"), outra);
+      const a = (await comSessao(diretor.id, () => obterVisaoGeral("mes"))).avisos.find((x) => x.tipo === "conciliacao")!;
+      expect(a.href).toBe(`/financeiro/conciliacao?conta=${outra}&de=${mesPassado}&ate=${hoje}&situacao=nao_conciliado`);
+      expect(a.detalhe).toBe(`R$ 30,00 em transações sem par, em 2 contas`);
+      // Os parâmetros do link são aceitos pela leitura da tela como estão e a pendência aparece.
+      const q = new URL(a.href, "http://x").searchParams;
+      const r = await comSessao(c.fin, () => obterConciliacao({ contaBancariaId: q.get("conta")!, de: q.get("de")!, ate: q.get("ate")!, situacao: q.get("situacao") as "nao_conciliado" }));
+      expect(r!.linhas.map((l) => l.transacao.fitid)).toEqual(["M2"]);
+    });
+  });
+
+  describe("planilha: descrição que parece fórmula e nome do arquivo", () => {
+    it("= e @ no início da descrição são neutralizados; o nome do arquivo leva a conta", async () => {
+      await importar(
+        ofx([
+          { fitid: "F1", data: "2026-11-05", valor: "-10.00", nome: "=SOMA(A1)" },
+          { fitid: "F2", data: "2026-11-06", valor: "-11.00", nome: "@cmd" },
+        ]),
+      );
+      const r = await comSessao(c.fin, () => GET(new Request(`http://localhost/x?rel=conciliacao&de=2026-11&ate=2026-11&conta=${c.conta}`)));
+      expect(r.headers.get("content-disposition")).toBe('attachment; filename="relatorio-conciliacao-2026-11-conta-itau.csv"');
+      const texto = await r.text();
+      expect(texto).toContain("05/11/2026;Itaú; =SOMA(A1);-10,00");
+      expect(texto).toContain("06/11/2026;Itaú; @cmd;-11,00");
+      expect(texto).not.toMatch(/;[=@]/);
     });
   });
 

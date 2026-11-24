@@ -162,13 +162,19 @@ export async function obterConciliacao(filtro: FiltroConciliacao): Promise<Conci
   };
 }
 
+export type ContaComPendentes = { contaId: string; nome: string; maisAntiga: string };
+
 /**
  * Transações pendentes com data de mais de `DIAS_AVISO` dias (o aviso "sem par no sistema") das contas ativas e não
- * excluídas; `valor` = soma dos valores em módulo. Sem checagem de acesso: chamada por `obterVisaoGeral`, que já checa.
+ * excluídas; `valor` = soma dos valores em módulo. `contas` = as contas com pendências, a de pendência mais antiga
+ * primeiro (o aviso abre essa, do dia mais antigo até hoje). Sem checagem de acesso: chamada por `obterVisaoGeral`.
  */
-export async function pendentesParaAviso(hoje: string): Promise<{ qtd: number; valor: bigint }> {
-  const [r] = await db
+export async function pendentesParaAviso(hoje: string): Promise<{ qtd: number; valor: bigint; contas: ContaComPendentes[] }> {
+  const porConta = await db
     .select({
+      contaId: contasBancarias.id,
+      nome: contasBancarias.nome,
+      maisAntiga: sql<string>`min(${extratoTransacoes.data})::text`,
       qtd: sql<number>`count(*)::int`,
       valor: sql<string>`coalesce(sum(abs(${extratoTransacoes.valor})), 0)::bigint`,
     })
@@ -181,6 +187,12 @@ export async function pendentesParaAviso(hoje: string): Promise<{ qtd: number; v
         eq(contasBancarias.ativa, true),
         isNull(contasBancarias.excluidoEm),
       ),
-    );
-  return { qtd: r.qtd, valor: BigInt(r.valor) };
+    )
+    .groupBy(contasBancarias.id, contasBancarias.nome)
+    .orderBy(sql`min(${extratoTransacoes.data})`, asc(contasBancarias.nome));
+  return {
+    qtd: porConta.reduce((s, c) => s + c.qtd, 0),
+    valor: porConta.reduce((s, c) => s + BigInt(c.valor), 0n),
+    contas: porConta.map((c) => ({ contaId: c.contaId, nome: c.nome, maisAntiga: c.maisAntiga })),
+  };
 }

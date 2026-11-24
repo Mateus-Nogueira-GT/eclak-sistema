@@ -336,12 +336,15 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
     );
   }
   if (semPar.qtd > 0) {
+    // Abre a conta com a pendência mais antiga, do dia dela até hoje: a lista não cai vazia.
+    const primeira = semPar.contas[0];
+    const href = `/financeiro/conciliacao?${new URLSearchParams({ conta: primeira.contaId, de: primeira.maisAntiga, ate: hoje, situacao: "nao_conciliado" }).toString()}`;
     avisos.push(
       aviso(
         "conciliacao",
         `${plural(semPar.qtd, "transação", "transações")} do extrato sem par no sistema`,
-        `${formatarReais(semPar.valor)} em transações sem par`,
-        "/financeiro/conciliacao?situacao=nao_conciliado",
+        `${formatarReais(semPar.valor)} em transações sem par${semPar.contas.length > 1 ? `, em ${semPar.contas.length} contas` : ""}`,
+        href,
         true,
       ),
     );

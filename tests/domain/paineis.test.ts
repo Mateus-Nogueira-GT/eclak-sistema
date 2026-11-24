@@ -218,6 +218,7 @@ describe("relatórios: período, arquivo e linhas do CSV", () => {
     expect(nomeArquivoRelatorio("dre", "2026-11", "2026-11")).toBe("relatorio-dre-2026-11.csv");
     expect(nomeArquivoRelatorio("bancos", "2026-09", "2026-11")).toBe("relatorio-bancos-2026-09_2026-11.csv");
     expect(nomeArquivoRelatorio("margens", "2026-11", "2026-11", true)).toBe("relatorio-margens-2026-11-consultor.csv");
+    expect(nomeArquivoRelatorio("conciliacao", "2026-11", "2026-11", false, "Banco do Brasil – PJ")).toBe("relatorio-conciliacao-2026-11-conta-banco-do-brasil-pj.csv");
     expect(nomeArquivoRelatorio("margens", "2026-09", "2026-11", true)).toBe("relatorio-margens-2026-09_2026-11-consultor.csv");
   });
   it("DRE", () => {
