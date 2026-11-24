@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { MAX_CARACTERES_CHAT, MAX_MENSAGENS_CHAT } from "@/domain/chat";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { protegerTexto } from "@/domain/ia-privacidade";
 import { PERFIS, veCamadaEstrategica } from "@/domain/perfis";
@@ -20,8 +21,6 @@ import { provedorIA, type MensagemIA, type RespostaIA } from "@/server/integraco
 
 type Falha = { ok: false; erro: string };
 
-const MAX_MENSAGENS = 30;
-const MAX_CARACTERES = 4000;
 /** Voltas (chamadas ao provedor) por pergunta. */
 const MAX_VOLTAS = 6;
 /**
@@ -77,11 +76,11 @@ function remontar(historico: { de: "eu" | "ia"; texto: string }[]): MensagemIA[]
 
 function validar(mensagens: unknown): MensagemIA[] | Falha {
   if (!Array.isArray(mensagens)) return { ok: false, erro: "Dados inválidos" };
-  if (mensagens.length > MAX_MENSAGENS) return { ok: false, erro: "Conversa longa demais: comece outra" };
+  if (mensagens.length > MAX_MENSAGENS_CHAT) return { ok: false, erro: "Conversa longa demais: comece outra" };
   const v = z.array(mensagemSchema).safeParse(mensagens);
   if (!v.success) return { ok: false, erro: "Dados inválidos" };
   const ms = v.data;
-  if (ms.some((m) => m.texto.length > MAX_CARACTERES)) return { ok: false, erro: "Mensagem longa demais (até 4.000 caracteres)" };
+  if (ms.some((m) => m.texto.length > MAX_CARACTERES_CHAT)) return { ok: false, erro: "Mensagem longa demais (até 4.000 caracteres)" };
   if (ms.some((m) => m.texto.trim() === "")) return SEM_PERGUNTA;
   // Terminar na IA seria preencher a resposta (prefill): a última precisa ser a pergunta.
   if (ms.length === 0 || ms[ms.length - 1].de !== "eu") return SEM_PERGUNTA;

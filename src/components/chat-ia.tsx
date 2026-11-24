@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Send, X } from "lucide-react";
+import { historicoParaEnviar, MAX_CARACTERES_CHAT } from "@/domain/chat";
 import { conversar } from "@/server/actions/chat";
 import { cx } from "./ui";
 
@@ -13,18 +14,6 @@ type Msg = { de: "eu" | "ia"; texto: string; erro?: boolean };
 
 const SAUDACAO_CHAT =
   "Posso responder perguntas sobre viagens, tarefas e dailies com o que o seu perfil pode ver. Por enquanto eu só leio: nada é salvo pelo chat.";
-
-/** Mesmos limites do servidor. */
-const MAX_MENSAGENS = 30;
-const MAX_CARACTERES = 4000;
-
-/** Últimas mensagens (até 30) que começam numa pergunta, sem as de erro. */
-function historico(msgs: Msg[]): { de: "eu" | "ia"; texto: string }[] {
-  const validas = msgs.filter((m) => !m.erro).map(({ de, texto }) => ({ de, texto }));
-  let corte = validas.slice(-MAX_MENSAGENS);
-  while (corte.length && corte[0].de !== "eu") corte = corte.slice(1);
-  return corte;
-}
 
 export function ChatIA({ aberto, onFechar, perfilNome }: { aberto: boolean; onFechar: () => void; perfilNome: string }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -48,7 +37,7 @@ export function ChatIA({ aberto, onFechar, perfilNome }: { aberto: boolean; onFe
     setTexto("");
     iniciar(async () => {
       try {
-        const r = await conversar(historico(novas));
+        const r = await conversar(historicoParaEnviar(novas));
         setMsgs((m) => [...m, r.ok ? { de: "ia", texto: r.texto } : { de: "ia", texto: r.erro, erro: true }]);
       } catch {
         setMsgs((m) => [...m, { de: "ia", texto: "Sem conexão com o sistema agora. Tente de novo.", erro: true }]);
@@ -100,7 +89,7 @@ export function ChatIA({ aberto, onFechar, perfilNome }: { aberto: boolean; onFe
               ref={campoRef}
               rows={1}
               value={texto}
-              maxLength={MAX_CARACTERES}
+              maxLength={MAX_CARACTERES_CHAT}
               onChange={(e) => setTexto(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
