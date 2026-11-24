@@ -37,7 +37,7 @@ function Par({ c }: { c: Candidata }) {
   );
 }
 
-type Aberto = { tipo: "escolher" | "criar" | "ignorar"; linha: LinhaConciliacao } | null;
+type Aberto = { tipo: "escolher" | "criar" | "ignorar" | "desfazer"; linha: LinhaConciliacao } | null;
 
 export function ListaConciliacao({ linhas, categorias, vazio }: { linhas: LinhaConciliacao[]; categorias: Grupo[]; vazio: string }) {
   const router = useRouter();
@@ -59,10 +59,6 @@ export function ListaConciliacao({ linhas, categorias, vazio }: { linhas: LinhaC
   }
 
   const confirmar = (l: LinhaConciliacao, c: Candidata) => executar(() => confirmarPar(l.transacao.id, c.origem, c.id));
-  const desfazer = (l: LinhaConciliacao) => {
-    if (!window.confirm(`Desfazer o tratamento de "${l.transacao.descricao}"? A transação volta a ficar pendente.`)) return;
-    executar(() => desfazerConciliacao(l.transacao.id));
-  };
 
   return (
     <div>
@@ -140,7 +136,7 @@ export function ListaConciliacao({ linhas, categorias, vazio }: { linhas: LinhaC
                           </Botao>
                         </>
                       ) : (
-                        <Botao variante="secundario" disabled={pendente} onClick={() => desfazer(l)} className="!px-2.5 !py-1 !text-[13px]">
+                        <Botao variante="secundario" disabled={pendente} onClick={() => setAberto({ tipo: "desfazer", linha: l })} className="!px-2.5 !py-1 !text-[13px]">
                           Desfazer
                         </Botao>
                       )}
@@ -156,6 +152,7 @@ export function ListaConciliacao({ linhas, categorias, vazio }: { linhas: LinhaC
       {aberto?.tipo === "escolher" && <DialogoEscolher linha={aberto.linha} onFechar={() => setAberto(null)} onEscolher={(c) => { setAberto(null); confirmar(aberto.linha, c); }} />}
       {aberto?.tipo === "criar" && <DialogoCriar linha={aberto.linha} categorias={categorias} onFechar={() => setAberto(null)} />}
       {aberto?.tipo === "ignorar" && <DialogoIgnorar linha={aberto.linha} onFechar={() => setAberto(null)} />}
+      {aberto?.tipo === "desfazer" && <DialogoDesfazer linha={aberto.linha} onFechar={() => setAberto(null)} />}
     </div>
   );
 }
@@ -275,6 +272,37 @@ function DialogoIgnorar({ linha, onFechar }: { linha: LinhaConciliacao; onFechar
         {acao.erro && (
           <p role="alert" className="mt-4 rounded-[5px] border border-ouro bg-ouro/15 px-3 py-2 text-[13px] text-texto">
             {acao.campos.motivo ?? acao.erro}
+          </p>
+        )}
+      </div>
+    </Dialogo>
+  );
+}
+
+function DialogoDesfazer({ linha, onFechar }: { linha: LinhaConciliacao; onFechar: () => void }) {
+  const acao = useAcao();
+  return (
+    <Dialogo
+      eyebrow="Desfazer"
+      titulo="Desfazer o tratamento desta transação"
+      onFechar={onFechar}
+      rodape={
+        <>
+          <Botao variante="secundario" onClick={onFechar}>Cancelar</Botao>
+          <Botao disabled={acao.pendente} onClick={() => acao.executar(() => desfazerConciliacao(linha.transacao.id), onFechar)}>
+            Desfazer
+          </Botao>
+        </>
+      }
+    >
+      <div className="px-6 py-5">
+        <Resumo l={linha} />
+        <p className="text-[14px] text-texto">
+          A transação volta a ficar pendente. Um lançamento criado a partir dela continua baixado: desfaça-o pela lista de lançamentos, se for o caso.
+        </p>
+        {acao.erro && (
+          <p role="alert" className="mt-4 rounded-[5px] border border-ouro bg-ouro/15 px-3 py-2 text-[13px] text-texto">
+            {acao.erro}
           </p>
         )}
       </div>

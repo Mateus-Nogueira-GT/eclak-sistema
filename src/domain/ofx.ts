@@ -31,18 +31,18 @@ export type ExtratoOfx = {
 
 export type ResultadoOfx = { ok: true; extrato: ExtratoOfx } | { ok: false; erro: string };
 
-/** Texto do arquivo, escolhendo o charset pelo cabeçalho: `CHARSET:1252`/`ENCODING:USASCII` → windows-1252; resto → UTF-8. */
+/**
+ * Texto do arquivo pelos bytes, não pelo cabeçalho (bancos declaram `CHARSET:1252` e mandam UTF-8, ou `CHARSET:NONE`
+ * e mandam 1252): UTF-8 estrito primeiro; se os bytes não são UTF-8 válido, windows-1252 (superconjunto do
+ * ISO-8859-1). Texto só ASCII sai igual nos dois, então o cabeçalho não tem o que desempatar. Tira o BOM.
+ */
 export function decodificarOfx(bytes: Uint8Array): string {
-  const cabecalho = new TextDecoder("latin1").decode(bytes.subarray(0, 2048));
-  const xmlEncoding = /^\s*<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']/i.exec(cabecalho)?.[1]?.toUpperCase();
-  const charset = /CHARSET:\s*([^\s<]+)/i.exec(cabecalho)?.[1]?.toUpperCase();
-  const encoding = /ENCODING:\s*([^\s<]+)/i.exec(cabecalho)?.[1]?.toUpperCase();
-  // ISO-8859-1 também vai para windows-1252 (superconjunto: só acrescenta caracteres onde o 8859-1 tem controles).
-  const OCIDENTAIS = ["1252", "WINDOWS-1252", "8859-1", "ISO-8859-1", "ISO8859-1", "LATIN1"];
-  const ocidental = xmlEncoding
-    ? OCIDENTAIS.includes(xmlEncoding)
-    : (charset !== undefined && OCIDENTAIS.includes(charset)) || encoding === "USASCII";
-  const texto = new TextDecoder(ocidental ? "windows-1252" : "utf-8").decode(bytes);
+  let texto: string;
+  try {
+    texto = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    texto = new TextDecoder("windows-1252").decode(bytes);
+  }
   return texto.charCodeAt(0) === 0xfeff ? texto.slice(1) : texto;
 }
 
@@ -66,9 +66,17 @@ export function dataOfx(s: string): string | null {
 
 const ENTIDADES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
 
+/** Código de `&#193;` / `&#xC1;` como caractere; inválido (fora do Unicode ou metade de surrogate) fica como está. */
+function caractere(original: string, codigo: number): string {
+  return codigo > 0x10ffff || (codigo >= 0xd800 && codigo <= 0xdfff) ? original : String.fromCodePoint(codigo);
+}
+
+/** Entidades nomeadas e numéricas numa passada só (`&amp;#193;` vira o texto `&#193;`, não `Á`). */
 function limpar(v: string): string {
   return v
-    .replace(/&(amp|lt|gt|quot|apos);/g, (_, n: string) => ENTIDADES[n])
+    .replace(/&(?:(amp|lt|gt|quot|apos)|#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6}));/g, (e: string, nome?: string, dec?: string, hex?: string) =>
+      nome ? ENTIDADES[nome] : caractere(e, dec !== undefined ? Number(dec) : parseInt(hex!, 16)),
+    )
     .replace(/\s+/g, " ")
     .trim();
 }

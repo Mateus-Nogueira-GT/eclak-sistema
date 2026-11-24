@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, between, count, eq, inArray, isNull, lt, lte, min, ne, or, sql, type SQL } from "drizzle-orm";
 import type { PeriodoCaixa } from "@/domain/caixa";
 import { hojeEmCuiaba } from "@/domain/clientes";
+import { DIAS_AVISO } from "@/domain/conciliacao";
 import { formatarPercentual, formatarReais } from "@/domain/dinheiro";
 import { rotuloSituacao, type Lado, type Origem } from "@/domain/financeiro";
 import {
@@ -343,7 +344,7 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
       aviso(
         "conciliacao",
         `${plural(semPar.qtd, "transação", "transações")} do extrato sem par no sistema`,
-        `${formatarReais(semPar.valor)} em transações sem par${semPar.contas.length > 1 ? `, em ${semPar.contas.length} contas` : ""}`,
+        `${formatarReais(semPar.valor)} em transações sem par com mais de ${DIAS_AVISO} dias${semPar.contas.length > 1 ? `, em ${semPar.contas.length} contas` : ""}`,
         href,
         true,
       ),
@@ -612,7 +613,9 @@ export async function relatorioConciliacao(i: Intervalo, contaBancariaId?: strin
     .from(contasBancarias)
     .where(and(isNull(contasBancarias.excluidoEm), contaBancariaId ? eq(contasBancarias.id, contaBancariaId) : undefined))
     .orderBy(asc(contasBancarias.nome));
-  const lidas = (await Promise.all(contas.map((c) => obterConciliacao({ contaBancariaId: c.id, de: i.de, ate: i.ate })))).flatMap((r) => (r ? [r] : []));
+  const lidas = (await Promise.all(contas.map((c) => obterConciliacao({ contaBancariaId: c.id, de: i.de, ate: i.ate }, { sugestoes: false })))).flatMap((r) =>
+    r ? [r] : [],
+  );
 
   const linhas: LinhaConciliacaoRel[] = lidas
     .flatMap((r) =>

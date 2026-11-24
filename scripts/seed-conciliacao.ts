@@ -2,13 +2,16 @@
  * Conciliação do seed local: um extrato sintético (descrições fictícias) na conta "Banco do Brasil" com três
  * transações: uma que confere com a baixa "Comissões de outubro", uma com diferença de R$ 2,00 em relação à baixa do
  * "Aluguel do escritório" e uma tarifa pendente (a que aparece no aviso da Visão geral). Idempotente: o extrato é
- * identificado pelo hash fixo (conta + hash é único) e as transações pelo FITID (conta + FITID é único).
+ * identificado pelo hash fixo (conta + hash é único) e as transações pelo FITID (conta + FITID é único). Conta do
+ * OFX gravada mascarada como na importação (só os 4 últimos: '3456'). Se a baixa do par já foi conciliada à mão com
+ * outra transação, a do seed entra pendente (o índice "uma baixa, uma transação" não deixa repetir).
  */
 import { hojeEmCuiaba } from "../src/domain/clientes";
 import { somarDias } from "../src/domain/venda";
 import { centavos, type Sql } from "./seed-orcamentos";
 
 const HASH = "seed-local-extrato-sintetico-v1";
+const CONTA_OFX = "3456";
 
 /** Devolve quantas transações foram criadas nesta execução. */
 export async function semearConciliacao(sql: Sql): Promise<number> {
@@ -32,7 +35,10 @@ export async function semearConciliacao(sql: Sql): Promise<number> {
     if (!ext) {
       [ext] = await tx`
         insert into extratos (conta_bancaria_id, arquivo_nome, arquivo_hash, banco_ofx, conta_ofx, inicio, fim, transacoes, repetidas, importado_por)
-        values (${conta.id}, 'extrato-exemplo.ofx', ${HASH}, '0001', '12345-6', ${somarDias(hoje, -30)}, ${hoje}, 0, 0, ${dir.id}) returning id`;
+        values (${conta.id}, 'extrato-exemplo.ofx', ${HASH}, '0001', ${CONTA_OFX}, ${somarDias(hoje, -30)}, ${hoje}, 0, 0, ${dir.id}) returning id`;
+    } else {
+      // Bancos semeados antes gravaram a conta sem máscara.
+      await tx`update extratos set conta_ofx = ${CONTA_OFX} where id = ${ext.id} and conta_ofx is distinct from ${CONTA_OFX}`;
     }
     const transacoes = [
       { fitid: "SEED-CONFERE", data: comissao?.data ?? somarDias(hoje, -18), valor: centavos(1824), descricao: "CREDITO COMISSAO HOTEIS EXEMPLO", par: comissao },
@@ -43,13 +49,15 @@ export async function semearConciliacao(sql: Sql): Promise<number> {
     for (const t of transacoes) {
       const [existe] = await tx`select 1 from extrato_transacoes where conta_bancaria_id = ${conta.id} and fitid = ${t.fitid}`;
       if (existe) continue;
-      // Sem a baixa no banco (seed parcial), a transação fica pendente em vez de falhar.
-      const conciliada = t.par !== null && t.par !== undefined;
+      // Sem a baixa no banco (seed parcial) ou com ela já conciliada à mão, a transação fica pendente em vez de falhar.
+      const jaConciliada = async (id: string) =>
+        (await tx`select 1 from extrato_transacoes where situacao = 'conciliada' and linha_origem = 'manual' and linha_id = ${id}`).length > 0;
+      const par = t.par && !(await jaConciliada(t.par.id)) ? t.par : null;
       await tx`
         insert into extrato_transacoes (extrato_id, conta_bancaria_id, fitid, data, valor, tipo, descricao, situacao, linha_origem, linha_id, conciliada_por, conciliada_em)
         values (${ext.id}, ${conta.id}, ${t.fitid}, ${t.data}, ${t.valor.toString()}, 'OTHER', ${t.descricao},
-                ${conciliada ? "conciliada" : "pendente"}::situacao_extrato, ${conciliada ? "manual" : null}, ${conciliada ? t.par.id : null},
-                ${conciliada ? dir.id : null}, ${conciliada ? new Date() : null})`;
+                ${par ? "conciliada" : "pendente"}::situacao_extrato, ${par ? "manual" : null}, ${par ? par.id : null},
+                ${par ? dir.id : null}, ${par ? new Date() : null})`;
       criadas++;
     }
     if (criadas > 0) {

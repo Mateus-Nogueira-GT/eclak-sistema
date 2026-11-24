@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Card, CardHeader, PageHeader } from "@/components/ui";
+import { Card, CardHeader, PageHeader, Td, Th } from "@/components/ui";
 import { dataEmCuiaba, hojeEmCuiaba } from "@/domain/clientes";
 import { formatarReais } from "@/domain/dinheiro";
 import { lerData } from "@/domain/venda";
@@ -9,6 +9,7 @@ import { ErroAcesso } from "@/server/auth";
 import { obterConciliacao, type Conciliacao } from "@/server/queries/conciliacao";
 import { listarCategorias, listarContasBancarias } from "@/server/queries/financeiro";
 import { dataBr } from "../../viagens/formatos";
+import { DesfazerImportacao } from "./desfazer-importacao";
 import { EnvioExtrato } from "./envio";
 import { ListaConciliacao } from "./lista";
 
@@ -186,22 +187,31 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
           <table className="mt-4 w-full text-left">
             <thead>
               <tr>
-                {["Importado em", "Arquivo", "Período do extrato", "Novas", "Repetidas", "Por"].map((h, i) => (
-                  <th key={h} className={`bg-fundo px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.06em] text-verde ${i === 3 || i === 4 ? "text-right" : ""}`}>
-                    {h}
-                  </th>
-                ))}
+                <Th>Importado em</Th>
+                <Th>Arquivo</Th>
+                <Th>Banco</Th>
+                <Th>Final da conta</Th>
+                <Th>Período do extrato</Th>
+                <Th className="text-right">Novas</Th>
+                <Th className="text-right">Repetidas</Th>
+                <Th>Por</Th>
+                <Th className="text-right">Ações</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-linha">
               {dados.importacoes.map((i) => (
                 <tr key={i.id}>
-                  <td className="px-4 py-3 text-[14px]">{dataBr(dataEmCuiaba(i.importadoEm))}</td>
-                  <td className="px-4 py-3 text-[14px]">{i.arquivoNome}</td>
-                  <td className="px-4 py-3 text-[14px]">{i.inicio && i.fim ? `${dataBr(i.inicio)} a ${dataBr(i.fim)}` : "—"}</td>
-                  <td className="num px-4 py-3 text-right text-[14px]">{i.transacoes}</td>
-                  <td className="num px-4 py-3 text-right text-[14px]">{i.repetidas}</td>
-                  <td className="px-4 py-3 text-[14px]">{i.importadoPorNome}</td>
+                  <Td>{dataBr(dataEmCuiaba(i.importadoEm))}</Td>
+                  <Td className="[overflow-wrap:anywhere]">{i.arquivoNome}</Td>
+                  <Td className="num">{i.bancoOfx ?? "—"}</Td>
+                  <Td className="num">{i.contaOfx ?? "—"}</Td>
+                  <Td>{i.inicio && i.fim ? `${dataBr(i.inicio)} a ${dataBr(i.fim)}` : "—"}</Td>
+                  <Td className="num text-right">{i.transacoes}</Td>
+                  <Td className="num text-right">{i.repetidas}</Td>
+                  <Td>{i.importadoPorNome}</Td>
+                  <Td className="text-right">
+                    <DesfazerImportacao id={i.id} arquivoNome={i.arquivoNome} transacoes={i.transacoes} tratadas={i.tratadas} />
+                  </Td>
                 </tr>
               ))}
             </tbody>

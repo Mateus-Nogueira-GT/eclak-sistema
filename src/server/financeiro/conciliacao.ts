@@ -60,26 +60,30 @@ function filtroCandidatas(contaId: string, de: string, ate: string): SQL {
 /**
  * Numa consulta: as candidatas da conta com baixa entre `de` e `ate` (sem par conciliado) e as linhas de `pares`
  * (as conciliadas, como estão hoje, onde estiverem). Em `linhas`, `null` = a linha já não é candidata válida
- * (não baixada, fora do caixa ou de outra conta) ou sumiu.
+ * (não baixada, fora do caixa ou de outra conta) ou sumiu. `soPares`: só as linhas de `pares` (sem candidatas),
+ * para quem precisa só da situação (o relatório).
  */
 export async function lerCandidatas(
   contaId: string,
   de: string,
   ate: string,
   pares: { origem: Origem; id: string }[],
+  { soPares = false }: { soPares?: boolean } = {},
 ): Promise<{ candidatas: Candidata[]; linhas: Map<string, Candidata | null> }> {
   const ids = [...new Set(pares.map((p) => p.id))];
+  if (soPares && ids.length === 0) return { candidatas: [], linhas: new Map() };
+  const filtro = soPares ? inArray(lf.id, ids) : ids.length > 0 ? or(filtroCandidatas(contaId, de, ate), inArray(lf.id, ids)) : filtroCandidatas(contaId, de, ate);
   const linhasView = (await db
     .select({ ...colunas, livre: sql<boolean>`NOT ${jaConciliada}` })
     .from(lf)
-    .where(ids.length > 0 ? or(filtroCandidatas(contaId, de, ate), inArray(lf.id, ids)) : filtroCandidatas(contaId, de, ate))
+    .where(filtro)
     .orderBy(lf.baixadoEm, lf.origem, lf.id)) as (LinhaView & { livre: boolean })[];
   const candidatas: Candidata[] = [];
   const porChave = new Map<string, LinhaView>();
   for (const l of linhasView) {
     porChave.set(chave(l.origem, l.id), l);
     const c = comoCandidata(l, contaId);
-    if (c && l.livre && c.data >= de && c.data <= ate) candidatas.push(c);
+    if (!soPares && c && l.livre && c.data >= de && c.data <= ate) candidatas.push(c);
   }
   const linhas = new Map<string, Candidata | null>();
   for (const p of pares) {

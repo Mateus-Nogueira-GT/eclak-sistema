@@ -25,6 +25,7 @@ import {
   confirmarPar,
   criarLancamentoDaTransacao,
   desfazerConciliacao,
+  desfazerImportacao,
   ignorarTransacao,
   importarExtrato,
 } from "@/server/actions/conciliacao";
@@ -47,17 +48,21 @@ const reais = (v: bigint) => `${v / 100n},${(v % 100n).toString().padStart(2, "0
 
 type T = { fitid: string; data: string; valor: string; nome: string };
 
-/** Extrato OFX 1.x sintético (ASCII), de uma conta, com as transações dadas (`data` em AAAA-MM-DD). */
-function ofx(ts: T[], inicio = "20261101", fim = "20261130"): string {
+/**
+ * Extrato OFX 1.x sintético (ASCII), de uma conta, com as transações dadas (`data` em AAAA-MM-DD). Banco e conta
+ * iguais aos do fixture SGML por padrão (senão a importação pede a confirmação de "outra conta").
+ */
+function ofx(ts: T[], inicio = "20261101", fim = "20261130", banco = "0001", acct = "12345-6"): string {
   const corpo = ts
     .map((t) => `<STMTTRN>\n<TRNTYPE>OTHER\n<DTPOSTED>${t.data.replaceAll("-", "")}\n<TRNAMT>${t.valor}\n<FITID>${t.fitid}\n<NAME>${t.nome}\n</STMTTRN>`)
     .join("\n");
-  return `OFXHEADER:100\nDATA:OFXSGML\nVERSION:102\nENCODING:USASCII\nCHARSET:1252\n\n<OFX>\n<BANKMSGSRSV1><STMTTRNRS><STMTRS>\n<CURDEF>BRL\n<BANKACCTFROM>\n<BANKID>0341\n<ACCTID>98765-4\n<ACCTTYPE>CHECKING\n</BANKACCTFROM>\n<BANKTRANLIST>\n<DTSTART>${inicio}\n<DTEND>${fim}\n${corpo}\n</BANKTRANLIST>\n</STMTRS></STMTTRNRS></BANKMSGSRSV1>\n</OFX>\n`;
+  return `OFXHEADER:100\nDATA:OFXSGML\nVERSION:102\nENCODING:USASCII\nCHARSET:1252\n\n<OFX>\n<BANKMSGSRSV1><STMTTRNRS><STMTRS>\n<CURDEF>BRL\n<BANKACCTFROM>\n<BANKID>${banco}\n<ACCTID>${acct}\n<ACCTTYPE>CHECKING\n</BANKACCTFROM>\n<BANKTRANLIST>\n<DTSTART>${inicio}\n<DTEND>${fim}\n${corpo}\n</BANKTRANLIST>\n</STMTRS></STMTTRNRS></BANKMSGSRSV1>\n</OFX>\n`;
 }
 
-function form(contaBancariaId: string, arquivo: string | Uint8Array | null, nome = "extrato.ofx"): FormData {
+function form(contaBancariaId: string, arquivo: string | Uint8Array | null, nome = "extrato.ofx", confirmarOutraConta = false): FormData {
   const f = new FormData();
   f.append("contaBancariaId", contaBancariaId);
+  if (confirmarOutraConta) f.append("confirmarOutraConta", "1");
   if (arquivo !== null) {
     const bytes = typeof arquivo === "string" ? new TextEncoder().encode(arquivo) : arquivo;
     f.append("arquivo", new File([new Uint8Array(bytes)], nome, { type: "application/x-ofx" }));
@@ -131,7 +136,7 @@ describe("conciliação do extrato OFX", () => {
   describe("importarExtrato", () => {
     it("SGML 1252: 3 novas, acentos certos, extrato e auditoria; o mesmo arquivo de novo é recusado pelo hash", async () => {
       const r = await importar(FIXTURE_SGML);
-      expect(r).toMatchObject({ ok: true, novas: 3, repetidas: 0, inicio: "2026-11-01", fim: "2026-11-30" });
+      expect(r).toMatchObject({ ok: true, novas: 3, repetidas: 0, ajustadas: 0, inicio: "2026-11-01", fim: "2026-11-30" });
       const [e] = await db.select().from(extratos).where(eq(extratos.id, r.extratoId));
       expect(e).toMatchObject({ contaBancariaId: c.conta, arquivoNome: "extrato.ofx", transacoes: 3, repetidas: 0, bancoOfx: "0001", contaOfx: "3456", importadoPor: c.fin });
       expect(e.arquivoHash).toMatch(/^[0-9a-f]{64}$/);
@@ -181,6 +186,87 @@ describe("conciliação do extrato OFX", () => {
       expect(r2).toMatchObject({ novas: 1, repetidas: 1 });
     });
 
+    it("FITID já no banco com outra data ou valor: entra com identificador ajustado; reimportar vê como repetida", async () => {
+      await importar(FIXTURE_SGML);
+      const arquivo = ofx([
+        { fitid: "202611030001", data: "2026-11-03", valor: "-2862.49", nome: "PAGTO AGUA" }, // igual: repetida
+        { fitid: "202611050002", data: "2026-11-25", valor: "-45.90", nome: "TARIFA" }, // outra data: ajustada
+        { fitid: "202611100003", data: "2026-11-10", valor: "999.00", nome: "PIX" }, // outro valor: ajustada
+        { fitid: "Z1", data: "2026-11-12", valor: "-5.00", nome: "IOF" }, // nova
+      ]);
+      const r = await importar(arquivo);
+      expect(r).toMatchObject({ novas: 3, repetidas: 1, ajustadas: 2 });
+      const [e] = await db.select().from(extratos).where(eq(extratos.id, r.extratoId));
+      expect(e).toMatchObject({ transacoes: 3, repetidas: 1 });
+      const ts = await db.select().from(extratoTransacoes).where(eq(extratoTransacoes.extratoId, r.extratoId)).orderBy(asc(extratoTransacoes.fitid));
+      expect(ts.map((t) => [t.fitid, t.data, t.valor])).toEqual([
+        ["202611050002#2026-11-25#-4590", "2026-11-25", -4590n],
+        ["202611100003#2026-11-10#99900", "2026-11-10", 99900n],
+        ["Z1", "2026-11-12", -500n],
+      ]);
+      // As originais continuam como estavam.
+      expect(await transacao("202611050002")).toMatchObject({ data: "2026-11-05", valor: -4590n });
+      // Outro arquivo (hash diferente) com as mesmas transações: tudo repetida, nada duplica.
+      const r2 = await importar(arquivo + "\n");
+      expect(r2).toMatchObject({ novas: 0, repetidas: 4, ajustadas: 0 });
+      expect(await db.select().from(extratoTransacoes)).toHaveLength(6);
+    });
+
+    it("FITID repetido no mesmo arquivo: igual conta como repetida; diferente entra ajustada", async () => {
+      const r = await importar(
+        ofx([
+          { fitid: "X1", data: "2026-11-21", valor: "-1.00", nome: "A" },
+          { fitid: "X1", data: "2026-11-21", valor: "-1.00", nome: "A" },
+          { fitid: "X1", data: "2026-11-22", valor: "-2.00", nome: "B" },
+          { fitid: "X1", data: "2026-11-22", valor: "-2.00", nome: "B" },
+        ]),
+      );
+      expect(r).toMatchObject({ novas: 2, repetidas: 2, ajustadas: 1 });
+      const ts = await db.select().from(extratoTransacoes).orderBy(asc(extratoTransacoes.fitid));
+      expect(ts.map((t) => [t.fitid, t.valor])).toEqual([
+        ["X1", -100n],
+        ["X1#2026-11-22#-200", -200n],
+      ]);
+    });
+
+    it("extrato de outra conta (banco ou final diferente): pede confirmação; com confirmarOutraConta=1 importa", async () => {
+      await importar(FIXTURE_SGML); // banco 0001, final 3456
+      const outroBanco = ofx([{ fitid: "O1", data: "2026-11-12", valor: "-5.00", nome: "IOF" }], "20261101", "20261130", "0341", "98765-4");
+      const recusa = await comSessao(c.fin, () => importarExtrato(form(c.conta, outroBanco)));
+      expect(recusa).toEqual({
+        ok: false,
+        erro: "Este extrato parece ser de outra conta (banco 0341, final 7654). Confirme para importar mesmo assim.",
+        outraConta: true,
+      });
+      const outroFinal = ofx([{ fitid: "O2", data: "2026-11-12", valor: "-5.00", nome: "IOF" }], "20261101", "20261130", "0001", "11111-1");
+      expect(await comSessao(c.fin, () => importarExtrato(form(c.conta, outroFinal)))).toMatchObject({ ok: false, outraConta: true });
+      expect(await db.select().from(extratos)).toHaveLength(1);
+
+      const confirmado = await comSessao(c.fin, () => importarExtrato(form(c.conta, outroBanco, "extrato.ofx", true)));
+      expect(confirmado).toMatchObject({ ok: true, novas: 1 });
+      // Arquivo sem banco nem conta não tem com o que comparar: entra.
+      const semConta = ofx([{ fitid: "O3", data: "2026-11-12", valor: "-5.00", nome: "IOF" }]).replace(/<BANKID>.*\n<ACCTID>.*\n/, "");
+      expect(await comSessao(c.fin, () => importarExtrato(form(c.conta, semConta)))).toMatchObject({ ok: true, novas: 1 });
+      // Conta sem extrato anterior: qualquer banco entra sem perguntar.
+      const nova = await contaBancaria(c.fin, "Bradesco");
+      expect(await comSessao(c.fin, () => importarExtrato(form(nova, outroBanco)))).toMatchObject({ ok: true, novas: 1 });
+    });
+
+    it("duas importações sobrepostas ao mesmo tempo na mesma conta: sem deadlock nem duplicata", async () => {
+      const a = ofx(
+        Array.from({ length: 40 }, (_, i) => ({ fitid: `F${String(i).padStart(3, "0")}`, data: "2026-11-10", valor: `-${i + 1}.00`, nome: "A" })),
+      );
+      const b = ofx(
+        Array.from({ length: 40 }, (_, i) => ({ fitid: `F${String(39 - i).padStart(3, "0")}`, data: "2026-11-10", valor: `-${40 - i}.00`, nome: "A" })),
+        "20261101",
+        "20261129",
+      );
+      const [ra, rb] = await Promise.all([importar(a), importar(b)]);
+      expect([ra, rb].map((r) => r.novas).sort()).toEqual([0, 40]);
+      expect([ra, rb].map((r) => r.repetidas).sort()).toEqual([0, 40]);
+      expect(await db.select().from(extratoTransacoes)).toHaveLength(40);
+    });
+
     it("recusas: conta inexistente ou desativada, sem arquivo, maior que 5 MB, arquivo que não é OFX", async () => {
       const texto = ofx([{ fitid: "1", data: "2026-11-05", valor: "-1.00", nome: "A" }]);
       const naoEncontrada = { ok: false, erro: "Conta bancária não encontrada ou desativada" };
@@ -198,6 +284,53 @@ describe("conciliação do extrato OFX", () => {
         erro: "O arquivo não parece um extrato OFX",
       });
       expect(await db.select().from(extratos)).toHaveLength(0);
+    });
+  });
+
+  describe("desfazerImportacao", () => {
+    it("com tudo pendente: apaga as transações e o extrato, audita (antes) e o mesmo arquivo volta a entrar", async () => {
+      const r = await importar(FIXTURE_SGML);
+      const ids = (await db.select({ id: extratoTransacoes.id }).from(extratoTransacoes)).map((t) => t.id);
+      expect(await comSessao(c.fin, () => desfazerImportacao(r.extratoId))).toEqual({ ok: true });
+      expect(await db.select().from(extratos)).toHaveLength(0);
+      expect(await db.select().from(extratoTransacoes)).toHaveLength(0);
+      const [ae] = await db.select().from(auditoria).where(and(eq(auditoria.tabela, "extratos"), eq(auditoria.acao, "excluir")));
+      expect(ae).toMatchObject({ registroId: r.extratoId, usuarioId: c.fin, depois: null });
+      expect(ae.antes).toMatchObject({ id: r.extratoId, transacoes: 3, contaOfx: "3456" });
+      const at = await db.select().from(auditoria).where(and(eq(auditoria.tabela, "extrato_transacoes"), eq(auditoria.acao, "excluir")));
+      expect(at.map((a) => a.registroId).sort()).toEqual([...ids].sort());
+      expect(at[0].antes).toMatchObject({ situacao: "pendente", extratoId: r.extratoId });
+      expect(await importar(FIXTURE_SGML)).toMatchObject({ novas: 3 });
+    });
+
+    it("com transação conciliada ou ignorada: recusa e não apaga nada; desfeitas, apaga", async () => {
+      const manual = await manualBaixado("45,90", "2026-11-05");
+      const r = await importar(FIXTURE_SGML);
+      const tarifa = await transacao("202611050002");
+      const agua = await transacao("202611030001");
+      expect(await comSessao(c.fin, () => confirmarPar(tarifa.id, "manual", manual))).toEqual({ ok: true });
+      expect(await comSessao(c.fin, () => ignorarTransacao(agua.id, "Transferência entre contas"))).toEqual({ ok: true });
+      const recusa = { ok: false, erro: "Desfaça as conciliações deste extrato antes" };
+      expect(await comSessao(c.fin, () => desfazerImportacao(r.extratoId))).toEqual(recusa);
+      expect(await comSessao(c.fin, () => desfazerConciliacao(tarifa.id))).toEqual({ ok: true });
+      expect(await comSessao(c.fin, () => desfazerImportacao(r.extratoId))).toEqual(recusa);
+      expect(await db.select().from(extratoTransacoes)).toHaveLength(3);
+      expect(await db.select().from(auditoria).where(eq(auditoria.acao, "excluir"))).toHaveLength(0);
+      expect(await comSessao(c.fin, () => desfazerConciliacao(agua.id))).toEqual({ ok: true });
+      expect(await comSessao(c.fin, () => desfazerImportacao(r.extratoId))).toEqual({ ok: true });
+      expect(await db.select().from(extratoTransacoes)).toHaveLength(0);
+    });
+
+    it("só apaga o extrato pedido; id inválido ou inexistente → não encontrado", async () => {
+      const r1 = await importar(FIXTURE_SGML);
+      const r2 = await importar(ofx([{ fitid: "N1", data: "2026-11-20", valor: "-1.00", nome: "A" }]));
+      const naoEncontrado = { ok: false, erro: "Extrato não encontrado" };
+      expect(await comSessao(c.fin, () => desfazerImportacao("nada"))).toEqual(naoEncontrado);
+      expect(await comSessao(c.fin, () => desfazerImportacao("8a1c1a3e-6f7e-4a55-9b1a-1b2c3d4e5f60"))).toEqual(naoEncontrado);
+      expect(await comSessao(c.fin, () => desfazerImportacao(r2.extratoId))).toEqual({ ok: true });
+      expect((await db.select().from(extratos)).map((e) => e.id)).toEqual([r1.extratoId]);
+      expect(await db.select().from(extratoTransacoes)).toHaveLength(3);
+      expect(await comSessao(c.fin, () => desfazerImportacao(r2.extratoId))).toEqual(naoEncontrado);
     });
   });
 
@@ -574,6 +707,13 @@ describe("conciliação do extrato OFX", () => {
         ["diferenca", 1, -420200n],
         ["nao_conciliado", 1, -3500n],
       ]);
+      // Mesmas linhas e situações da tela; o caminho enxuto (sem sugestões) não muda a situação nem os totais.
+      const tela = await conciliacao();
+      expect(r.linhas.map((l) => l.situacao)).toEqual(tela!.linhas.map((l) => l.situacao.rotulo));
+      const enxuta = await comSessao(c.fin, () => obterConciliacao({ contaBancariaId: c.conta, ...PERIODO }, { sugestoes: false }));
+      expect(enxuta!.linhas.map((l) => [l.transacao.id, l.situacao, l.linha])).toEqual(tela!.linhas.map((l) => [l.transacao.id, l.situacao, l.linha]));
+      expect(enxuta!.linhas.every((l) => l.sugestao === null && l.opcoes.length === 0)).toBe(true);
+      expect(enxuta!.totais).toEqual(tela!.totais);
       const outra = await contaBancaria(c.fin, "Bradesco");
       expect((await comSessao(c.fin, () => relatorioConciliacao(intervalo, outra))).linhas).toEqual([]);
       expect((await comSessao(c.fin, () => relatorioConciliacao(intervalo, c.conta))).linhas).toHaveLength(3);
@@ -621,7 +761,7 @@ describe("conciliação do extrato OFX", () => {
       const a = v.avisos.find((x) => x.tipo === "conciliacao");
       expect(a).toMatchObject({
         titulo: "2 transações do extrato sem par no sistema",
-        detalhe: "R$ 45,00 em transações sem par",
+        detalhe: "R$ 45,00 em transações sem par com mais de 3 dias",
         href: `/financeiro/conciliacao?conta=${c.conta}&de=${somarDias(hoje, -9)}&ate=${hoje}&situacao=nao_conciliado`,
         responsavel: "Financeiro",
         agregado: true,
@@ -643,7 +783,7 @@ describe("conciliação do extrato OFX", () => {
       await importar(ofx([{ fitid: "M2", data: mesPassado, valor: "-20.00", nome: "B" }], "20200101", "20991231"), outra);
       const a = (await comSessao(diretor.id, () => obterVisaoGeral("mes"))).avisos.find((x) => x.tipo === "conciliacao")!;
       expect(a.href).toBe(`/financeiro/conciliacao?conta=${outra}&de=${mesPassado}&ate=${hoje}&situacao=nao_conciliado`);
-      expect(a.detalhe).toBe(`R$ 30,00 em transações sem par, em 2 contas`);
+      expect(a.detalhe).toBe(`R$ 30,00 em transações sem par com mais de 3 dias, em 2 contas`);
       // Os parâmetros do link são aceitos pela leitura da tela como estão e a pendência aparece.
       const q = new URL(a.href, "http://x").searchParams;
       const r = await comSessao(c.fin, () => obterConciliacao({ contaBancariaId: q.get("conta")!, de: q.get("de")!, ate: q.get("ate")!, situacao: q.get("situacao") as "nao_conciliado" }));
@@ -679,9 +819,11 @@ describe("conciliação do extrato OFX", () => {
         expect(await comSessao(u.id, () => criarLancamentoDaTransacao(t.id, { categoriaId: CAT.tarifas, descricao: "x", centro: "MT" }))).toEqual(SEM_PERMISSAO);
         expect(await comSessao(u.id, () => ignorarTransacao(t.id, "Motivo"))).toEqual(SEM_PERMISSAO);
         expect(await comSessao(u.id, () => desfazerConciliacao(t.id))).toEqual(SEM_PERMISSAO);
+        expect(await comSessao(u.id, () => desfazerImportacao(t.extratoId))).toEqual(SEM_PERMISSAO);
         await expect(conciliacao({}, u.id)).rejects.toBeInstanceOf(ErroAcesso);
       }
       expect((await transacao("202611050002")).situacao).toBe("pendente");
+      expect(await db.select().from(extratos)).toHaveLength(1);
       for (const perfil of ["diretor", "fin_operacional"] as const) {
         const u = await criarUsuarioTeste(perfil);
         expect((await conciliacao({}, u.id))!.linhas).toHaveLength(3);
@@ -694,7 +836,17 @@ describe("conciliação do extrato OFX", () => {
       const r = await conciliacao();
       expect(r!.conta).toMatchObject({ id: c.conta, nome: "Itaú" });
       expect(r!.importacoes).toEqual([
-        expect.objectContaining({ arquivoNome: "extrato.ofx", transacoes: 3, repetidas: 0, inicio: "2026-11-01", fim: "2026-11-30", importadoPorNome: "Teste fin_estrategico" }),
+        expect.objectContaining({
+          arquivoNome: "extrato.ofx",
+          bancoOfx: "0001",
+          contaOfx: "3456",
+          transacoes: 3,
+          repetidas: 0,
+          tratadas: 0,
+          inicio: "2026-11-01",
+          fim: "2026-11-30",
+          importadoPorNome: "Teste fin_estrategico",
+        }),
       ]);
     });
 

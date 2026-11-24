@@ -54,6 +54,48 @@ describe("ofx: decodificação", () => {
   it("sem indicação de charset assume UTF-8", () => {
     expect(decodificarOfx(new TextEncoder().encode("<OFX>ação</OFX>"))).toBe("<OFX>ação</OFX>");
   });
+  it("bytes UTF-8 com cabeçalho CHARSET:1252 (cabeçalho errado) saem em UTF-8", () => {
+    const bytes = new TextEncoder().encode("OFXHEADER:100\nENCODING:USASCII\nCHARSET:1252\n\n<OFX><MEMO>TARIFA BANCÁRIA</OFX>");
+    const texto = decodificarOfx(bytes);
+    expect(texto).toContain("TARIFA BANCÁRIA");
+    expect(texto).not.toContain("Ã");
+  });
+  it("bytes 1252 com cabeçalho CHARSET:NONE saem em windows-1252", () => {
+    const bytes = Uint8Array.from(Buffer.from("OFXHEADER:100\nENCODING:UTF-8\nCHARSET:NONE\n\n<OFX><MEMO>TARIFA BANCÁRIA</OFX>", "latin1"));
+    const texto = decodificarOfx(bytes);
+    expect(texto).toContain("TARIFA BANCÁRIA");
+    expect(texto).not.toContain("\uFFFD");
+  });
+  it("XML declarado UTF-8 com bytes 1252 sai em windows-1252", () => {
+    const bytes = Uint8Array.from(Buffer.from('<?xml version="1.0" encoding="UTF-8"?><OFX><MEMO>PAGTO ÁGUA</OFX>', "latin1"));
+    expect(decodificarOfx(bytes)).toContain("PAGTO ÁGUA");
+  });
+  it("BOM do UTF-8 é retirado", () => {
+    expect(decodificarOfx(Uint8Array.from([0xef, 0xbb, 0xbf, ...new TextEncoder().encode("<OFX>ação</OFX>")]))).toBe("<OFX>ação</OFX>");
+  });
+});
+
+describe("ofx: entidades", () => {
+  const comMemo = (memo: string) =>
+    lerOfx(
+      `<OFX><STMTRS><BANKTRANLIST><STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20261103<TRNAMT>-1.00<FITID>1<MEMO>${memo}</STMTTRN></BANKTRANLIST></STMTRS></OFX>`,
+    );
+  const descricao = (memo: string) => {
+    const r = comMemo(memo);
+    if (!r.ok) throw new Error(r.erro);
+    return r.extrato.transacoes[0].descricao;
+  };
+  it("decimais e hexadecimais", () => {
+    expect(descricao("TARIFA BANC&#193;RIA")).toBe("TARIFA BANCÁRIA");
+    expect(descricao("PAGTO &#xC1;GUA &#Xc1;")).toBe("PAGTO ÁGUA Á");
+  });
+  it("nomeadas continuam e &amp;#193; fica literal (uma passada só)", () => {
+    expect(descricao("A &amp; B &quot;C&quot;")).toBe('A & B "C"');
+    expect(descricao("X &amp;#193;")).toBe("X &#193;");
+  });
+  it("código inválido fica como está", () => {
+    expect(descricao("A &#1114112; B &#xD800;")).toBe("A &#1114112; B &#xD800;");
+  });
 });
 
 describe("ofx: leitura", () => {

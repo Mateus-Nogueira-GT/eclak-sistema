@@ -1,19 +1,18 @@
 "use server";
 
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { dataEmCuiaba, hojeEmCuiaba } from "@/domain/clientes";
 import { opcoesDeEscolha } from "@/domain/conciliacao";
 import { ORIGENS, type Origem } from "@/domain/financeiro";
 import { lancamentoDaTransacaoSchema, motivoIgnorarSchema } from "@/domain/financeiro-entrada";
-import { TAMANHO_MAXIMO_OFX, decodificarOfx, lerOfx } from "@/domain/ofx";
+import { TAMANHO_MAXIMO_OFX, decodificarOfx, lerOfx, type ExtratoOfx, type TransacaoOfx } from "@/domain/ofx";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
-import { extratoTransacoes, extratos } from "@/server/db/schema";
-import { contaBancariaAtiva } from "@/server/financeiro/baixas-viagem";
+import { contasBancarias, extratoTransacoes, extratos } from "@/server/db/schema";
 import { candidataNa, travarTransacaoExtrato, type TransacaoExtratoLinha } from "@/server/financeiro/conciliacao";
 import { Desfazer, baixarLancamentoNa, criarLancamentosNa, falha, type Falha } from "@/server/financeiro/lancamentos";
 
@@ -25,7 +24,10 @@ import { Desfazer, baixarLancamentoNa, criarLancamentosNa, falha, type Falha } f
 // Não mexe nas baixas: a validade do par é conferida na leitura ("A baixa mudou").
 
 type Ok = { ok: true };
-type Importado = { ok: true; extratoId: string; novas: number; repetidas: number; inicio: string | null; fim: string | null };
+/** `novas` = transações gravadas (inclui as `ajustadas`: FITID já usado com outra data ou valor, gravadas com FITID ajustado). */
+type Importado = { ok: true; extratoId: string; novas: number; repetidas: number; ajustadas: number; inicio: string | null; fim: string | null };
+/** Banco ou final da conta do arquivo diferente dos extratos já importados na conta: a tela pede confirmação. */
+type OutraConta = Falha & { outraConta: true };
 
 const FINANCEIRO = [...PERFIS_FINANCEIRO];
 const CONTA_NAO_ENCONTRADA = falha("Conta bancária não encontrada ou desativada");
@@ -33,9 +35,10 @@ const TRANSACAO_NAO_ENCONTRADA = falha("Transação do extrato não encontrada")
 const ORIGEM_INVALIDA = falha("Origem inválida");
 const PAR_INVALIDO = falha("Esta baixa não pode ser conciliada com esta transação");
 const JA_CONCILIADA = falha("Esta baixa já está conciliada com outra transação");
+const EXTRATO_NAO_ENCONTRADO = falha("Extrato não encontrado");
 const MSG_ARQUIVO = "Escolha o arquivo OFX";
 const MSG_TAMANHO = "O arquivo passa de 5 MB";
-/** Linhas por INSERT (abaixo do limite de parâmetros do Postgres). */
+/** Linhas por INSERT e valores por `IN (...)` (abaixo do limite de parâmetros do Postgres). */
 const LOTE_INSERT = 1000;
 
 const ehOrigem = (o: unknown): o is Origem => typeof o === "string" && (ORIGENS as readonly string[]).includes(o);
@@ -94,13 +97,75 @@ async function jaImportadoEm(contaId: string, hash: string): Promise<Date | null
 
 const msgJaImportado = (em: Date) => falha(`Este arquivo já foi importado nesta conta em ${dataBr(em)}`);
 
+type Gravar = TransacaoOfx & { fitidGravado: string; ajustada: boolean };
+
+/** FITID de uma transação cujo FITID original já está na conta (ou no arquivo) com outra data ou valor. */
+const fitidAjustado = (t: TransacaoOfx) => `${t.fitid}#${t.data}#${t.valor}`;
+
 /**
- * Importa um extrato OFX. FormData: `contaBancariaId`, `arquivo` (até 5 MB). O arquivo não é guardado (só o
- * SHA-256, para recusar o mesmo arquivo na mesma conta); transação com FITID já importado na conta (deste ou de
- * outro arquivo, ou repetido no próprio arquivo) conta como repetida e não duplica.
+ * Separa o que gravar do que já está na conta (`existentes`: FITID → data e valor gravados). FITID livre → nova;
+ * FITID com a mesma data e valor (na conta ou antes no próprio arquivo) → repetida; com outra data ou valor → grava
+ * com `fitid#data#valor` (ajustada), a não ser que esse também já exista (então é repetida: reimportação).
+ */
+function separarTransacoes(transacoes: TransacaoOfx[], existentes: Map<string, { data: string; valor: bigint }>): { gravar: Gravar[]; repetidas: number } {
+  const vistos = new Map(existentes);
+  const gravar: Gravar[] = [];
+  let repetidas = 0;
+  for (const t of transacoes) {
+    const igual = (e: { data: string; valor: bigint }) => e.data === t.data && e.valor === t.valor;
+    const original = vistos.get(t.fitid);
+    let fitid = t.fitid;
+    if (original) {
+      if (igual(original)) {
+        repetidas++;
+        continue;
+      }
+      fitid = fitidAjustado(t);
+      if (vistos.has(fitid)) {
+        repetidas++;
+        continue;
+      }
+    }
+    vistos.set(fitid, { data: t.data, valor: t.valor });
+    gravar.push({ ...t, fitidGravado: fitid, ajustada: fitid !== t.fitid });
+  }
+  // Ordem fixa por FITID: duas importações na mesma conta nunca travam linhas em ordens cruzadas.
+  gravar.sort((x, y) => (x.fitidGravado < y.fitidGravado ? -1 : x.fitidGravado > y.fitidGravado ? 1 : 0));
+  return { gravar, repetidas };
+}
+
+async function fitidsNaConta(tx: Transacao, contaId: string, transacoes: TransacaoOfx[]): Promise<Map<string, { data: string; valor: bigint }>> {
+  const procurados = [...new Set(transacoes.flatMap((t) => [t.fitid, fitidAjustado(t)]))];
+  const existentes = new Map<string, { data: string; valor: bigint }>();
+  for (let i = 0; i < procurados.length; i += LOTE_INSERT) {
+    const linhas = await tx
+      .select({ fitid: extratoTransacoes.fitid, data: extratoTransacoes.data, valor: extratoTransacoes.valor })
+      .from(extratoTransacoes)
+      .where(and(eq(extratoTransacoes.contaBancariaId, contaId), inArray(extratoTransacoes.fitid, procurados.slice(i, i + LOTE_INSERT))));
+    for (const l of linhas) existentes.set(l.fitid, { data: l.data, valor: l.valor });
+  }
+  return existentes;
+}
+
+/** Extrato já importado na conta com banco ou final diferente do arquivo (só compara o que os dois têm). */
+async function outraContaNa(tx: Transacao, contaId: string, extrato: ExtratoOfx): Promise<OutraConta | null> {
+  const anteriores = await tx.selectDistinct({ banco: extratos.bancoOfx, conta: extratos.contaOfx }).from(extratos).where(eq(extratos.contaBancariaId, contaId));
+  const difere = (a: string | null, b: string | null) => a !== null && b !== null && a !== b;
+  if (!anteriores.some((e) => difere(e.banco, extrato.banco) || difere(e.conta, extrato.conta))) return null;
+  const quem = [extrato.banco && `banco ${extrato.banco}`, extrato.conta && `final ${extrato.conta}`].filter(Boolean).join(", ");
+  return { ok: false, erro: `Este extrato parece ser de outra conta (${quem}). Confirme para importar mesmo assim.`, outraConta: true };
+}
+
+/**
+ * Importa um extrato OFX. FormData: `contaBancariaId`, `arquivo` (até 5 MB) e `confirmarOutraConta=1` (opcional). O
+ * arquivo não é guardado (só o SHA-256, para recusar o mesmo arquivo na mesma conta). Transação com FITID já
+ * importado na conta (deste ou de outro arquivo, ou repetido no próprio arquivo) e mesma data e valor conta como
+ * repetida e não duplica; com outra data ou valor entra separada, com FITID ajustado (`ajustadas`). Se a conta já
+ * tem extrato de outro banco ou outro final de conta, recusa com `outraConta` até vir a confirmação. Trava a conta
+ * (`for no key update`): importações na mesma conta entram uma de cada vez.
  */
 export async function importarExtrato(form: FormData) {
-  return comPerfil(FINANCEIRO, async (u): Promise<Importado | Falha> => {
+  return comPerfil(FINANCEIRO, async (u): Promise<Importado | OutraConta | Falha> => {
     const contaId = form.get("contaBancariaId");
     if (typeof contaId !== "string" || !ehUuid(contaId)) return CONTA_NAO_ENCONTRADA;
     const arquivo = form.get("arquivo");
@@ -111,19 +176,33 @@ export async function importarExtrato(form: FormData) {
     const lido = lerOfx(decodificarOfx(bytes));
     if (!lido.ok) return falha(lido.erro);
     const { extrato } = lido;
+    const confirmarOutraConta = form.get("confirmarOutraConta") === "1";
     const hash = createHash("sha256").update(bytes).digest("hex");
     const nome = Array.from(arquivo.name || "extrato.ofx").slice(0, 255).join("");
 
-    let r: Importado | Falha;
+    let r: Importado | OutraConta | Falha;
     try {
-      r = await db.transaction(async (tx): Promise<Importado | Falha> => {
-        if (!(await contaBancariaAtiva(tx, contaId))) return CONTA_NAO_ENCONTRADA;
+      r = await db.transaction(async (tx): Promise<Importado | OutraConta | Falha> => {
+        // `no key update`: serializa as importações da conta sem barrar quem só referencia a conta (baixas).
+        const [conta] = await tx
+          .select({ id: contasBancarias.id })
+          .from(contasBancarias)
+          .where(and(eq(contasBancarias.id, contaId), eq(contasBancarias.ativa, true), isNull(contasBancarias.excluidoEm)))
+          .for("no key update");
+        if (!conta) return CONTA_NAO_ENCONTRADA;
         const [repetido] = await tx
           .select({ importadoEm: extratos.importadoEm })
           .from(extratos)
           .where(and(eq(extratos.contaBancariaId, contaId), eq(extratos.arquivoHash, hash)));
         if (repetido) return msgJaImportado(repetido.importadoEm);
-        const [novo] = await tx
+        if (!confirmarOutraConta) {
+          const outra = await outraContaNa(tx, contaId, extrato);
+          if (outra) return outra;
+        }
+        const { gravar, repetidas } = separarTransacoes(extrato.transacoes, await fitidsNaConta(tx, contaId, extrato.transacoes));
+        const novas = gravar.length;
+        const ajustadas = gravar.filter((t) => t.ajustada).length;
+        const [gravado] = await tx
           .insert(extratos)
           .values({
             contaBancariaId: contaId,
@@ -133,25 +212,26 @@ export async function importarExtrato(form: FormData) {
             contaOfx: extrato.conta,
             inicio: extrato.inicio,
             fim: extrato.fim,
-            transacoes: 0,
-            repetidas: 0,
+            transacoes: novas,
+            repetidas,
             importadoPor: u.id,
           })
-          .returning({ id: extratos.id });
-        let novas = 0;
-        for (let i = 0; i < extrato.transacoes.length; i += LOTE_INSERT) {
-          const lote = extrato.transacoes.slice(i, i + LOTE_INSERT);
-          const inseridas = await tx
-            .insert(extratoTransacoes)
-            .values(lote.map((t) => ({ extratoId: novo.id, contaBancariaId: contaId, fitid: t.fitid, data: t.data, valor: t.valor, tipo: t.tipo, descricao: t.descricao })))
-            .onConflictDoNothing({ target: [extratoTransacoes.contaBancariaId, extratoTransacoes.fitid] })
-            .returning({ id: extratoTransacoes.id });
-          novas += inseridas.length;
+          .returning();
+        for (let i = 0; i < gravar.length; i += LOTE_INSERT) {
+          await tx.insert(extratoTransacoes).values(
+            gravar.slice(i, i + LOTE_INSERT).map((t) => ({
+              extratoId: gravado.id,
+              contaBancariaId: contaId,
+              fitid: t.fitidGravado,
+              data: t.data,
+              valor: t.valor,
+              tipo: t.tipo,
+              descricao: t.descricao,
+            })),
+          );
         }
-        const repetidas = extrato.transacoes.length - novas;
-        const [gravado] = await tx.update(extratos).set({ transacoes: novas, repetidas }).where(eq(extratos.id, novo.id)).returning();
-        await registrarAuditoria(tx, { usuarioId: u.id, tabela: "extratos", registroId: novo.id, acao: "criar", depois: gravado });
-        return { ok: true, extratoId: novo.id, novas, repetidas, inicio: extrato.inicio, fim: extrato.fim };
+        await registrarAuditoria(tx, { usuarioId: u.id, tabela: "extratos", registroId: gravado.id, acao: "criar", depois: { ...gravado, ajustadas } });
+        return { ok: true, extratoId: gravado.id, novas, repetidas, ajustadas, inicio: extrato.inicio, fim: extrato.fim };
       });
     } catch (x) {
       // Mesmo arquivo importado ao mesmo tempo por outra pessoa: a segunda cai no único (conta, hash).
@@ -162,6 +242,32 @@ export async function importarExtrato(form: FormData) {
       }
       throw erroDeBanco("Falha ao importar o extrato", x);
     }
+    if (r.ok) revalidar();
+    return r;
+  });
+}
+
+/**
+ * Desfaz a importação de um extrato (arquivo da conta errada, por exemplo): apaga as transações e o extrato, com a
+ * auditoria (antes) na mesma transação. Só enquanto todas as transações dele estão pendentes; com alguma conciliada
+ * ou ignorada, pede para desfazer antes. Trava o extrato e as transações (`for update`).
+ */
+export async function desfazerImportacao(extratoId: string) {
+  return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
+    if (typeof extratoId !== "string" || !ehUuid(extratoId)) return EXTRATO_NAO_ENCONTRADO;
+    const r = await transacao("Falha ao desfazer a importação", async (tx): Promise<Ok | Falha> => {
+      const [e] = await tx.select().from(extratos).where(eq(extratos.id, extratoId)).for("update");
+      if (!e) return EXTRATO_NAO_ENCONTRADO;
+      const ts = await tx.select().from(extratoTransacoes).where(eq(extratoTransacoes.extratoId, e.id)).orderBy(asc(extratoTransacoes.id)).for("update");
+      if (ts.some((t) => t.situacao !== "pendente")) return falha("Desfaça as conciliações deste extrato antes");
+      await tx.delete(extratoTransacoes).where(eq(extratoTransacoes.extratoId, e.id));
+      for (const t of ts) {
+        await registrarAuditoria(tx, { usuarioId: u.id, tabela: "extrato_transacoes", registroId: t.id, acao: "excluir", antes: t });
+      }
+      await tx.delete(extratos).where(eq(extratos.id, e.id));
+      await registrarAuditoria(tx, { usuarioId: u.id, tabela: "extratos", registroId: e.id, acao: "excluir", antes: e });
+      return { ok: true };
+    });
     if (r.ok) revalidar();
     return r;
   });
