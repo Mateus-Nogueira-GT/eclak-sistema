@@ -553,5 +553,14 @@ describe("conciliação do extrato OFX", () => {
         expect.objectContaining({ arquivoNome: "extrato.ofx", transacoes: 3, repetidas: 0, inicio: "2026-11-01", fim: "2026-11-30", importadoPorNome: "Teste fin_estrategico" }),
       ]);
     });
+
+    it("obterConciliacao: data inexistente ou período invertido é recusado; situação desconhecida não filtra", async () => {
+      await importar(FIXTURE_SGML);
+      await expect(conciliacao({ de: "2026-13-45" })).rejects.toThrow("Período inválido");
+      await expect(conciliacao({ ate: "2026-02-30" })).rejects.toThrow("Período inválido");
+      await expect(conciliacao({ de: "2026-11-30", ate: "2026-11-01" })).rejects.toThrow("Período inválido");
+      expect((await conciliacao({ situacao: "qualquer" }))!.linhas).toHaveLength(3);
+      expect((await conciliacao({ situacao: "ignorado" }))!.linhas).toHaveLength(0);
+    });
   });
 });

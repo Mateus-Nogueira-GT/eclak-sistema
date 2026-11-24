@@ -12,7 +12,7 @@ import {
 } from "@/domain/conciliacao";
 import type { Origem } from "@/domain/financeiro";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
-import { somarDias } from "@/domain/venda";
+import { lerData, somarDias } from "@/domain/venda";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
@@ -73,13 +73,21 @@ export type Conciliacao = {
 
 export type FiltroConciliacao = { contaBancariaId: string; de: string; ate: string; situacao?: SituacaoConciliacao | null };
 
-const DATA = /^\d{4}-\d{2}-\d{2}$/;
+/** Data ISO de calendário real (rejeita 2026-13-45). */
+function dataValida(v: string): boolean {
+  try {
+    lerData(v);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Conciliação da conta no período (datas da transação). Conta inexistente ou excluída → `null`. */
 export async function obterConciliacao(filtro: FiltroConciliacao): Promise<Conciliacao | null> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
   const { contaBancariaId, de, ate } = filtro;
-  if (!DATA.test(de) || !DATA.test(ate)) throw new Error("Período inválido");
+  if (!dataValida(de) || !dataValida(ate) || de > ate) throw new Error("Período inválido");
   if (!ehUuid(contaBancariaId)) return null;
   const [conta] = await db
     .select({ id: contasBancarias.id, nome: contasBancarias.nome, ativa: contasBancarias.ativa })
@@ -127,6 +135,8 @@ export async function obterConciliacao(filtro: FiltroConciliacao): Promise<Conci
   const pares = transacoes.flatMap((t) => (t.situacao === "conciliada" && t.linhaOrigem && t.linhaId ? [{ origem: t.linhaOrigem, id: t.linhaId }] : []));
   const { candidatas, linhas: conciliadas } = await lerCandidatas(conta.id, somarDias(de, -DIAS_ESCOLHA), somarDias(ate, DIAS_ESCOLHA), pares);
 
+  // Situação desconhecida: sem filtro.
+  const situacao = SITUACOES_CONCILIACAO.find((s) => s === filtro.situacao) ?? null;
   const totais = Object.fromEntries(SITUACOES_CONCILIACAO.map((s) => [s, { qtd: 0, valor: 0n }])) as Conciliacao["totais"];
   const todas: LinhaConciliacao[] = transacoes.map((t) => {
     const linha = t.situacao === "conciliada" && t.linhaOrigem && t.linhaId ? (conciliadas.get(chave(t.linhaOrigem, t.linhaId)) ?? null) : null;
@@ -147,7 +157,7 @@ export async function obterConciliacao(filtro: FiltroConciliacao): Promise<Conci
   return {
     conta,
     importacoes,
-    linhas: filtro.situacao ? todas.filter((l) => l.situacao.tipo === filtro.situacao) : todas,
+    linhas: situacao ? todas.filter((l) => l.situacao.tipo === situacao) : todas,
     totais,
   };
 }
