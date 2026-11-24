@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Grade } from "@/components/kit";
 import { BotaoLink, Card } from "@/components/ui";
 import { formatarPercentual, formatarReais } from "@/domain/dinheiro";
-import { diferencaPp, pctAbaixoDe, PERIODOS_PAINEL, ROTULO_PERIODO, type PeriodoPainel } from "@/domain/paineis";
+import { diferencaPp, pctAbaixoDe, ppBr as pp, PERIODOS_PAINEL, ROTULO_PERIODO, type PeriodoPainel } from "@/domain/paineis";
 import { ErroAcesso } from "@/server/auth";
 import { obterVisaoGeral, type VisaoGeral } from "@/server/queries/paineis";
 
@@ -18,9 +18,6 @@ function periodoDaUrl(v: string | string[] | undefined): PeriodoPainel {
   const p = Array.isArray(v) ? v[0] : v;
   return PERIODOS_PAINEL.find((x) => x === p) ?? "30d";
 }
-
-/** Diferença em pontos percentuais com uma casa, em pt-BR ("-2,5 pontos"). */
-const pp = (d: string) => `${d.startsWith("-") ? "" : "+"}${d.replace(".", ",")} pontos`;
 
 // Defesa em profundidade: o proxy já barra, mas a tela não depende só dele.
 export default async function Pagina({ searchParams }: { searchParams: Promise<Busca> }) {

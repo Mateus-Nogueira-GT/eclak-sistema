@@ -4,6 +4,9 @@ import {
   intervaloAnterior,
   intervaloDeMeses,
   intervaloDoPeriodo,
+  linhasCsv,
+  nomeArquivoRelatorio,
+  periodoDosRelatorios,
   margemPonderada,
   montarDre,
   ordenarAvisos,
@@ -175,5 +178,60 @@ describe("diferencaPp e pctAbaixoDe", () => {
     expect(pctAbaixoDe("19.0", "19.000")).toBe(false);
     expect(pctAbaixoDe("-1.0", "0.0")).toBe(true);
     expect(() => pctAbaixoDe("abc", "1")).toThrow();
+  });
+});
+
+describe("relatórios: período, arquivo e linhas do CSV", () => {
+  const hoje = "2026-11-23";
+  it("período da URL: padrão é o mês de hoje; inválido volta ao mês com aviso", () => {
+    expect(periodoDosRelatorios(undefined, undefined, hoje)).toEqual({ de: "2026-11", ate: "2026-11", intervalo: { de: "2026-11-01", ate: "2026-11-30" }, invalido: false });
+    expect(periodoDosRelatorios("2026-09", "2026-10", hoje)).toMatchObject({ intervalo: { de: "2026-09-01", ate: "2026-10-31" }, invalido: false });
+    expect(periodoDosRelatorios("2026-09", undefined, hoje)).toMatchObject({ de: "2026-09", ate: "2026-09", invalido: false });
+    expect(periodoDosRelatorios("2026-10", "2026-09", hoje)).toMatchObject({ de: "2026-11", ate: "2026-11", invalido: true });
+    expect(periodoDosRelatorios("lixo", "2026-09", hoje).invalido).toBe(true);
+    expect(periodoDosRelatorios("2020-01", "2026-11", hoje).invalido).toBe(true);
+  });
+  it("nome do arquivo", () => {
+    expect(nomeArquivoRelatorio("dre", "2026-11", "2026-11")).toBe("relatorio-dre-2026-11.csv");
+    expect(nomeArquivoRelatorio("bancos", "2026-09", "2026-11")).toBe("relatorio-bancos-2026-09_2026-11.csv");
+  });
+  it("DRE", () => {
+    const r = linhasCsv("dre", { linhas: [{ rotulo: "Receita de viagens", valor: 123456n, nivel: "total" }, { rotulo: "(-) Custo", valor: -5000n, nivel: "total" }] });
+    expect(r.cabecalho).toEqual(["Linha", "Valor"]);
+    expect(r.linhas).toEqual([["Receita de viagens", 123456n], ["(-) Custo", -5000n]]);
+  });
+  it("contas a pagar e a receber, com total por situação", () => {
+    const dados = {
+      linhas: [{ vencimento: "2026-11-05", pessoa: "Hotel", descricao: "Diária", categoria: "Hospedagem", viagemCodigo: "ECL-1", situacao: "Vencida", valor: 1000n }],
+      totais: { Vencida: 1000n },
+    };
+    const p = linhasCsv("pagar", dados);
+    expect(p.cabecalho).toEqual(["Vencimento", "Fornecedor", "Descrição", "Categoria", "Viagem", "Situação", "Valor"]);
+    expect(p.linhas).toEqual([["05/11/2026", "Hotel", "Diária", "Hospedagem", "ECL-1", "Vencida", 1000n], ["Total", "", "", "", "", "Vencida", 1000n]]);
+    expect(linhasCsv("receber", dados).cabecalho[1]).toBe("Cliente");
+  });
+  it("volume por banco", () => {
+    const r = linhasCsv("bancos", {
+      contas: [{ nome: "Itaú", entradas: 300n, saidas: 100n, saldoPeriodo: 200n, saldoAtual: 900n }],
+      total: { entradas: 300n, saidas: 100n, saldoPeriodo: 200n },
+    });
+    expect(r.cabecalho).toEqual(["Conta", "Entradas", "Saídas", "Saldo do período", "Saldo atual"]);
+    expect(r.linhas).toEqual([["Itaú", 300n, 100n, 200n, 900n], ["Total", 300n, 100n, 200n, null]]);
+  });
+  it("margem por viagem: coluna Valor vendido; sem cálculo", () => {
+    const r = linhasCsv("margens", [
+      { codigo: "ECL-1", cliente: "Souza", destino: "Itália", vendido: 5000n, planejadaPct: "19.000", realPct: "16.5", diferencaPp: "-2.5" },
+      { codigo: "ECL-2", cliente: "Lima", destino: "Chile", vendido: 100n, planejadaPct: "20.0", realPct: null, diferencaPp: null },
+    ]);
+    expect(r.cabecalho).toEqual(["Viagem", "Cliente", "Destino", "Valor vendido", "Planejada", "Real", "Diferença"]);
+    expect(r.linhas).toEqual([["ECL-1", "Souza", "Itália", 5000n, "19%", "16,5%", "-2,5 pontos"], ["ECL-2", "Lima", "Chile", 100n, "20%", "Sem cálculo", null]]);
+  });
+  it("vendas por consultor", () => {
+    const r = linhasCsv("consultores", {
+      linhas: [{ nome: "Ana", viagens: 2, vendido: 9000n, margemPct: "18.2" }],
+      total: { viagens: 2, vendido: 9000n, margemPct: null },
+    });
+    expect(r.cabecalho).toEqual(["Consultor", "Viagens", "Valor vendido", "Margem real"]);
+    expect(r.linhas).toEqual([["Ana", "2", 9000n, "18,2%"], ["Total", "2", 9000n, "Sem margem"]]);
   });
 });

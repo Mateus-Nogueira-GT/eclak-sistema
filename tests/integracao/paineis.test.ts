@@ -18,6 +18,7 @@ import { saldosDasContas } from "@/server/queries/caixa";
 import { obterVisaoGeral, relatorioBancos, relatorioConsultores, relatorioContas, relatorioDre, relatorioMargens } from "@/server/queries/paineis";
 import { regrasVigentes } from "@/server/queries/regras";
 import { margensVendidas, obterViagemVendida } from "@/server/queries/vendas";
+import { GET } from "@/app/(app)/financeiro/relatorios/planilha/route";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
 import { cartaoCorporativo, contaBancaria, cotacao, item, souza, vendida } from "../helpers/venda";
 
@@ -447,5 +448,41 @@ describe("relatórios", () => {
     expect(c.linhas.find((l) => l.consultorId === a.u.id)).toMatchObject({ viagens: 1, vendido: va, margemPct: margemPonderada([pondera(a.viagemId)]) });
     expect(c.linhas.find((l) => l.consultorId === b.u.id)).toMatchObject({ viagens: 1, vendido: vb, margemPct: margemPonderada([pondera(b.viagemId)]) });
     expect(c.total).toEqual({ viagens: 2, vendido: va + vb, margemPct: margemPonderada([pondera(a.viagemId), pondera(b.viagemId)]) });
+  });
+});
+
+describe("planilha dos relatórios (CSV)", () => {
+  beforeEach(limparBanco);
+  const url = (q: string) => new Request(`http://localhost/financeiro/relatorios/planilha?${q}`);
+
+  it("financeiro baixa o CSV com BOM, tipo e nome do arquivo; consultor recebe 403 sem corpo", async () => {
+    const a = await vendida();
+    await aceite(a.viagemId, "2027-01-05");
+
+    const resposta = await comSessao(a.fin.id, () => GET(url("rel=margens&de=2027-01&ate=2027-01")));
+    expect(resposta.status).toBe(200);
+    expect(resposta.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+    expect(resposta.headers.get("content-disposition")).toBe('attachment; filename="relatorio-margens-2027-01.csv"');
+    // `text()` descarta o BOM: confere os bytes (EF BB BF) e o texto depois deles.
+    const bytes = new Uint8Array(await resposta.arrayBuffer());
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    const texto = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
+    expect(texto.startsWith("﻿Viagem;Cliente;Destino;Valor vendido;Planejada;Real;Diferença\r\n")).toBe(true);
+    expect(texto).toContain("Itália");
+
+    const dre = await comSessao(a.fin.id, () => GET(url("rel=dre&de=2027-01&ate=2027-03")));
+    expect(dre.headers.get("content-disposition")).toBe('attachment; filename="relatorio-dre-2027-01_2027-03.csv"');
+    expect(await dre.text()).toMatch(/^Linha;Valor\r\n/);
+
+    const negada = await comSessao(a.u.id, () => GET(url("rel=dre&de=2027-01&ate=2027-01")));
+    expect(negada.status).toBe(403);
+    expect(await negada.text()).toBe("");
+    expect(negada.headers.get("content-type") ?? "").not.toMatch(/csv/);
+  });
+
+  it("período inválido cai no mês atual; rel desconhecido vira DRE", async () => {
+    const a = await vendida();
+    const r = await comSessao(a.fin.id, () => GET(url("rel=xx&de=2027-05&ate=2027-01")));
+    expect(r.headers.get("content-disposition")).toBe(`attachment; filename="relatorio-dre-${hojeEmCuiaba().slice(0, 7)}.csv"`);
   });
 });

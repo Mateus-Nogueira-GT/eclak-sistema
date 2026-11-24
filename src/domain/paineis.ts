@@ -1,4 +1,5 @@
 import { arredondar } from "./decimal";
+import { formatarPercentual } from "./dinheiro";
 import { pct1 } from "./precificacao";
 import { diasNoMes, lerData, somarDias, somarMeses } from "./venda";
 
@@ -216,3 +217,121 @@ export function paraCsv(cabecalho: string[], linhas: (string | bigint | null)[][
   const todas = [cabecalho, ...linhas].map((l) => l.map(celulaCsv).join(";"));
   return "﻿" + todas.join("\r\n");
 }
+
+// ---------------------------------------------------------------------------
+// Relatórios: período da URL, cabeçalhos e linhas do CSV (as mesmas da tela)
+// ---------------------------------------------------------------------------
+
+export type PeriodoRelatorio = { de: string; ate: string; intervalo: Intervalo; invalido: boolean };
+
+/** Período `AAAA-MM` a `AAAA-MM` da URL; ausente ou inválido vale o mês de `hoje` (`invalido` só se veio e não valeu). */
+export function periodoDosRelatorios(de: string | undefined, ate: string | undefined, hoje: string): PeriodoRelatorio {
+  const mes = hoje.slice(0, 7);
+  if (!de && !ate) return { de: mes, ate: mes, intervalo: intervaloDeMeses(mes, mes), invalido: false };
+  try {
+    const d = de || ate!;
+    const a = ate || de!;
+    return { de: d, ate: a, intervalo: intervaloDeMeses(d, a), invalido: false };
+  } catch {
+    return { de: mes, ate: mes, intervalo: intervaloDeMeses(mes, mes), invalido: true };
+  }
+}
+
+/** `relatorio-{rel}-{de}[_{ate}].csv` */
+export function nomeArquivoRelatorio(rel: Relatorio, de: string, ate: string): string {
+  return `relatorio-${rel}-${de}${ate === de ? "" : `_${ate}`}.csv`;
+}
+
+export const CABECALHOS: Record<Relatorio, string[]> = {
+  dre: ["Linha", "Valor"],
+  pagar: ["Vencimento", "Fornecedor", "Descrição", "Categoria", "Viagem", "Situação", "Valor"],
+  receber: ["Vencimento", "Cliente", "Descrição", "Categoria", "Viagem", "Situação", "Valor"],
+  bancos: ["Conta", "Entradas", "Saídas", "Saldo do período", "Saldo atual"],
+  margens: ["Viagem", "Cliente", "Destino", "Valor vendido", "Planejada", "Real", "Diferença"],
+  consultores: ["Consultor", "Viagens", "Valor vendido", "Margem real"],
+};
+
+type LinhaContaCsv = { vencimento: string; pessoa: string; descricao: string; categoria: string; viagemCodigo: string | null; situacao: string; valor: bigint };
+type LinhaMargemCsv = { codigo: string; cliente: string; destino: string; vendido: bigint; planejadaPct: string; realPct: string | null; diferencaPp: string | null };
+
+/** Dados de cada relatório, como saem das leituras (só o que a tela e o CSV usam). */
+export type DadosRelatorios = {
+  dre: { linhas: LinhaDre[] };
+  pagar: { linhas: LinhaContaCsv[]; totais: Record<string, bigint> };
+  receber: { linhas: LinhaContaCsv[]; totais: Record<string, bigint> };
+  bancos: {
+    contas: { nome: string; entradas: bigint; saidas: bigint; saldoPeriodo: bigint; saldoAtual: bigint }[];
+    total: { entradas: bigint; saidas: bigint; saldoPeriodo: bigint };
+  };
+  margens: LinhaMargemCsv[];
+  consultores: {
+    linhas: { nome: string; viagens: number; vendido: bigint; margemPct: string | null }[];
+    total: { viagens: number; vendido: bigint; margemPct: string | null };
+  };
+};
+
+const dataBrCsv = (iso: string) => iso.split("-").reverse().join("/");
+/** Diferença em pontos percentuais, como na tela: "-2,5 pontos". */
+export const ppBr = (d: string) => `${d.startsWith("-") ? "" : "+"}${d.replace(".", ",")} pontos`;
+export const SEM_CALCULO = "Sem cálculo";
+export const SEM_MARGEM = "Sem margem";
+
+/** Cabeçalho e linhas do CSV de um relatório: o mesmo conteúdo da tela, valores em reais (`paraCsv`). */
+export function linhasCsv<R extends Relatorio>(rel: R, dados: DadosRelatorios[R]): { cabecalho: string[]; linhas: (string | bigint | null)[][] } {
+  const cabecalho = CABECALHOS[rel];
+  const d = dados as DadosRelatorios[Relatorio];
+  switch (rel) {
+    case "dre":
+      return { cabecalho, linhas: (d as DadosRelatorios["dre"]).linhas.map((l) => [l.rotulo, l.valor]) };
+    case "pagar":
+    case "receber": {
+      const { linhas, totais } = d as DadosRelatorios["pagar"];
+      return {
+        cabecalho,
+        linhas: [
+          ...linhas.map((l) => [dataBrCsv(l.vencimento), l.pessoa, l.descricao, l.categoria, l.viagemCodigo, l.situacao, l.valor]),
+          ...Object.entries(totais).map(([situacao, v]) => ["Total", "", "", "", "", situacao, v]),
+        ],
+      };
+    }
+    case "bancos": {
+      const { contas, total } = d as DadosRelatorios["bancos"];
+      return {
+        cabecalho,
+        linhas: [
+          ...contas.map((c) => [c.nome, c.entradas, c.saidas, c.saldoPeriodo, c.saldoAtual]),
+          ["Total", total.entradas, total.saidas, total.saldoPeriodo, null],
+        ],
+      };
+    }
+    case "margens":
+      return {
+        cabecalho,
+        linhas: (d as DadosRelatorios["margens"]).map((l) => [
+          l.codigo,
+          l.cliente,
+          l.destino,
+          l.vendido,
+          formatarPercentual(l.planejadaPct),
+          l.realPct === null ? SEM_CALCULO : formatarPercentual(l.realPct),
+          l.diferencaPp === null ? null : ppBr(l.diferencaPp),
+        ]),
+      };
+    case "consultores": {
+      const { linhas, total } = d as DadosRelatorios["consultores"];
+      const m = (p: string | null) => (p === null ? SEM_MARGEM : formatarPercentual(p));
+      return {
+        cabecalho,
+        linhas: [
+          ...linhas.map((l) => [l.nome, String(l.viagens), l.vendido, m(l.margemPct)]),
+          ["Total", String(total.viagens), total.vendido, m(total.margemPct)],
+        ],
+      };
+    }
+  }
+}
+
+const NOMES_MES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+/** "2026-11" -> "novembro de 2026"; um mês ou "janeiro de 2026 a março de 2026". */
+export const rotuloMes = (m: string) => `${NOMES_MES[Number(m.slice(5)) - 1]} de ${m.slice(0, 4)}`;
+export const rotuloPeriodoMeses = (de: string, ate: string) => (de === ate ? rotuloMes(de) : `${rotuloMes(de)} a ${rotuloMes(ate)}`);
