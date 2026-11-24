@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Send } from "lucide-react";
 import { Botao, Campo, Card, CardHeader, Select, inputCls } from "@/components/ui";
 import { MSG_SEM_ITEM_COTADO, msgSemCotacao } from "@/domain/aprovacoes";
-import { FORMAS_SIMULADOR, FORMA_REFERENCIA, type FormaPagamento } from "@/domain/precificacao";
+import { FORMAS_SIMULADOR, FORMA_REFERENCIA, INDICES_FORMAS_PROPOSTA, type FormaPagamento } from "@/domain/precificacao";
 import { enviarParaAprovacao } from "@/server/actions/aprovacoes";
 import type { FichaPrecificacao } from "@/server/queries/viagens";
 import { reaisParaCampo } from "../formatos";
@@ -59,7 +59,7 @@ export function Envio({ ficha, onFechar }: { ficha: FichaPrecificacao; onFechar:
       <div className="mt-4 grid grid-cols-1 gap-4 px-6 sm:grid-cols-2 lg:grid-cols-4">
         <Campo label="Forma de pagamento proposta" className="lg:col-span-2">
           <Select value={forma} onChange={(v) => { setForma(v); a.limparCampo("forma"); }} className="w-full">
-            {FORMAS_SIMULADOR.map((f, i) => <option key={f.rotulo} value={String(i)}>{f.rotulo}</option>)}
+            {INDICES_FORMAS_PROPOSTA.map((i) => <option key={FORMAS_SIMULADOR[i].rotulo} value={String(i)}>{FORMAS_SIMULADOR[i].rotulo}</option>)}
             <option value="boleto">Boleto</option>
           </Select>
           {a.campos.forma && <span className="mt-1 block text-[12px] text-texto">{a.campos.forma}</span>}

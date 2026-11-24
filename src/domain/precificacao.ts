@@ -43,13 +43,21 @@ export type FormaPagamento = {
   antecipado?: boolean;
 };
 
-export const FORMAS_SIMULADOR: { rotulo: string; forma: FormaPagamento }[] = [
+/**
+ * Formas do simulador (planilha v7). `soReferencia`: aparece nas análises, mas não é forma de proposta nem de venda.
+ * "6x com antecipação" é só referência: a ECLAK não antecipa recebíveis automaticamente; a antecipação é calculada
+ * quando falta caixa (Augusto, 23/11/2026).
+ */
+export const FORMAS_SIMULADOR: { rotulo: string; forma: FormaPagamento; soReferencia?: true }[] = [
   { rotulo: "Pix / cartão direto no fornecedor", forma: { tipo: "pix", parcelas: 1 } },
   { rotulo: "Crédito 1x", forma: { tipo: "credito", parcelas: 1 } },
   { rotulo: "Crédito 2x a 6x (referência)", forma: { tipo: "credito", parcelas: 6 } },
   { rotulo: "Crédito 7x a 10x", forma: { tipo: "credito", parcelas: 10 } },
-  { rotulo: "6x com antecipação", forma: { tipo: "credito", parcelas: 6, antecipado: true } },
+  { rotulo: "6x com antecipação", forma: { tipo: "credito", parcelas: 6, antecipado: true }, soReferencia: true },
 ];
+
+/** Índices de `FORMAS_SIMULADOR` que podem ser escolhidos como forma da proposta (sem as de referência). */
+export const INDICES_FORMAS_PROPOSTA: number[] = FORMAS_SIMULADOR.flatMap((f, i) => (f.soReferencia ? [] : [i]));
 
 /** Índice em `FORMAS_SIMULADOR` da forma de referência (2x a 6x): é a que define `compensacao` e `valorFinal` dos itens. */
 export const FORMA_REFERENCIA = 2;

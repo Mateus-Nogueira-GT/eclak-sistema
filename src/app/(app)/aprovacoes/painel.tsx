@@ -18,6 +18,7 @@ import { formatarPercentual, formatarReais, lerPercentual, lerReais } from "@/do
 import {
   custoLiquido,
   FORMAS_SIMULADOR,
+  INDICES_FORMAS_PROPOSTA,
   margemDaAprovacao,
   taxaDaForma,
   type FormaPagamento,
@@ -326,7 +327,7 @@ export function Painel({ pedido: p }: { pedido: Pedido }) {
             <Campo label="Forma de pagamento do cliente">
               <Select value={formaSel} onChange={setFormaSel} className={cx("w-full", !formasIguais(forma, p.forma) && "!border-terracota")}>
                 <option value="proposta">Forma da proposta: {p.formaRotulo}</option>
-                {FORMAS_SIMULADOR.map((f, k) => <option key={f.rotulo} value={String(k)}>{f.rotulo}</option>)}
+                {INDICES_FORMAS_PROPOSTA.map((k) => <option key={FORMAS_SIMULADOR[k].rotulo} value={String(k)}>{FORMAS_SIMULADOR[k].rotulo}</option>)}
                 <option value="boleto">Boleto</option>
               </Select>
             </Campo>
