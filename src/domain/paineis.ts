@@ -15,6 +15,19 @@ export const ROTULO_PERIODO: Record<PeriodoPainel, string> = {
   ano: "Este ano",
 };
 
+export const RELATORIOS_TIPOS = ["dre", "pagar", "receber", "bancos", "margens", "consultores"] as const;
+export type Relatorio = (typeof RELATORIOS_TIPOS)[number];
+
+/** Nome e descrição de cada relatório (texto do protótipo). */
+export const RELATORIOS: Record<Relatorio, { nome: string; descricao: string }> = {
+  dre: { nome: "DRE", descricao: "Resultado do período" },
+  pagar: { nome: "Contas a pagar", descricao: "Fornecedores e custos da empresa" },
+  receber: { nome: "Contas a receber", descricao: "Parcelas de clientes" },
+  bancos: { nome: "Volume por banco", descricao: "Entradas e saídas por conta" },
+  margens: { nome: "Margem por viagem", descricao: "Planejada e real" },
+  consultores: { nome: "Vendas por consultor", descricao: "Valor vendido e margem" },
+};
+
 /** Datas ISO (AAAA-MM-DD), ambas inclusivas. */
 export type Intervalo = { de: string; ate: string };
 

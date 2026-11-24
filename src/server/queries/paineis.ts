@@ -1,21 +1,25 @@
 import "server-only";
-import { and, asc, between, count, eq, inArray, isNull, lt, lte, min, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, between, count, eq, inArray, isNull, lt, lte, min, ne, or, sql, type SQL } from "drizzle-orm";
 import type { PeriodoCaixa } from "@/domain/caixa";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { formatarPercentual, formatarReais } from "@/domain/dinheiro";
+import { rotuloSituacao, type Lado, type Origem } from "@/domain/financeiro";
 import {
   diferencaPp,
   intervaloAnterior,
   intervaloDoPeriodo,
   margemPonderada,
+  montarDre,
   ordenarAvisos,
   pctAbaixoDe,
   RESPONSAVEL_AVISO,
   variacaoPct,
   type Aviso,
   type Intervalo,
+  type LinhaDre,
   type PeriodoPainel,
 } from "@/domain/paineis";
+import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { somarDias, statusDaViagem } from "@/domain/venda";
 import { formatarCodigoViagem } from "@/domain/viagens";
 import { exigirPerfil } from "@/server/auth";
@@ -23,13 +27,15 @@ import { db } from "@/server/db/client";
 import {
   categoriasFinanceiras,
   clientes,
+  contasBancarias,
   lancamentosFinanceiros as lf,
   usuarios,
   vendas,
   versoesPrecificacao,
   viagens,
 } from "@/server/db/schema";
-import { obterFluxoDeCaixa, type FluxoDeCaixa } from "@/server/queries/caixa";
+import { obterFluxoDeCaixa, saldoAtualSql, type FluxoDeCaixa } from "@/server/queries/caixa";
+import { situacaoSql } from "@/server/queries/financeiro";
 import { regrasVigentes } from "@/server/queries/regras";
 import { margensVendidas, type MargensVendida } from "@/server/queries/vendas";
 
@@ -324,5 +330,211 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
     perdas: perdas.slice(0, MAX_PERDAS),
     margemReferenciaPct: referencia,
     viagensAbaixoReferencia: abaixoReferencia,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Relatórios (spec §5.4): todos para a gestão financeira, pelo intervalo de meses da tela
+// ---------------------------------------------------------------------------
+
+export type RelatorioDre = { linhas: LinhaDre[]; resultado: bigint; semMargem: { viagemId: string; codigo: string }[] };
+
+/**
+ * DRE por competência (R3): viagens com aceite no intervalo pelos valores de `margemReal` (sem o `fixo`); empresa =
+ * lançamentos manuais não cancelados pela competência e pelo valor previsto, inclusive as compras no cartão
+ * corporativo uma a uma. As linhas de viagem da view e a da fatura do cartão (o total das compras) ficam de fora.
+ */
+export async function relatorioDre(i: Intervalo): Promise<RelatorioDre> {
+  await exigirPerfil(...PERFIS_FINANCEIRO);
+  const [vendidas, empresa] = await Promise.all([
+    viagensVendidasNoIntervalo(i),
+    db
+      .select({
+        lado: lf.lado,
+        grupo: categoriasFinanceiras.grupo,
+        categoria: categoriasFinanceiras.nome,
+        categoriaId: lf.categoriaId,
+        valor: bigintSql(sql`sum(${lf.valorPrevisto})`),
+      })
+      .from(lf)
+      .innerJoin(categoriasFinanceiras, eq(categoriasFinanceiras.id, lf.categoriaId))
+      .where(and(eq(lf.origem, "manual"), ne(lf.statusBase, "cancelado"), between(lf.competencia, i.de.slice(0, 7), i.ate.slice(0, 7))))
+      .groupBy(lf.lado, categoriasFinanceiras.grupo, categoriasFinanceiras.nome, lf.categoriaId),
+  ]);
+
+  const bloco = { receita: 0n, custo: 0n, imposto: 0n, taxas: 0n, semMargem: 0 };
+  const semMargem: RelatorioDre["semMargem"] = [];
+  for (const v of vendidas) {
+    const real = v.margens.real;
+    if ("erro" in real) {
+      semMargem.push({ viagemId: v.viagemId, codigo: v.codigo });
+      continue;
+    }
+    bloco.receita += real.receita;
+    bloco.custo += real.custo;
+    bloco.imposto += real.imposto;
+    bloco.taxas += real.taxas;
+  }
+  bloco.semMargem = semMargem.length;
+  return { ...montarDre(bloco, empresa), semMargem };
+}
+
+export type LinhaConta = {
+  origem: Origem;
+  id: string;
+  vencimento: string;
+  pessoa: string;
+  descricao: string;
+  categoria: string;
+  viagemId: string | null;
+  viagemCodigo: string | null;
+  /** Baixada: o valor baixado; senão o previsto (como a lista). */
+  valor: bigint;
+  /** Rótulo da lista única (Vencida, Vence hoje, A vencer, Paga/Recebida). */
+  situacao: string;
+};
+
+export type RelatorioContas = { linhas: LinhaConta[]; totais: Record<string, bigint> };
+
+/**
+ * Contas a pagar ou a receber com vencimento no intervalo, não canceladas, por vencimento. Como a lista única, as
+ * compras no cartão corporativo aparecem pela linha da fatura (não uma a uma). Totais pela situação (rótulo).
+ */
+export async function relatorioContas(lado: Lado, i: Intervalo): Promise<RelatorioContas> {
+  await exigirPerfil(...PERFIS_FINANCEIRO);
+  const linhas = await db
+    .select({
+      origem: lf.origem,
+      id: lf.id,
+      vencimento: lf.vencimento,
+      pessoa: lf.pessoa,
+      descricao: lf.descricao,
+      categoria: categoriasFinanceiras.nome,
+      viagemId: lf.viagemId,
+      viagemCodigo: lf.viagemCodigo,
+      valor: bigintSql(sql`case when ${lf.statusBase} = 'baixado' then coalesce(${lf.valorBaixado}, ${lf.valorPrevisto}) else ${lf.valorPrevisto} end`),
+      situacao: situacaoSql(hojeEmCuiaba()),
+    })
+    .from(lf)
+    .innerJoin(categoriasFinanceiras, eq(categoriasFinanceiras.id, lf.categoriaId))
+    .where(and(eq(lf.lado, lado), ne(lf.statusBase, "cancelado"), isNull(lf.faturaCartaoId), between(lf.vencimento, i.de, i.ate)))
+    .orderBy(asc(lf.vencimento), asc(lf.id), asc(lf.origem));
+
+  const totais: Record<string, bigint> = {};
+  const comRotulo = linhas.map((l) => {
+    const situacao = rotuloSituacao(l.situacao, lado);
+    totais[situacao] = (totais[situacao] ?? 0n) + l.valor;
+    return { ...l, situacao };
+  });
+  return { linhas: comRotulo, totais };
+}
+
+export type LinhaBanco = { contaId: string; nome: string; entradas: bigint; saidas: bigint; saldoPeriodo: bigint; saldoAtual: bigint };
+export type RelatorioBancos = { contas: LinhaBanco[]; total: { entradas: bigint; saidas: bigint; saldoPeriodo: bigint } };
+
+/**
+ * Volume por banco (R2): baixas no intervalo que transitam pelo caixa, pelo valor de caixa, por conta, e o saldo
+ * atual (`saldoAtualSql`). Contas ativas sempre; desativadas só se tiveram baixa no intervalo. Por nome.
+ */
+export async function relatorioBancos(i: Intervalo): Promise<RelatorioBancos> {
+  await exigirPerfil(...PERFIS_FINANCEIRO);
+  const [contas, movimentos] = await Promise.all([
+    db
+      .select({ contaId: contasBancarias.id, nome: contasBancarias.nome, ativa: contasBancarias.ativa, saldoAtual: saldoAtualSql })
+      .from(contasBancarias)
+      .where(isNull(contasBancarias.excluidoEm))
+      .orderBy(asc(contasBancarias.nome)),
+    db
+      .select({
+        contaId: lf.contaBancariaId,
+        entradas: bigintSql(sql`sum(${lf.valorCaixaBaixado}) filter (where ${lf.lado} = 'receber')`),
+        saidas: bigintSql(sql`sum(${lf.valorCaixaBaixado}) filter (where ${lf.lado} = 'pagar')`),
+      })
+      .from(lf)
+      .where(and(eq(lf.statusBase, "baixado"), eq(lf.transitaCaixa, true), between(lf.baixadoEm, i.de, i.ate)))
+      .groupBy(lf.contaBancariaId),
+  ]);
+
+  const porConta = new Map(movimentos.map((m) => [m.contaId, m]));
+  const linhas: LinhaBanco[] = contas
+    .filter((c) => c.ativa || porConta.has(c.contaId))
+    .map((c) => {
+      const m = porConta.get(c.contaId);
+      const entradas = m?.entradas ?? 0n;
+      const saidas = m?.saidas ?? 0n;
+      return { contaId: c.contaId, nome: c.nome, entradas, saidas, saldoPeriodo: entradas - saidas, saldoAtual: c.saldoAtual };
+    });
+  const entradas = linhas.reduce((s, c) => s + c.entradas, 0n);
+  const saidas = linhas.reduce((s, c) => s + c.saidas, 0n);
+  return { contas: linhas, total: { entradas, saidas, saldoPeriodo: entradas - saidas } };
+}
+
+export type LinhaMargem = {
+  viagemId: string;
+  codigo: string;
+  cliente: string;
+  destino: string;
+  vendido: bigint;
+  planejadaPct: string;
+  realPct: string | null;
+  /** Real − planejada, em pontos percentuais com uma casa; null sem margem real. */
+  diferencaPp: string | null;
+  erro: string | null;
+};
+
+/** Margem por viagem com aceite no intervalo (R1), por aceite; com `consultorId`, só as viagens dele. */
+export async function relatorioMargens(i: Intervalo, consultorId?: string): Promise<LinhaMargem[]> {
+  await exigirPerfil(...PERFIS_FINANCEIRO);
+  const vendidas = await viagensVendidasNoIntervalo(i);
+  return vendidas
+    .filter((v) => !consultorId || v.consultorId === consultorId)
+    .map((v) => {
+      const planejadaPct = v.margens.planejada.finalPct;
+      const real = v.margens.real;
+      const comErro = "erro" in real;
+      return {
+        viagemId: v.viagemId,
+        codigo: v.codigo,
+        cliente: v.cliente,
+        destino: v.destino,
+        vendido: v.vendido,
+        planejadaPct,
+        realPct: comErro ? null : real.finalPct,
+        diferencaPp: comErro ? null : diferencaPp(real.finalPct, planejadaPct),
+        erro: comErro ? real.erro : null,
+      };
+    });
+}
+
+export type LinhaConsultor = { consultorId: string; nome: string; viagens: number; vendido: bigint; margemPct: string | null };
+export type RelatorioConsultores = { linhas: LinhaConsultor[]; total: { viagens: number; vendido: bigint; margemPct: string | null } };
+
+/**
+ * Vendas por consultor da viagem (R1): viagens fechadas e vendido no intervalo; margem real ponderada pela receita
+ * (R4), só das viagens com margem calculada. Por nome.
+ */
+export async function relatorioConsultores(i: Intervalo): Promise<RelatorioConsultores> {
+  await exigirPerfil(...PERFIS_FINANCEIRO);
+  const vendidas = await viagensVendidasNoIntervalo(i);
+  type Acumulado = { nome: string; viagens: number; vendido: bigint; reais: { final: bigint; receita: bigint }[] };
+  const porConsultor = new Map<string, Acumulado>();
+  const todas: Acumulado["reais"] = [];
+  for (const v of vendidas) {
+    const a = porConsultor.get(v.consultorId) ?? { nome: v.consultorNome, viagens: 0, vendido: 0n, reais: [] };
+    a.viagens++;
+    a.vendido += v.vendido;
+    const real = v.margens.real;
+    if (!("erro" in real)) {
+      a.reais.push({ final: real.final, receita: real.receita });
+      todas.push({ final: real.final, receita: real.receita });
+    }
+    porConsultor.set(v.consultorId, a);
+  }
+  const linhas = [...porConsultor.entries()]
+    .map(([consultorId, a]) => ({ consultorId, nome: a.nome, viagens: a.viagens, vendido: a.vendido, margemPct: margemPonderada(a.reais) }))
+    .sort((x, y) => x.nome.localeCompare(y.nome, "pt-BR"));
+  return {
+    linhas,
+    total: { viagens: vendidas.length, vendido: vendidas.reduce((s, v) => s + v.vendido, 0n), margemPct: margemPonderada(todas) },
   };
 }

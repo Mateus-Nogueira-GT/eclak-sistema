@@ -110,7 +110,7 @@ export type LinhaLancamento = {
 export type ListaLancamentos = { linhas: LinhaLancamento[]; totalLinhas: number; totais: TotaisLancamentos };
 
 /** Situação derivada (nunca gravada): cancelada, baixada, vencida (< hoje), vence hoje, a vencer. */
-const situacaoSql = (hoje: string) => sql<Situacao>`(case
+export const situacaoSql = (hoje: string) => sql<Situacao>`(case
   when ${lf.statusBase} = 'cancelado' then 'cancelada'
   when ${lf.statusBase} = 'baixado' then 'baixada'
   when ${lf.vencimento} < ${hoje}::date then 'vencida'
