@@ -34,10 +34,14 @@ export type ResultadoOfx = { ok: true; extrato: ExtratoOfx } | { ok: false; erro
 /** Texto do arquivo, escolhendo o charset pelo cabeçalho: `CHARSET:1252`/`ENCODING:USASCII` → windows-1252; resto → UTF-8. */
 export function decodificarOfx(bytes: Uint8Array): string {
   const cabecalho = new TextDecoder("latin1").decode(bytes.subarray(0, 2048));
-  const xmlUtf8 = /^\s*<\?xml[^>]*encoding\s*=\s*["']utf-8["']/i.test(cabecalho);
+  const xmlEncoding = /^\s*<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']/i.exec(cabecalho)?.[1]?.toUpperCase();
   const charset = /CHARSET:\s*([^\s<]+)/i.exec(cabecalho)?.[1]?.toUpperCase();
   const encoding = /ENCODING:\s*([^\s<]+)/i.exec(cabecalho)?.[1]?.toUpperCase();
-  const ocidental = !xmlUtf8 && (charset === "1252" || charset === "WINDOWS-1252" || encoding === "USASCII");
+  // ISO-8859-1 também vai para windows-1252 (superconjunto: só acrescenta caracteres onde o 8859-1 tem controles).
+  const OCIDENTAIS = ["1252", "WINDOWS-1252", "8859-1", "ISO-8859-1", "ISO8859-1", "LATIN1"];
+  const ocidental = xmlEncoding
+    ? OCIDENTAIS.includes(xmlEncoding)
+    : (charset !== undefined && OCIDENTAIS.includes(charset)) || encoding === "USASCII";
   const texto = new TextDecoder(ocidental ? "windows-1252" : "utf-8").decode(bytes);
   return texto.charCodeAt(0) === 0xfeff ? texto.slice(1) : texto;
 }
@@ -71,7 +75,7 @@ function limpar(v: string): string {
 
 /** Valor da primeira ocorrência de `<TAG>` no trecho (até `<` ou fim da linha); `null` se não há ou vazio. */
 function tag(trecho: string, nome: string): string | null {
-  const m = new RegExp(`<${nome}>([^<\\r\\n]*)`, "i").exec(trecho);
+  const m = new RegExp(`<${nome}>\\s*([^<\\r\\n]*)`, "i").exec(trecho);
   const v = m ? limpar(m[1]) : "";
   return v === "" ? null : v;
 }

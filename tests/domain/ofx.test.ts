@@ -40,6 +40,17 @@ describe("ofx: decodificação", () => {
   it("XML com UTF-8 decodifica os acentos", () => {
     expect(decodificarOfx(fixture("xml-utf8.ofx"))).toContain("São João");
   });
+  it.each(["CHARSET:8859-1", "CHARSET:ISO-8859-1", "CHARSET:LATIN1", "ENCODING:USASCII\nCHARSET:1252"])(
+    "SGML com %s decodifica como windows-1252",
+    (cab) => {
+      const bytes = Uint8Array.from(Buffer.from(`OFXHEADER:100\n${cab}\n\n<OFX><MEMO>TARIFA BANCÁRIA</OFX>`, "latin1"));
+      expect(decodificarOfx(bytes)).toContain("TARIFA BANCÁRIA");
+    },
+  );
+  it.each(["ISO-8859-1", "windows-1252"])("XML com encoding %s decodifica como windows-1252", (enc) => {
+    const bytes = Uint8Array.from(Buffer.from(`<?xml version="1.0" encoding="${enc}"?><OFX><MEMO>PAGTO ÁGUA</OFX>`, "latin1"));
+    expect(decodificarOfx(bytes)).toContain("PAGTO ÁGUA");
+  });
   it("sem indicação de charset assume UTF-8", () => {
     expect(decodificarOfx(new TextEncoder().encode("<OFX>ação</OFX>"))).toBe("<OFX>ação</OFX>");
   });
@@ -101,9 +112,28 @@ describe("ofx: leitura", () => {
     expect(b.ok && b.extrato.transacoes).toEqual([]);
   });
 
-  it("ignora os saldos", () => {
+  it("ignora os saldos: o fixture SGML (com LEDGERBAL) rende só as 3 transações", () => {
     const r = lerFixture("sgml-1252.ofx");
-    expect(r.ok && r.extrato.transacoes.every((t) => t.fitid !== "")).toBe(true);
+    expect(r.ok && r.extrato.transacoes.map((t) => t.fitid)).toEqual(["202611030001", "202611050002", "202611100003"]);
+  });
+
+  it("valores em linha própria (XML indentado)", () => {
+    const r = lerOfx(
+      "<OFX>\n<STMTRS>\n<BANKACCTFROM>\n<ACCTID>\n  12345-6\n</ACCTID>\n</BANKACCTFROM>\n<BANKTRANLIST>\n<STMTTRN>\n" +
+        "<DTPOSTED>\n  20261103\n</DTPOSTED>\n<TRNAMT>\n  -10,50\n</TRNAMT>\n<FITID>\n  123\n</FITID>\n<MEMO>\n  Pix\n</MEMO>\n" +
+        "</STMTTRN>\n</BANKTRANLIST>\n</STMTRS>\n</OFX>",
+    );
+    expect(r.ok && r.extrato.conta).toBe("3456");
+    expect(r.ok && r.extrato.transacoes).toEqual([
+      { fitid: "123", data: "2026-11-03", valor: -1050n, tipo: "OTHER", descricao: "Pix" },
+    ]);
+  });
+
+  it("tag vazia em SGML não engole a tag da linha seguinte", () => {
+    const r = lerOfx(
+      "<OFX><STMTRS><BANKTRANLIST><STMTTRN>\n<DTPOSTED>20261103\n<TRNAMT>-1.00\n<FITID>9\n<NAME>\n<MEMO>Só memo\n</STMTTRN></BANKTRANLIST></STMTRS></OFX>",
+    );
+    expect(r.ok && r.extrato.transacoes[0].descricao).toBe("Só memo");
   });
 
   it("mais de uma conta é recusado", () => {
