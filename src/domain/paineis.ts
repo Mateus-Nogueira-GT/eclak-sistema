@@ -185,6 +185,8 @@ export type Aviso = {
   detalhe: string;
   href: string;
   responsavel: "Gestão" | "Financeiro";
+  /** A linha resume várias (parcelas, comissões, contas, pedidos, viagens além das 3): o link abre uma lista. */
+  agregado: boolean;
 };
 
 const ORDEM_AVISO: Aviso["tipo"][] = ["caixa", "margem", "parcela", "comissao", "pagar", "aprovacao"];

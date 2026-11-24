@@ -143,6 +143,7 @@ describe("ordenarAvisos", () => {
     detalhe: "",
     href: "/",
     responsavel: RESPONSAVEL_AVISO[tipo],
+    agregado: false,
   });
   it("ordena por tipo, estável dentro do tipo", () => {
     const r = ordenarAvisos([av("aprovacao", "1"), av("pagar", "2"), av("caixa", "3"), av("margem", "4"), av("caixa", "5"), av("comissao", "6"), av("parcela", "7")]);

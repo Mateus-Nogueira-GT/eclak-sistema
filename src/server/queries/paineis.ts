@@ -40,6 +40,8 @@ import { regrasVigentes } from "@/server/queries/regras";
 import { margensVendidas, type MargensVendida } from "@/server/queries/vendas";
 
 const MAX_AVISOS = 8;
+/** Avisos de margem uma viagem por linha; as demais viram uma linha "e mais N viagens". */
+const MAX_AVISOS_MARGEM = 3;
 const MAX_PERDAS = 6;
 const DIAS_A_PAGAR = 7;
 
@@ -133,12 +135,14 @@ export type VisaoGeral = {
   semanas: PeriodoCaixa[];
   primeiraNegativa: PeriodoCaixa | null;
   reserva: FluxoDeCaixa["reserva"];
+  /** Até 8, na ordem de R6. */
   avisos: Aviso[];
-  avisosRestantes: number;
+  /** Os que passaram do limite de 8 (a tela lista os títulos com link). */
+  avisosOcultos: Aviso[];
   /** Até 6, só não conciliadas com margem real abaixo da planejada, maior perda primeiro. */
   perdas: PerdaDeMargem[];
   margemReferenciaPct: string;
-  /** Viagens vendidas e não conciliadas com margem real abaixo da referência (os avisos podem ser cortados). */
+  /** Viagens vendidas e não conciliadas com margem real abaixo da referência (os avisos mostram até 3 e um resumo). */
   viagensAbaixoReferencia: number;
 };
 
@@ -156,13 +160,9 @@ async function caixaDoIntervalo(i: Intervalo): Promise<{ recebido: bigint; pago:
   return t ?? { recebido: 0n, pago: 0n };
 }
 
+/** Vendido com aceite no intervalo, pelas mesmas linhas (`linhasVendidas`) do vendido do período atual. */
 async function vendidoNoIntervalo(i: Intervalo): Promise<bigint> {
-  const [t] = await db
-    .select({ total: bigintSql(sql`sum(${vendas.total})`) })
-    .from(vendas)
-    .innerJoin(viagens, eq(viagens.id, vendas.viagemId))
-    .where(and(isNull(viagens.excluidoEm), eq(viagens.status, "vendida"), aceiteNo(i)));
-  return t?.total ?? 0n;
+  return (await linhasVendidas(aceiteNo(i))).reduce((s, l) => s + l.vendido, 0n);
 }
 
 type Agregado = { quantidade: number; total: bigint; desde: string | null };
@@ -188,8 +188,9 @@ async function pedidosAguardando(): Promise<number> {
 const lista = (params: Record<string, string>) => `/financeiro/lancamentos?${new URLSearchParams(params).toString()}`;
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 
-function aviso(tipo: Aviso["tipo"], titulo: string, detalhe: string, href: string): Aviso {
-  return { tipo, titulo, detalhe, href, responsavel: RESPONSAVEL_AVISO[tipo] };
+/** `agregado`: a linha resume várias (o link abre uma lista, não um item). */
+function aviso(tipo: Aviso["tipo"], titulo: string, detalhe: string, href: string, agregado = false): Aviso {
+  return { tipo, titulo, detalhe, href, responsavel: RESPONSAVEL_AVISO[tipo], agregado };
 }
 
 /**
@@ -239,25 +240,25 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
 
   const referencia = regras.valores.margemReferenciaPct;
   const avisos: Aviso[] = [];
-  for (const s of fluxo.semanas) {
-    if (s.saldoFinal < 0n) avisos.push(aviso("caixa", `Caixa negativo na semana de ${s.rotulo}`, `Saldo projetado de ${formatarReais(s.saldoFinal)}`, "/financeiro/caixa"));
+  // Caixa: uma linha só, com quantas semanas ficam negativas, a primeira e a de menor saldo.
+  const negativas = fluxo.semanas.filter((s) => s.saldoFinal < 0n);
+  if (negativas.length > 0) {
+    const menor = negativas.reduce((m, s) => (s.saldoFinal < m.saldoFinal ? s : m));
+    avisos.push(
+      aviso(
+        "caixa",
+        `Caixa negativo em ${negativas.length} das próximas ${fluxo.semanas.length} semanas, a partir da semana de ${negativas[0].rotulo}`,
+        `Menor saldo projetado: ${formatarReais(menor.saldoFinal)}, na semana de ${menor.rotulo}`,
+        "/financeiro/caixa",
+      ),
+    );
   }
   const perdas: PerdaDeMargem[] = [];
-  let abaixoReferencia = 0;
+  const abaixo: { v: ViagemVendidaDoPainel; realPct: string }[] = [];
   for (const v of naoConciliadas) {
     const real = v.margens.real;
     if ("erro" in real) continue;
-    if (pctAbaixoDe(real.finalPct, referencia)) {
-      abaixoReferencia++;
-      avisos.push(
-        aviso(
-          "margem",
-          `${v.codigo} abaixo da margem de referência`,
-          `${v.cliente}: margem real de ${formatarPercentual(real.finalPct)}, referência de ${formatarPercentual(referencia)}`,
-          `/viagens/${v.viagemId}`,
-        ),
-      );
-    }
+    if (pctAbaixoDe(real.finalPct, referencia)) abaixo.push({ v, realPct: real.finalPct });
     const planejadaPct = v.margens.planejada.finalPct;
     if (pctAbaixoDe(real.finalPct, planejadaPct)) {
       perdas.push({
@@ -272,6 +273,29 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
       });
     }
   }
+  // Margem: a maior distância da referência (a menor margem real) primeiro; até 3 por viagem e um resumo do resto.
+  abaixo.sort((a, b) => (pctAbaixoDe(a.realPct, b.realPct) ? -1 : pctAbaixoDe(b.realPct, a.realPct) ? 1 : a.v.codigo.localeCompare(b.v.codigo, "pt-BR")));
+  for (const { v, realPct } of abaixo.slice(0, MAX_AVISOS_MARGEM)) {
+    avisos.push(
+      aviso(
+        "margem",
+        `${v.codigo} abaixo da margem de referência`,
+        `${v.cliente}: margem real de ${formatarPercentual(realPct)}, referência de ${formatarPercentual(referencia)}`,
+        `/viagens/${v.viagemId}`,
+      ),
+    );
+  }
+  if (abaixo.length > MAX_AVISOS_MARGEM) {
+    avisos.push(
+      aviso(
+        "margem",
+        `e mais ${plural(abaixo.length - MAX_AVISOS_MARGEM, "viagem", "viagens")} abaixo da margem de referência`,
+        `Margem real abaixo de ${formatarPercentual(referencia)}; veja a margem por viagem nos relatórios`,
+        "/financeiro/relatorios?rel=margens",
+        true,
+      ),
+    );
+  }
   if (parcelas.quantidade > 0 && parcelas.desde) {
     const filtro: Record<string, string> = { lado: "receber", base: "vencimento", situacao: "vencida", origem: "viagem" };
     if (categoriaVendas[0]) filtro.categoriaId = categoriaVendas[0].id;
@@ -281,6 +305,7 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
         plural(parcelas.quantidade, "parcela de cliente vencida", "parcelas de cliente vencidas"),
         `${formatarReais(parcelas.total)} em aberto`,
         lista({ ...filtro, de: parcelas.desde, ate: ontem }),
+        true,
       ),
     );
   }
@@ -291,6 +316,7 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
         plural(comissoesVencidas.quantidade, "comissão de fornecedor vencida", "comissões de fornecedor vencidas"),
         `${formatarReais(comissoesVencidas.total)} a receber`,
         lista({ lado: "receber", base: "vencimento", situacao: "vencida", origem: "viagem", de: comissoesVencidas.desde, ate: ontem }),
+        true,
       ),
     );
   }
@@ -301,11 +327,12 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
         plural(aPagar.quantidade, "conta a pagar vencida ou vencendo em 7 dias", "contas a pagar vencidas ou vencendo em 7 dias"),
         `${formatarReais(aPagar.total)} em aberto`,
         lista({ lado: "pagar", base: "vencimento", situacao: "em_aberto", de: aPagar.desde, ate: limitePagar }),
+        true,
       ),
     );
   }
   if (aguardando > 0) {
-    avisos.push(aviso("aprovacao", plural(aguardando, "pedido aguardando aprovação", "pedidos aguardando aprovação"), "Decidir em Aprovações", "/aprovacoes"));
+    avisos.push(aviso("aprovacao", plural(aguardando, "pedido aguardando aprovação", "pedidos aguardando aprovação"), "Decidir em Aprovações", "/aprovacoes", true));
   }
   const ordenados = ordenarAvisos(avisos);
 
@@ -326,10 +353,10 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
     primeiraNegativa: fluxo.semanas.find((s) => s.saldoFinal < 0n) ?? null,
     reserva: fluxo.reserva,
     avisos: ordenados.slice(0, MAX_AVISOS),
-    avisosRestantes: Math.max(ordenados.length - MAX_AVISOS, 0),
+    avisosOcultos: ordenados.slice(MAX_AVISOS),
     perdas: perdas.slice(0, MAX_PERDAS),
     margemReferenciaPct: referencia,
-    viagensAbaixoReferencia: abaixoReferencia,
+    viagensAbaixoReferencia: abaixo.length,
   };
 }
 

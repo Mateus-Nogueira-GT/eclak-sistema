@@ -61,13 +61,26 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<B
                   </p>
                 </div>
                 <Link href={a.href} className="whitespace-nowrap rounded-[5px] border border-[#C9CDD1] px-3.5 py-2 text-[14px] font-semibold text-texto hover:border-verde hover:text-verde">
-                  Abrir
+                  {a.agregado ? "Abrir a lista" : "Abrir"}
                 </Link>
               </li>
             ))}
             {v.avisos.length === 0 && <li className="border-b border-linha py-6 text-[15px] text-cinza">Nada pede decisão agora.</li>}
           </ul>
-          {v.avisosRestantes > 0 && <p className="mt-3 text-[13.5px] text-cinza">e mais {plural(v.avisosRestantes, "aviso", "avisos")}.</p>}
+          {v.avisosOcultos.length > 0 && (
+            <div className="mt-3 text-[13.5px] text-cinza">
+              <p>e mais {plural(v.avisosOcultos.length, "aviso", "avisos")}:</p>
+              <ul className="mt-1 space-y-1">
+                {v.avisosOcultos.map((a, i) => (
+                  <li key={`${a.tipo}-${i}`}>
+                    <Link href={a.href} className="font-semibold text-verde underline decoration-verde/30 underline-offset-[3px] hover:decoration-verde">
+                      {a.titulo}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         <aside>
@@ -185,8 +198,16 @@ function Reserva({ reserva: r }: { reserva: VisaoGeral["reserva"] }) {
       <div className="mt-2 h-2 overflow-hidden rounded-full bg-white" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Reserva atingida">
         <div className="h-full rounded-full bg-verde" style={{ width: `${pct}%` }} />
       </div>
-      <p className="num mt-2 text-[13px] text-cinza">
-        {formatarReais(r.temos)} de {formatarReais(r.meta)} (6 meses de custo fixo). {r.falta === 0n ? "A reserva já está na meta." : `Faltam ${formatarReais(r.falta)}.`}
+      {/* `num` só nos valores: no parágrafo inteiro ele impede a quebra de linha e o texto sai do cartão. */}
+      <p className="mt-2 text-[13px] leading-relaxed text-cinza">
+        <span className="num">{formatarReais(r.temos)}</span> de <span className="num">{formatarReais(r.meta)}</span> (6 meses de custo fixo).{" "}
+        {r.falta === 0n ? (
+          "A reserva já está na meta."
+        ) : (
+          <>
+            Faltam <span className="num">{formatarReais(r.falta)}</span>.
+          </>
+        )}
       </p>
     </div>
   );

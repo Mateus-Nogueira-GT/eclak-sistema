@@ -3,10 +3,11 @@ import { and, eq, inArray } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { hojeEmCuiaba } from "@/domain/clientes";
-import { diferencaPp, intervaloDeMeses, margemPonderada } from "@/domain/paineis";
+import { diferencaPp, intervaloDeMeses, margemPonderada, pctAbaixoDe } from "@/domain/paineis";
 import { ErroAcesso } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { categoriasFinanceiras, lancamentosFinanceiros as lf, pagamentosFornecedor, parcelasReceber, vendas, versoesPrecificacao } from "@/server/db/schema";
+import { categoriasFinanceiras, comissoes, lancamentosFinanceiros as lf, pagamentosFornecedor, parcelasReceber, vendas, versoesPrecificacao } from "@/server/db/schema";
+import { formatarReais } from "@/domain/dinheiro";
 import { salvarCliente } from "@/server/actions/clientes";
 import { baixarLinha, baixarRepasse, cancelarLancamento, criarLancamento } from "@/server/actions/financeiro";
 import { baixarPagamento, baixarParcela } from "@/server/actions/financeiro-viagem";
@@ -46,6 +47,19 @@ async function linha(origem: "parcela" | "pagamento", id: string) {
   return l;
 }
 
+/** Pedido aguardando aprovação, criado pelo consultor `uid`. */
+async function pedidoAguardando(uid: string) {
+  const c = await comSessao(uid, () => salvarCliente(souza));
+  if (!c.ok) throw new Error(c.erro);
+  const pessoas = (await comSessao(uid, () => obterCliente(c.id)))!.pessoas.map((x) => x.id);
+  const o = await comSessao(uid, () => criarOrcamento({ clienteId: c.id, destino: "Portugal", inicio: "2027-05-01", fim: "2027-05-10", passageiros: pessoas }));
+  if (!o.ok) throw new Error(o.erro);
+  const passeio = await item(uid, o.id, { servico: "Belém", cidade: "Lisboa" });
+  await cotacao(uid, passeio, { valor: "900,00" });
+  const e = await comSessao(uid, () => enviarParaAprovacao(o.id, { forma: { tipo: "pix", parcelas: 1 }, alteracao: "Primeira versão" }));
+  if (!e.ok) throw new Error(e.erro);
+}
+
 describe("obterVisaoGeral", () => {
   beforeEach(limparBanco);
 
@@ -74,7 +88,7 @@ describe("obterVisaoGeral", () => {
       resultadoCaixa: 0n,
       primeiraNegativa: null,
       avisos: [],
-      avisosRestantes: 0,
+      avisosOcultos: [],
       perdas: [],
       viagensAbaixoReferencia: 0,
     });
@@ -117,6 +131,12 @@ describe("obterVisaoGeral", () => {
       .innerJoin(versoesPrecificacao, eq(versoesPrecificacao.id, vendas.versaoId));
     const planejadas = [a.viagemId, b.viagemId].map((id) => ({ final: m.get(id)!.planejada.final, receita: precos.find((x) => x.viagemId === id)!.preco }));
     expect(r.margemPlanejadaPct).toBe(margemPonderada(planejadas));
+
+    // Abaixo da referência: as não conciliadas (as 3, inclusive a de fora do período) com margem real abaixo dela.
+    const referencia = (await comSessao(a.d.id, () => regrasVigentes())).valores.margemReferenciaPct;
+    const todas = await margensVendidas([a.viagemId, b.viagemId, fora.viagemId]);
+    const abaixo = [...todas.values()].filter((x) => !("erro" in x.real) && pctAbaixoDe(x.real.finalPct, referencia)).length;
+    expect(r.viagensAbaixoReferencia).toBe(abaixo);
 
     // A viagem A aparece nas perdas com a mesma margem real da tela da viagem.
     const telaA = await comSessao(a.d.id, () => obterViagemVendida(a.viagemId));
@@ -166,16 +186,7 @@ describe("obterVisaoGeral", () => {
     const vig = await comSessao(x.d.id, () => regrasVigentes());
     expect((await comSessao(x.d.id, () => salvarRegras({ ...vig.valores, margemReferenciaPct: "99.000" }))).ok).toBe(true);
 
-    // Pedido aguardando aprovação.
-    const c = await comSessao(x.u.id, () => salvarCliente(souza));
-    if (!c.ok) throw new Error(c.erro);
-    const pessoas = (await comSessao(x.u.id, () => obterCliente(c.id)))!.pessoas.map((x) => x.id);
-    const o = await comSessao(x.u.id, () => criarOrcamento({ clienteId: c.id, destino: "Portugal", inicio: "2027-05-01", fim: "2027-05-10", passageiros: pessoas }));
-    if (!o.ok) throw new Error(o.erro);
-    const passeio = await item(x.u.id, o.id, { servico: "Belém", cidade: "Lisboa" });
-    await cotacao(x.u.id, passeio, { valor: "900,00" });
-    const e = await comSessao(x.u.id, () => enviarParaAprovacao(o.id, { forma: { tipo: "pix", parcelas: 1 }, alteracao: "Primeira versão" }));
-    if (!e.ok) throw new Error(e.erro);
+    await pedidoAguardando(x.u.id);
 
     const r = await comSessao(x.d.id, () => obterVisaoGeral("30d"));
     const tipos = r.avisos.map((a) => a.tipo);
@@ -203,13 +214,62 @@ describe("obterVisaoGeral", () => {
       ate: dias(hoje, -1),
     });
     expect(r.avisos.find((a) => a.tipo === "aprovacao")).toMatchObject({ titulo: "1 pedido aguardando aprovação", href: "/aprovacoes" });
-    expect(r.avisos.length + r.avisosRestantes).toBeGreaterThanOrEqual(3);
+    expect(r.avisos.length + r.avisosOcultos.length).toBeGreaterThanOrEqual(3);
+    expect(r.avisosOcultos).toEqual([]);
+    // Margem por viagem abre a viagem; parcela e aprovação abrem uma lista.
+    expect(margem.agregado).toBe(false);
+    expect(parcela.agregado).toBe(true);
+    expect(r.avisos.find((a) => a.tipo === "aprovacao")!.agregado).toBe(true);
     expect(r.avisos.length).toBeLessThanOrEqual(8);
 
     const fe = await criarUsuarioTeste("fin_estrategico");
     const rf = await comSessao(fe.id, () => obterVisaoGeral("30d"));
     expect(rf.avisos.map((a) => a.tipo)).not.toContain("aprovacao");
     expect(rf.avisos.map((a) => a.tipo)).toEqual(expect.arrayContaining(["margem", "parcela"]));
+  });
+
+  it("avisos: caixa numa linha só, margem até 3 e um resumo, parcela vencida dentro dos 8 e o excesso listado", async () => {
+    const hoje = hojeEmCuiaba();
+    const vs = [];
+    for (let n = 0; n < 5; n++) vs.push(await vendida());
+    const [a] = vs;
+    for (const v of vs) await aceite(v.viagemId, dias(hoje, -5));
+    // A perde mais margem: passeio pago acima do previsto.
+    const cb = await contaBancaria(a.fin.id);
+    expect(await comSessao(a.fin.id, () => baixarPagamento(a.pagPasseio.id, { pagoEm: hoje, valorOriginalPago: "800,00", contaBancariaId: cb }))).toEqual({ ok: true });
+    const vig = await comSessao(a.d.id, () => regrasVigentes());
+    expect((await comSessao(a.d.id, () => salvarRegras({ ...vig.valores, margemReferenciaPct: "99.000" }))).ok).toBe(true);
+    // Parcela de cliente e comissão de fornecedor vencidas.
+    await db.update(parcelasReceber).set({ vencimento: dias(hoje, -3) }).where(eq(parcelasReceber.id, a.parcelas[0].id));
+    await db.update(comissoes).set({ previstaPara: dias(hoje, -3) }).where(eq(comissoes.id, a.comissao.id));
+    // Conta da empresa vencida e grande: o caixa fica negativo nas 8 semanas (e vira aviso de contas a pagar).
+    await manual(a.fin.id, { categoria: "Aluguel", competencia: dias(hoje, -1).slice(0, 7), vencimento: dias(hoje, -1), valor: "9.000.000,00" });
+    await pedidoAguardando(a.u.id);
+
+    const r = await comSessao(a.d.id, () => obterVisaoGeral("30d"));
+    expect(r.semanas.every((s) => s.saldoFinal < 0n)).toBe(true);
+    const caixa = r.avisos.filter((x) => x.tipo === "caixa");
+    expect(caixa).toHaveLength(1);
+    const menor = r.semanas.reduce((m, s) => (s.saldoFinal < m.saldoFinal ? s : m));
+    expect(caixa[0]).toMatchObject({
+      titulo: `Caixa negativo em 8 das próximas 8 semanas, a partir da semana de ${r.semanas[0].rotulo}`,
+      detalhe: `Menor saldo projetado: ${formatarReais(menor.saldoFinal)}, na semana de ${menor.rotulo}`,
+      href: "/financeiro/caixa",
+      agregado: false,
+    });
+
+    // Margem: as 5 contam; 3 linhas por viagem (A primeiro, a menor margem real) e um resumo das outras 2.
+    expect(r.viagensAbaixoReferencia).toBe(5);
+    const margem = r.avisos.filter((x) => x.tipo === "margem");
+    expect(margem).toHaveLength(4);
+    expect(margem[0].href).toBe(`/viagens/${a.viagemId}`);
+    expect(margem.slice(0, 3).every((x) => x.href.startsWith("/viagens/") && !x.agregado)).toBe(true);
+    expect(margem[3]).toMatchObject({ titulo: "e mais 2 viagens abaixo da margem de referência", href: "/financeiro/relatorios?rel=margens", agregado: true, responsavel: "Gestão" });
+
+    // Caixa, 4 de margem, parcela, comissão e contas a pagar: 8 na tela; a aprovação fica no excesso.
+    expect(r.avisos.map((x) => x.tipo)).toEqual(["caixa", "margem", "margem", "margem", "margem", "parcela", "comissao", "pagar"]);
+    expect(r.avisos.filter((x) => x.tipo !== "caixa" && x.tipo !== "margem").every((x) => x.agregado)).toBe(true);
+    expect(r.avisosOcultos.map((x) => [x.tipo, x.titulo, x.href])).toEqual([["aprovacao", "1 pedido aguardando aprovação", "/aprovacoes"]]);
   });
 });
 
