@@ -1,0 +1,1 @@
+CREATE TYPE "public"."situacao_extrato" AS ENUM('pendente', 'conciliada', 'ignorada');
