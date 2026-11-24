@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { hojeEmCuiaba } from "@/domain/clientes";
@@ -310,49 +310,71 @@ describe("relatórios", () => {
     expect(vazio.linhas.every((l) => l.nivel === "total" && l.valor === 0n)).toBe(true);
   });
 
-  it("contas a pagar e a receber: pelo vencimento, sem canceladas, compras do cartão pela fatura, totais por situação", async () => {
+  it("contas a pagar e a receber: pelo vencimento, sem canceladas, compras do cartão pela fatura, situação e totais da lista", async () => {
+    const hoje = hojeEmCuiaba();
+    const ontem = dias(hoje, -1);
+    const amanha = dias(hoje, 1);
+    // De ontem até o fim do mês seguinte (a fatura de uma compra de hoje vence no dia 25 deste mês ou do próximo).
+    const periodo = intervaloDeMeses(ontem.slice(0, 7), dias(hoje, 40).slice(0, 7));
     const x = await vendida();
     const fin = x.fin.id;
     const cb = await contaBancaria(fin);
     const k = await cartaoCorporativo(fin, cb);
-    await db.update(pagamentosFornecedor).set({ vencimento: "2027-01-20" }).where(eq(pagamentosFornecedor.id, x.pagPasseio.id));
-    const aluguel = await manual(fin, { categoria: "Aluguel", competencia: "2027-01", vencimento: "2027-01-05", valor: "2.000,00", descricao: "Aluguel de janeiro" });
-    const cancelada = await manual(fin, { categoria: "Seguros", competencia: "2027-01", vencimento: "2027-01-07", valor: "500,00" });
-    expect(await comSessao(fin, () => cancelarLancamento(cancelada, "Lançado por engano", "esta"))).toMatchObject({ ok: true });
-    const compra = await manual(fin, { categoria: "Papelaria", competencia: "2027-01", vencimento: "2027-01-10", valor: "300,00", cartaoId: k });
-    const foraDoMes = await manual(fin, { categoria: "Telefone", competencia: "2027-01", vencimento: "2027-02-03", valor: "80,00" });
+    // Contas e parcelas da viagem para longe do período; só o passeio e a 1ª parcela voltam para dentro.
+    const contasDaViagem = [x.hotel.id, x.passeio.id, x.transfer.id, x.aereo.id];
+    await db.update(pagamentosFornecedor).set({ vencimento: "2029-06-01" }).where(inArray(pagamentosFornecedor.contaId, contasDaViagem));
+    await db.update(pagamentosFornecedor).set({ vencimento: dias(hoje, 2) }).where(eq(pagamentosFornecedor.id, x.pagPasseio.id));
+    await db.update(parcelasReceber).set({ vencimento: "2029-06-01" }).where(eq(parcelasReceber.viagemId, x.viagemId));
+    await db.update(parcelasReceber).set({ vencimento: ontem }).where(eq(parcelasReceber.id, x.parcelas[0].id));
 
-    const r = await comSessao(fin, () => relatorioContas("pagar", JANEIRO));
+    const comp = (d: string) => d.slice(0, 7);
+    const aluguel = await manual(fin, { categoria: "Aluguel", competencia: comp(ontem), vencimento: ontem, valor: "2.000,00", descricao: "Aluguel do mês" });
+    const internet = await manual(fin, { categoria: "Internet", competencia: comp(hoje), vencimento: hoje, valor: "50,00" });
+    const telefone = await manual(fin, { categoria: "Telefone", competencia: comp(amanha), vencimento: amanha, valor: "80,00" });
+    const paga = await manual(fin, { categoria: "Serviços contratados", competencia: comp(hoje), vencimento: hoje, valor: "100,00" });
+    expect(await comSessao(fin, () => baixarLinha("manual", paga, { data: hoje, valorPago: "90,00", observacao: "Desconto do fornecedor", contaBancariaId: cb }))).toEqual({ ok: true });
+    const cancelada = await manual(fin, { categoria: "Seguros", competencia: comp(hoje), vencimento: hoje, valor: "500,00" });
+    expect(await comSessao(fin, () => cancelarLancamento(cancelada, "Lançado por engano", "esta"))).toMatchObject({ ok: true });
+    const compra = await manual(fin, { categoria: "Papelaria", competencia: comp(hoje), vencimento: hoje, valor: "120,00", cartaoId: k });
+    const foraDoPeriodo = await manual(fin, { categoria: "Telefone", competencia: comp(dias(periodo.ate, 1)), vencimento: dias(periodo.ate, 1), valor: "70,00" });
+    const [fatura] = await db.select().from(lf).where(eq(lf.origem, "fatura_cartao"));
+    expect(fatura.vencimento >= hoje && fatura.vencimento <= periodo.ate).toBe(true);
+    const passeioPrevisto = (await linha("pagamento", x.pagPasseio.id)).valorPrevisto;
+
+    const r = await comSessao(fin, () => relatorioContas("pagar", periodo));
     const ids = r.linhas.map((l) => l.id);
     expect(ids).not.toContain(cancelada);
     expect(ids).not.toContain(compra);
-    expect(ids).not.toContain(foraDoMes);
-    expect(r.linhas.find((l) => l.id === aluguel)).toMatchObject({
+    expect(ids).not.toContain(foraDoPeriodo);
+    expect(r.linhas).toHaveLength(6);
+    expect(r.linhas.find((l) => l.id === aluguel)).toEqual({
       origem: "manual",
-      vencimento: "2027-01-05",
+      id: aluguel,
+      vencimento: ontem,
       pessoa: "Fornecedor local",
-      descricao: "Aluguel de janeiro",
+      descricao: "Aluguel do mês",
       categoria: "Aluguel",
       viagemId: null,
       viagemCodigo: null,
       valor: 200000n,
-      situacao: "A vencer",
+      situacao: "Vencida",
     });
+    expect(r.linhas.find((l) => l.id === internet)).toMatchObject({ valor: 5000n, situacao: "Vence hoje" });
+    expect(r.linhas.find((l) => l.id === telefone)).toMatchObject({ valor: 8000n, situacao: "A vencer" });
+    // Baixada: o valor pago, rótulo do lado.
+    expect(r.linhas.find((l) => l.id === paga)).toMatchObject({ valor: 9000n, situacao: "Paga" });
     const passeio = r.linhas.find((l) => l.id === x.pagPasseio.id)!;
-    expect(passeio).toMatchObject({ origem: "pagamento", viagemId: x.viagemId, situacao: "A vencer" });
+    expect(passeio).toMatchObject({ origem: "pagamento", viagemId: x.viagemId, valor: passeioPrevisto, situacao: "A vencer" });
     expect(passeio.viagemCodigo).toMatch(/.+/);
-    expect(r.linhas.find((l) => l.origem === "fatura_cartao")).toMatchObject({ valor: 30000n, situacao: "A vencer" });
-    for (const l of r.linhas) {
-      expect(l.vencimento >= JANEIRO.de && l.vencimento <= JANEIRO.ate).toBe(true);
-    }
-    const somas: Record<string, bigint> = {};
-    for (const l of r.linhas) somas[l.situacao] = (somas[l.situacao] ?? 0n) + l.valor;
-    expect(r.totais).toEqual(somas);
+    expect(r.linhas.find((l) => l.origem === "fatura_cartao")).toMatchObject({ id: fatura.id, valor: 12000n, situacao: "A vencer" });
+    expect(r.totais).toEqual({ Vencida: 200000n, "Vence hoje": 5000n, Paga: 9000n, "A vencer": 8000n + passeioPrevisto + 12000n });
 
-    // A receber: a segunda parcela do boleto (vence em 10/01/2027), da viagem.
-    const rr = await comSessao(fin, () => relatorioContas("receber", JANEIRO));
-    expect(rr.linhas.find((l) => l.id === x.parcelas[1].id)).toMatchObject({ origem: "parcela", viagemId: x.viagemId, valor: x.parcelas[1].valor, situacao: "A vencer" });
-    expect(rr.linhas.map((l) => l.id)).not.toContain(x.parcelas[0].id);
+    // A receber: a 1ª parcela da viagem, baixada, como "Recebida"; a 2ª fora do período.
+    const p = x.parcelas[0];
+    expect(await comSessao(fin, () => baixarParcela(p.id, { recebidaEm: hoje, valorRecebido: reais(p.valor), taxaEfetiva: null, observacao: null, contaBancariaId: cb }))).toEqual({ ok: true });
+    const rr = await comSessao(fin, () => relatorioContas("receber", periodo));
+    expect(rr.linhas.find((l) => l.id === p.id)).toMatchObject({ origem: "parcela", viagemId: x.viagemId, valor: (await linha("parcela", p.id)).valorBaixado, situacao: "Recebida" });
+    expect(rr.linhas.map((l) => l.id)).not.toContain(x.parcelas[1].id);
   });
 
   it("volume por banco: baixas do período por conta, fora do período não entra, saldo atual da conta", async () => {
