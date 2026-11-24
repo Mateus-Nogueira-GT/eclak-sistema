@@ -107,8 +107,19 @@ export function Formulario({ valores, desde }: { valores: Regras; desde: string 
     const erro = erros[c.caminho];
     const id = `campo-${c.caminho}`;
     return (
-      <div className="flex flex-col items-end gap-1">
-        {c.tipo === "metodo" ? (
+      <div className={`flex flex-col gap-1 ${c.tipo === "texto" ? "items-stretch" : "items-end"}`}>
+        {c.tipo === "texto" ? (
+          <textarea
+            id={id}
+            aria-label={c.rotulo}
+            aria-invalid={erro ? true : undefined}
+            rows={4}
+            maxLength={1000}
+            className={`w-full resize-y rounded-[4px] border bg-white px-3 py-2 text-left text-[14px] leading-[1.55] text-texto outline-none focus:border-verde ${erro ? "border-ouro bg-ouro/15" : "border-linha"} ${extra}`}
+            value={textos[c.caminho] ?? ""}
+            onChange={(e) => mudar(c.caminho, e.target.value)}
+          />
+        ) : c.tipo === "metodo" ? (
           <Select value={textos[c.caminho]} onChange={(x) => mudar(c.caminho, x)}>
             {METODOS_RATEIO.map((m) => (
               <option key={m} value={m}>{ROTULO_METODO[m]}</option>
@@ -148,7 +159,7 @@ export function Formulario({ valores, desde }: { valores: Regras; desde: string 
     <>
       <PageHeader
         title="Parâmetros"
-        subtitle="Regras de preço, taxas e câmbio. Todos os valores são editáveis pela gestão, com histórico."
+        subtitle="Regras de preço, taxas, câmbio e textos da operação. Todos os valores são editáveis pela gestão, com histórico."
         right={
           <div className="flex flex-wrap items-center gap-3">
             <SoGestao />
@@ -196,6 +207,22 @@ export function Formulario({ valores, desde }: { valores: Regras; desde: string 
           />
         </Card>
       </div>
+
+      <Card className="mb-5">
+        <CardHeader eyebrow="Textos usados na operação das viagens" title="Operação" />
+        <div className="space-y-5 px-6 pb-6 pt-3">
+          {por("operacao").map((c) => (
+            <div key={c.caminho} className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-[260px_minmax(0,1fr)]">
+              <div>
+                <label htmlFor={`campo-${c.caminho}`} className="block text-[14px] font-semibold text-texto">{c.rotulo}</label>
+                <p className="mt-1 text-[13px] text-cinza">{c.obs}</p>
+                {c.onde && <p className="mt-1 text-[13px] text-cinza">Usado em: {c.onde}</p>}
+              </div>
+              {entrada(c)}
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <Card className="mb-5">
         <CardHeader eyebrow="Regra: câmbio comercial mais o acréscimo" title="Câmbio" right={entrada(cambio, "!w-[90px]")} />

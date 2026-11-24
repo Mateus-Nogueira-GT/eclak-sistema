@@ -277,6 +277,7 @@ describe("fecharVenda", () => {
     expect(contagem("contas_pagar")).toBe(3);
     expect(contagem("pagamentos_fornecedor")).toBe(3);
     expect(contagem("comissoes")).toBe(1);
+    expect(contagem("tarefas")).toBe(5);
     expect(aud.find((a) => a.tabela === "viagens" && a.registroId === viagemId && (a.depois as { status?: string })?.status === "vendida")).toMatchObject({
       antes: { status: "aprovado" },
     });

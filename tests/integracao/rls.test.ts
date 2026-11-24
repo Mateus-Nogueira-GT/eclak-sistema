@@ -147,6 +147,10 @@ describe("RLS: anon não lê nada", () => {
     const [cartao] = await sql`insert into cartoes_corporativos (nome, final, dia_fechamento, dia_vencimento, conta_bancaria_id, centro)
               values ('Visa', '1234', 15, 25, ${cb.id}, 'MT') returning id`;
     await sql`insert into faturas_cartao (cartao_id, fechamento, vencimento) values (${cartao.id}, '2027-01-15', '2027-01-25')`;
+    // Operação (fatia 5a): uma linha em cada tabela nova.
+    await sql`insert into tarefas (viagem_id, categoria, item, ordem) values (${v.id}, 'conferir', 'Teste', 1)`;
+    const [rot] = await sql`insert into roteiros (viagem_id, idioma, fuso, conteudo) values (${v.id}, 'italiano', 'Europe/Rome', '{"dias":[],"hoteis":[],"voos":[]}') returning id`;
+    await sql`insert into dailies (roteiro_id, data) values (${rot.id}, '2027-08-14')`;
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from lancamentos_financeiros`;
     expect(n).toBeGreaterThan(0);
   });
@@ -177,6 +181,9 @@ describe("RLS: anon não lê nada", () => {
     "notas_fiscais",
     "cartoes_corporativos",
     "faturas_cartao",
+    "tarefas",
+    "roteiros",
+    "dailies",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
@@ -186,6 +193,13 @@ describe("RLS: anon não lê nada", () => {
 
   it("tabelas do financeiro com RLS ligado", async () => {
     const tabelas = ["categorias_financeiras", "contas_bancarias", "lancamentos", "faturas_contador", "faturas", "faturas_versoes", "anexos", "notas_fiscais", "cartoes_corporativos", "faturas_cartao"];
+    const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
+      select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
+    expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
+  });
+
+  it("tabelas da operação com RLS ligado", async () => {
+    const tabelas = ["tarefas", "roteiros", "dailies"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());

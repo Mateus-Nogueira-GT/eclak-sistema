@@ -20,7 +20,7 @@ E-mails enviados localmente (convite, nova senha) chegam no Mailpit: http://127.
 - `npm run lint`: ESLint.
 - `npm run typecheck`: verificação de tipos (`tsc --noEmit`).
 - `npm test`: testes de domínio (Vitest, `tests/domain`).
-- `npm run test:integracao`: testes de integração (`tests/integracao`, exigem o banco local; rodam em sequência, um arquivo por vez).
+- `npm run test:integracao`: testes de integração (`tests/integracao`, exigem o banco local; rodam em sequência, um arquivo por vez). Como truncam o banco, só uma execução por vez: o global setup (`tests/integracao/trava-global.ts`) pega um advisory lock do Postgres numa conexão aberta até o fim e, se outra execução já o tem, falha logo com "Outra execução dos testes de integração está usando o banco local agora". Rode sempre por este script (um `npx vitest run tests/integracao/...` avulso não passa pela trava).
 - `npm run db:local`: sobe o Supabase local (Docker). Depois, `npm run db:migrate` aplica as migrações.
 - `npm run db:generate`: gera migração a partir do esquema Drizzle (`src/server/db/schema`).
 - `npm run db:migrate`: aplica as migrações em `drizzle/` no banco de `DATABASE_URL`.
@@ -48,7 +48,16 @@ Toda tabela de `public` tem RLS ligado e nenhuma política para `anon`/`authenti
 
 ## Seed local
 
-`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Também semeia o financeiro (contas Banco do Brasil e Bradesco PJ, lançamentos manuais do protótipo com datas relativas a hoje, alguns já baixados, a fatura da Família Ribeiro, o cartão "Visa Corporativo" final 4821 com três compras no ciclo atual e uma nota fiscal sem PDF). Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
+`npm run seed:local` (com o banco local no ar e migrado) cria um usuário por perfil, todos com senha `eclak-local`, e os fornecedores fictícios do protótipo: `diretor@eclak.local`, `consultor@eclak.local`, `operacional@eclak.local`, `fin.operacional@eclak.local`, `fin.estrategico@eclak.local`. Também semeia o financeiro (contas Banco do Brasil e Bradesco PJ, lançamentos manuais do protótipo com datas relativas a hoje, alguns já baixados, a fatura da Família Ribeiro, o cartão "Visa Corporativo" final 4821 com três compras no ciclo atual e uma nota fiscal sem PDF) e a operação (as 5 tarefas da venda em toda viagem vendida; na Família Ribeiro, tarefas manuais do protótipo, roteiro aprovado com Florença e Veneza preenchidos e dois dailies). Roda de novo sem duplicar. Recusa executar se `DATABASE_URL` ou `NEXT_PUBLIC_SUPABASE_URL` não apontarem para `localhost`/`127.0.0.1`.
+
+## Operação
+
+Visível aos cinco perfis (nenhum valor de custo, margem ou comissão aparece nestas telas), só para viagem vendida.
+
+- Rotas: `/tarefas` (minhas e todas, com filtros), `/roteiros` (viagens vendidas não terminadas), `/dailies` (hoje até +3 dias) e, por viagem, `/viagens/[id]/{roteiro,tarefas,dailies}` com a impressão em `/roteiro/imprimir` e `/tarefas/imprimir` (o título da página é o nome do arquivo: `RT_<TITULAR>_<DESTINO>_<ini>-<fim>` e `TAREFAS_…`).
+- Tarefas automáticas: 5 ao fechar a venda (prazo venda + 1/2/7 dias, nunca depois do início) e 3 ao aprovar o roteiro (60/60/90 dias antes do embarque), sem duplicar (chave única por viagem).
+- Dailies: o texto é gerado sob demanda ("Gerar texto"), e a geração é esperada em D-2 e o envio em D-1 da data do dia; antes de D-2 o botão vira "Gerar agora". O estado vai de A gerar a Gerado (a revisar), Pronto para enviar e Enviado.
+- O texto de encerramento do daily muda em Admin › Parâmetros, card "Operação" (só o Diretor; vale a partir da versão nova, sem código).
 
 ## Financeiro
 

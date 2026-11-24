@@ -21,6 +21,9 @@ const areas: { titulo: string; itens: Item[] }[] = [
     titulo: "Operação",
     itens: [
       { href: "/viagens", label: "Viagens" },
+      { href: "/tarefas", label: "Tarefas" },
+      { href: "/roteiros", label: "Roteiros" },
+      { href: "/dailies", label: "Dailies" },
       { href: "/fornecedores", label: "Fornecedores" },
     ],
   },

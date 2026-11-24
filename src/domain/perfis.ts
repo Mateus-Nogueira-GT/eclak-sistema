@@ -20,13 +20,16 @@ export const PERFIS: Record<Perfil, { nome: string }> = {
   fin_estrategico: { nome: "Financeiro estratégico" },
 };
 
+/** Tarefas, roteiros e dailies (fatia 5): os cinco perfis. */
+const OPERACAO = ["/tarefas", "/roteiros", "/dailies"];
+
 // Fatias seguintes acrescentam rotas aqui.
 export const ROTAS_POR_PERFIL: Record<Perfil, string[]> = {
-  diretor: ["/clientes", "/viagens", "/fornecedores", "/vendas", "/aprovacoes", "/admin/usuarios", "/admin/parametros", "/financeiro"],
-  consultor: ["/clientes", "/viagens", "/fornecedores", "/vendas"],
-  operacional: ["/clientes", "/viagens", "/fornecedores", "/vendas"],
-  fin_operacional: ["/clientes", "/viagens", "/fornecedores", "/financeiro"],
-  fin_estrategico: ["/clientes", "/viagens", "/fornecedores", "/financeiro"],
+  diretor: ["/clientes", "/viagens", "/fornecedores", "/vendas", "/aprovacoes", "/admin/usuarios", "/admin/parametros", "/financeiro", ...OPERACAO],
+  consultor: ["/clientes", "/viagens", "/fornecedores", "/vendas", ...OPERACAO],
+  operacional: ["/clientes", "/viagens", "/fornecedores", "/vendas", ...OPERACAO],
+  fin_operacional: ["/clientes", "/viagens", "/fornecedores", "/financeiro", ...OPERACAO],
+  fin_estrategico: ["/clientes", "/viagens", "/fornecedores", "/financeiro", ...OPERACAO],
 };
 
 export function podeAcessar(perfil: Perfil, caminho: string): boolean {

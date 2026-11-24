@@ -44,8 +44,8 @@ export default async function Pagina() {
               <span key="d" className="text-cinza">{dataHora(h.em)}</span>,
               h.usuario,
               <b key="p" className="font-semibold">{h.campo}</b>,
-              h.antes,
-              <b key="n" className="text-verde">{h.depois}</b>,
+              <span key="a" className="whitespace-pre-line">{h.antes}</span>,
+              <b key="n" className="whitespace-pre-line text-verde">{h.depois}</b>,
             ])}
           />
         )}

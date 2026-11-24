@@ -12,7 +12,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/domain",
-    "test:integracao": "vitest run tests/integracao",
+    "test:integracao": "vitest run --config vitest.integracao.config.ts",
     "db:local": "supabase start -x studio,imgproxy,vector,logflare,edge-runtime,realtime,supavisor,postgres-meta",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

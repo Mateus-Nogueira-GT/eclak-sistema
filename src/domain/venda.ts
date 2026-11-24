@@ -46,6 +46,13 @@ export function somarMeses(data: string, meses: number): string {
   return iso(an, mn, Math.min(d, diasNoMes(an, mn)));
 }
 
+/** Mesma data `dias` depois (negativo = antes), em calendário puro, sem fuso. */
+export function somarDias(data: string, dias: number): string {
+  const [a, m, d] = lerData(data);
+  const r = new Date(Date.UTC(a, m - 1, d + dias));
+  return iso(r.getUTCFullYear(), r.getUTCMonth() + 1, r.getUTCDate());
+}
+
 /** Dia 15 do mês seguinte ao de `data` (previsão padrão da comissão a receber). */
 function dia15DoMesSeguinte(data: string): string {
   const [a, m] = lerData(data);

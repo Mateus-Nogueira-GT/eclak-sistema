@@ -54,7 +54,7 @@ export function formatarCodigoCliente(n: number): string {
 
 // ---------- Nome do grupo ----------
 
-function ultimoSobrenome(nome: string): string {
+export function ultimoSobrenome(nome: string): string {
   const partes = nome.trim().split(/\s+/);
   return partes[partes.length - 1] ?? "";
 }
@@ -144,13 +144,19 @@ function dataBr(iso: string): string {
   return `${dois(d)}/${dois(m)}/${a}`;
 }
 
+/** Data (AAAA-MM-DD) do aniversário no `ano`; 29/02 em ano não bissexto vira 28/02. */
+export function aniversarioNoAno(nascimento: string, ano: number): string {
+  const [, mn, dn] = partes(nascimento);
+  const dia = mn === 2 && dn === 29 && !bissexto(ano) ? 28 : dn;
+  return `${String(ano).padStart(4, "0")}-${dois(mn)}-${dois(dia)}`;
+}
+
 // Próxima ocorrência (>= hoje) do aniversário; 29/02 em ano não bissexto vira 28/02.
 function proximoAniversario(nascimento: string, hoje: string): { dias: number; dia: number; mes: number } {
   const [ah, mh, dh] = partes(hoje);
-  const [, mn, dn] = partes(nascimento);
   const ocorrencia = (ano: number) => {
-    const dia = mn === 2 && dn === 29 && !bissexto(ano) ? 28 : dn;
-    return { dias: diaUtc(ano, mn, dia), dia, mes: mn };
+    const [a, m, d] = partes(aniversarioNoAno(nascimento, ano));
+    return { dias: diaUtc(a, m, d), dia: d, mes: m };
   };
   const base = diaUtc(ah, mh, dh);
   let o = ocorrencia(ah);
