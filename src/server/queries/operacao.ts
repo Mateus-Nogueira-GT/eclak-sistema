@@ -2,6 +2,9 @@ import "server-only";
 import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { hojeEmCuiaba } from "@/domain/clientes";
+import { chavePasta } from "@/domain/drive";
+import { linkHttps } from "@/domain/integracoes";
+import { chaveVenda } from "@/domain/trello";
 import {
   ordenarTarefas,
   prazoEfetivo,
@@ -36,7 +39,18 @@ import { formatarCodigoViagem, noites } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { clientes, dailies, pessoas, roteiros, tarefas, usuarios, viagemPassageiros, viagens } from "@/server/db/schema";
+import { estadoIntegracao } from "@/server/integracoes/config";
+import {
+  clientes,
+  dailies,
+  integracaoEnvios,
+  pessoas,
+  roteiros,
+  tarefas,
+  usuarios,
+  viagemPassageiros,
+  viagens,
+} from "@/server/db/schema";
 import { regrasVigentes } from "@/server/queries/regras";
 
 export type CabecalhoViagem = {
@@ -52,11 +66,47 @@ export type CabecalhoViagem = {
   passageiros: { id: string; nome: string; nascimento: string | null }[];
   consultor: { id: string; nome: string };
   vendida: boolean;
+  /** Link da pasta da viagem no Google Drive, quando o envio `pasta:` já saiu; null sem pasta. */
+  pastaDrive: string | null;
+  /** Link do cartão da viagem no Trello, quando o envio `venda:` já saiu; null sem cartão. */
+  cartaoTrello: string | null;
+  /** Só para o Diretor (null nos demais): o que mostrar no lugar de cada botão. */
+  integracoesNaViagem: { trello: SituacaoNaViagem; drive: SituacaoNaViagem } | null;
 };
+
+/**
+ * `enviar`: ligada, viagem vendida e nada na fila (mostra o botão); `pendente` (inclui `enviando`), `falhou` e
+ * `enviado` seguem o envio; `desligada`: sem envio e sem como enviar (integração desligada ou viagem não vendida).
+ */
+export type SituacaoNaViagem = "desligada" | "enviar" | "pendente" | "falhou" | "enviado";
+
+/** Envios `venda:` (Trello) e `pasta:` (Drive) da viagem; o link só de um `enviado` (o parcial de um pendente não conta). */
+async function enviosDaViagem(viagemId: string) {
+  const linhas = await db
+    .select({ integracao: integracaoEnvios.integracao, situacao: integracaoEnvios.situacao, resultado: integracaoEnvios.resultado })
+    .from(integracaoEnvios)
+    .where(
+      sql`(${integracaoEnvios.integracao} = 'trello' and ${integracaoEnvios.chave} = ${chaveVenda(viagemId)})
+        or (${integracaoEnvios.integracao} = 'drive' and ${integracaoEnvios.chave} = ${chavePasta(viagemId)})`,
+    );
+  const de = (i: "trello" | "drive") => linhas.find((l) => l.integracao === i) ?? null;
+  const link = (l: ReturnType<typeof de>, campo: "url" | "link") =>
+    l?.situacao === "enviado" ? linkHttps((l.resultado as Record<string, unknown> | null)?.[campo]) : null;
+  return { trello: de("trello"), drive: de("drive"), cartaoTrello: link(de("trello"), "url"), pastaDrive: link(de("drive"), "link") };
+}
+
+function situacaoNaViagem(
+  envio: { situacao: "pendente" | "enviando" | "enviado" | "falhou" } | null,
+  ligada: boolean,
+  vendida: boolean,
+): SituacaoNaViagem {
+  if (envio) return envio.situacao === "enviando" ? "pendente" : envio.situacao;
+  return ligada && vendida ? "enviar" : "desligada";
+}
 
 /** Cabeçalho da trilha da operação (só dados cadastrais; nada de preço, custo, margem ou comissão). */
 export async function cabecalhoDaViagem(viagemId: string): Promise<CabecalhoViagem | null> {
-  await exigirPerfil();
+  const usuario = await exigirPerfil();
   if (!ehUuid(viagemId)) return null;
   const [v] = await db
     .select({
@@ -89,6 +139,15 @@ export async function cabecalhoDaViagem(viagemId: string): Promise<CabecalhoViag
     .innerJoin(pessoas, eq(pessoas.id, viagemPassageiros.pessoaId))
     .where(and(eq(viagemPassageiros.viagemId, v.id), isNull(pessoas.removidoEm)))
     .orderBy(asc(pessoas.ordem), asc(pessoas.nome));
+  const envios = await enviosDaViagem(v.id);
+  const vendida = v.status === "vendida";
+  const integracoesNaViagem =
+    usuario.perfil === "diretor"
+      ? {
+          trello: situacaoNaViagem(envios.trello, estadoIntegracao("trello").configurada, vendida),
+          drive: situacaoNaViagem(envios.drive, estadoIntegracao("drive").configurada, vendida),
+        }
+      : null;
   return {
     id: v.id,
     codigo: formatarCodigoViagem(v.clienteCodigo, v.seq),
@@ -101,7 +160,10 @@ export async function cabecalhoDaViagem(viagemId: string): Promise<CabecalhoViag
     noites: noites(v.inicio, v.fim),
     passageiros,
     consultor: { id: v.consultorId, nome: v.consultor },
-    vendida: v.status === "vendida",
+    vendida,
+    pastaDrive: envios.pastaDrive,
+    cartaoTrello: envios.cartaoTrello,
+    integracoesNaViagem,
   };
 }
 

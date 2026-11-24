@@ -63,6 +63,6 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     // Literal exigido pelo Next; testado contra MATCHER_PROXY em tests/domain/proxy-caminhos.test.ts.
-    "/((?!_next/static|_next/image|favicon\\.ico$|logo-eclak\\.png$|login(?:/|$)|auth/confirmar(?:/|$)).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico$|logo-eclak\\.png$|login(?:/|$)|auth/confirmar(?:/|$)|api/cron/).*)",
   ],
 };

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { estadoIntegracao } from "@/server/integracoes/config";
 import { roteiroDaViagem } from "@/server/queries/operacao";
 import { Trilha } from "../trilha";
 import { CriarRoteiro, EditorRoteiro } from "./editor";
@@ -23,7 +24,10 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
     <div className="mx-auto max-w-[1640px]">
       <Trilha viagem={c} ativa="roteiro" />
       {r.roteiro ? (
-        <EditorRoteiro viagemId={id} destino={c.destino} inicio={c.inicio} fim={c.fim} roteiro={r.roteiro} aniversarios={r.aniversarios} />
+        <EditorRoteiro viagemId={id} destino={c.destino} inicio={c.inicio} fim={c.fim} roteiro={r.roteiro}
+          aniversarios={r.aniversarios}
+          iaLigada={estadoIntegracao("ia").configurada}
+        />
       ) : (
         <CriarRoteiro viagemId={id} sugestao={r.sugestao} aniversarios={r.aniversarios} />
       )}

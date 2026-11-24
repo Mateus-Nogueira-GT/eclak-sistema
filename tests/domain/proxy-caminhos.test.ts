@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { podeAcessar } from "@/domain/perfis";
 import { deveProteger, MATCHER_PROXY } from "@/server/proxy-caminhos";
 
-const ex = ["/login", "/login/", "/auth/confirmar", "/auth/confirmar/", "/logo-eclak.png", "/favicon.ico", "/_next/static/a.js", "/_next/image"];
-const guardados = ["/auth/confirmarx", "/auth", "/definir-senha", "/login-historico", "/loginx/a", "/logo-eclak.png.bak", "/fornecedores", "/", "/admin/usuarios"];
+const ex = ["/login", "/login/", "/auth/confirmar", "/auth/confirmar/", "/logo-eclak.png", "/favicon.ico", "/_next/static/a.js", "/_next/image", "/api/cron/integracoes", "/api/cron/dailies"];
+const guardados = ["/auth/confirmarx", "/auth", "/definir-senha", "/login-historico", "/loginx/a", "/logo-eclak.png.bak", "/fornecedores", "/", "/admin/usuarios", "/api/cronograma", "/api/cron", "/api/outra", "/x/api/cron/integracoes"];
 
 describe("exclusões do proxy", () => {
   const re = new RegExp("^" + MATCHER_PROXY + "$");

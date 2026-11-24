@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { hojeEmCuiaba } from "@/domain/clientes";
+import { estadoIntegracao } from "@/server/integracoes/config";
 import { dailiesDaViagem } from "@/server/queries/operacao";
 import { Trilha } from "../trilha";
 import { Dailies } from "./dailies";
@@ -54,6 +55,7 @@ export default async function Pagina({ params, searchParams }: { params: Promise
         usuarios={r.usuarios}
         dias={r.dias}
         diaInicial={inicial}
+        iaLigada={estadoIntegracao("ia").configurada}
       />
     </div>
   );

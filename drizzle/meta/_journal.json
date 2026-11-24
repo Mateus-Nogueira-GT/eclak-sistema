@@ -281,6 +281,41 @@
       "when": 1795510758687,
       "tag": "0039_extratos_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795515650974,
+      "tag": "0040_integracoes_enums",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795515664617,
+      "tag": "0041_integracao_envios",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795515665229,
+      "tag": "0042_integracao_envios_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795521861362,
+      "tag": "0043_ia_usos",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795521861976,
+      "tag": "0044_ia_usos_rls",
+      "breakpoints": true
     }
   ]
 }
