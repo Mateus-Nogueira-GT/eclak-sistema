@@ -132,6 +132,8 @@ export type VisaoGeral = {
   /** Até 6, só não conciliadas com margem real abaixo da planejada, maior perda primeiro. */
   perdas: PerdaDeMargem[];
   margemReferenciaPct: string;
+  /** Viagens vendidas e não conciliadas com margem real abaixo da referência (os avisos podem ser cortados). */
+  viagensAbaixoReferencia: number;
 };
 
 const bigintSql = (expr: SQL) => sql<string>`coalesce(${expr}, 0)::bigint`.mapWith((v: string) => BigInt(v));
@@ -235,10 +237,12 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
     if (s.saldoFinal < 0n) avisos.push(aviso("caixa", `Caixa negativo na semana de ${s.rotulo}`, `Saldo projetado de ${formatarReais(s.saldoFinal)}`, "/financeiro/caixa"));
   }
   const perdas: PerdaDeMargem[] = [];
+  let abaixoReferencia = 0;
   for (const v of naoConciliadas) {
     const real = v.margens.real;
     if ("erro" in real) continue;
     if (pctAbaixoDe(real.finalPct, referencia)) {
+      abaixoReferencia++;
       avisos.push(
         aviso(
           "margem",
@@ -319,5 +323,6 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
     avisosRestantes: Math.max(ordenados.length - MAX_AVISOS, 0),
     perdas: perdas.slice(0, MAX_PERDAS),
     margemReferenciaPct: referencia,
+    viagensAbaixoReferencia: abaixoReferencia,
   };
 }
