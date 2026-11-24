@@ -156,6 +156,9 @@ describe("RLS: anon não lê nada", () => {
               values (${cb.id}, 'teste.ofx', 'hash-rls', 1, 0, ${u.id}) returning id`;
     await sql`insert into extrato_transacoes (extrato_id, conta_bancaria_id, fitid, data, valor, descricao)
               values (${ext.id}, ${cb.id}, 'F1', '2027-01-10', 100, 'Teste')`;
+    // Integrações (fatia 6c): um envio na fila.
+    await sql`insert into integracao_envios (integracao, tipo, viagem_id, chave, payload)
+              values ('trello', 'cartao_viagem', ${v.id}, ${"venda:" + v.id}, '{}')`;
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from lancamentos_financeiros`;
     expect(n).toBeGreaterThan(0);
   });
@@ -191,6 +194,7 @@ describe("RLS: anon não lê nada", () => {
     "dailies",
     "extratos",
     "extrato_transacoes",
+    "integracao_envios",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
@@ -207,6 +211,13 @@ describe("RLS: anon não lê nada", () => {
 
   it("tabelas da operação com RLS ligado", async () => {
     const tabelas = ["tarefas", "roteiros", "dailies"];
+    const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
+      select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
+    expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
+  });
+
+  it("tabelas das integrações com RLS ligado", async () => {
+    const tabelas = ["integracao_envios"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());

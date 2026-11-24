@@ -13,7 +13,8 @@ function serializar(valor: unknown): unknown {
 }
 
 export type EntradaAuditoria = {
-  usuarioId: string;
+  /** null = ação do sistema (cron, fila das integrações). */
+  usuarioId: string | null;
   tabela: string;
   registroId: string;
   acao: AcaoAuditoria;
