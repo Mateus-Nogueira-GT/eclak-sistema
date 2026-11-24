@@ -96,7 +96,7 @@ export type LinhaLancamento = {
   forma: string;
   exigeIndividual: boolean;
   repasse: boolean;
-  /** Compra numa fatura do cartão corporativo (só aparece cancelada: a ativa sai pela linha da fatura). */
+  /** Compra numa fatura do cartão corporativo (só aparece cancelada ou com `compras = "incluir"`: senão sai pela linha da fatura). */
   faturaCartaoId: string | null;
   situacao: Situacao;
   categoria: { grupo: string; nome: string };

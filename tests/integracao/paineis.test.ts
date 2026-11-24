@@ -6,7 +6,7 @@ import { hojeEmCuiaba } from "@/domain/clientes";
 import { diferencaPp, intervaloDeMeses, margemPonderada, pctAbaixoDe } from "@/domain/paineis";
 import { ErroAcesso } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { categoriasFinanceiras, comissoes, lancamentosFinanceiros as lf, pagamentosFornecedor, parcelasReceber, vendas, versoesPrecificacao } from "@/server/db/schema";
+import { categoriasFinanceiras, comissoes, lancamentosFinanceiros as lf, pagamentosFornecedor, parcelasReceber, usuarios, vendas, versoesPrecificacao } from "@/server/db/schema";
 import { formatarReais } from "@/domain/dinheiro";
 import { salvarCliente } from "@/server/actions/clientes";
 import { baixarLinha, baixarRepasse, cancelarLancamento, criarLancamento } from "@/server/actions/financeiro";
@@ -16,7 +16,7 @@ import { enviarParaAprovacao } from "@/server/actions/aprovacoes";
 import { criarOrcamento } from "@/server/actions/viagens";
 import { obterCliente } from "@/server/queries/clientes";
 import { saldosDasContas } from "@/server/queries/caixa";
-import { obterVisaoGeral, relatorioBancos, relatorioConsultores, relatorioContas, relatorioDre, relatorioMargens } from "@/server/queries/paineis";
+import { nomeDoConsultor, obterVisaoGeral, relatorioBancos, relatorioConsultores, relatorioContas, relatorioDre, relatorioMargens } from "@/server/queries/paineis";
 import { regrasVigentes } from "@/server/queries/regras";
 import { margensVendidas, obterViagemVendida } from "@/server/queries/vendas";
 import { GET } from "@/app/(app)/financeiro/relatorios/planilha/route";
@@ -136,6 +136,7 @@ describe("obterVisaoGeral", () => {
     const referencia = (await comSessao(a.d.id, () => regrasVigentes())).valores.margemReferenciaPct;
     const todas = await margensVendidas([a.viagemId, b.viagemId, fora.viagemId]);
     const abaixo = [...todas.values()].filter((x) => !("erro" in x.real) && pctAbaixoDe(x.real.finalPct, referencia)).length;
+    expect(abaixo).toBeGreaterThan(0);
     expect(r.viagensAbaixoReferencia).toBe(abaixo);
 
     // A viagem A aparece nas perdas com a mesma margem real da tela da viagem.
@@ -270,7 +271,7 @@ describe("obterVisaoGeral", () => {
     expect(r.avisos.map((x) => x.tipo)).toEqual(["caixa", "margem", "margem", "margem", "margem", "parcela", "comissao", "pagar"]);
     expect(r.avisos.filter((x) => x.tipo !== "caixa" && x.tipo !== "margem").every((x) => x.agregado)).toBe(true);
     expect(r.avisosOcultos.map((x) => [x.tipo, x.titulo, x.href])).toEqual([["aprovacao", "1 pedido aguardando aprovação", "/aprovacoes"]]);
-  });
+  }, 30_000); // cinco viagens vendidas no fixture
 });
 
 async function categoria(nome: string): Promise<string> {
@@ -509,6 +510,11 @@ describe("relatórios", () => {
 
     const soA = await comSessao(fin, () => relatorioMargens(JANEIRO, a.u.id));
     expect(soA.map((l) => l.viagemId)).toEqual([a.viagemId]);
+    // O nome do consultor do filtro não depende de vendas no período; consultor não lê.
+    const [consultorA] = await db.select({ nome: usuarios.nome }).from(usuarios).where(eq(usuarios.id, a.u.id));
+    expect(await comSessao(fin, () => nomeDoConsultor(a.u.id))).toBe(consultorA.nome);
+    expect(await comSessao(fin, () => relatorioMargens(intervaloDeMeses("2027-03", "2027-03"), a.u.id))).toEqual([]);
+    await expect(comSessao(a.u.id, () => nomeDoConsultor(a.u.id))).rejects.toBeInstanceOf(ErroAcesso);
 
     const c = await comSessao(fin, () => relatorioConsultores(JANEIRO));
     const m = await margensVendidas([a.viagemId, b.viagemId]);

@@ -399,7 +399,8 @@ export function ListaLancamentos(p: Props) {
                       )}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3">
-                      <Badge tom={TOM[l.situacao]}>{rotuloSituacao(l.situacao, l.lado)}</Badge>
+                      {/* Compra no cartão em aberto: o vencimento é a data da compra; quem vence é a fatura. */}
+                      {l.faturaCartaoId && l.statusBase === "em_aberto" ? <Badge tom="cinza">Na fatura</Badge> : <Badge tom={TOM[l.situacao]}>{rotuloSituacao(l.situacao, l.lado)}</Badge>}
                       {baixada && l.baixadoEm && <span className="block text-[12px] text-cinza">em {dataBr(l.baixadoEm)}{l.contaBancaria ? ` · ${l.contaBancaria}` : ""}</span>}
                       {!l.transitaCaixa && <span className="block text-[12px] text-cinza">Fora do caixa</span>}
                     </td>

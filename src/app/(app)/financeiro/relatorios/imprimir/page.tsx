@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { AVISO_PERIODO_INVALIDO, rotuloPeriodoMeses, RELATORIOS } from "@/domain/paineis";
 import { ErroAcesso } from "@/server/auth";
-import { carregarRelatorio, nomeDoConsultor, parametrosDoRelatorio, type RelatorioCarregado } from "@/server/relatorios";
+import { carregarRelatorio, parametrosDoRelatorio, type RelatorioCarregado } from "@/server/relatorios";
+import { nomeDoConsultor } from "@/server/queries/paineis";
 import { BotaoImprimir } from "../../../viagens/[id]/proposta/imprimir";
 import { dataBr } from "../../../viagens/formatos";
 import { TabelaRelatorio } from "../tabelas";
@@ -15,7 +16,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
   let nomeConsultor: string | undefined;
   try {
     carregado = await carregarRelatorio(rel, periodo.intervalo, consultorId);
-    if (consultorId) nomeConsultor = await nomeDoConsultor(periodo.intervalo, consultorId);
+    if (consultorId) nomeConsultor = await nomeDoConsultor(consultorId);
   } catch (e) {
     if (e instanceof ErroAcesso) redirect("/sem-acesso");
     throw e;
@@ -33,7 +34,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
         <p className="text-[13px] text-cinza">
           {rotulo} (<span className="num">{dataBr(periodo.intervalo.de)}</span> a <span className="num">{dataBr(periodo.intervalo.ate)}</span>) · emitido em <span className="num">{dataBr(hoje)}</span>
         </p>
-        {consultorId && <p className="text-[13px] text-texto">Consultor: {nomeConsultor ?? "um consultor"}</p>}
+        {consultorId && nomeConsultor && <p className="text-[13px] text-texto">Consultor: {nomeConsultor}</p>}
         {periodo.invalido && <p className="mt-2 rounded-[5px] border border-ouro bg-ouro/15 px-3 py-2 text-[13px] text-texto">{AVISO_PERIODO_INVALIDO}</p>}
       </header>
       <TabelaRelatorio carregado={carregado} intervalo={periodo.intervalo} links={false} />

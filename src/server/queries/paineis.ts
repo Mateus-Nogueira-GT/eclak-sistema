@@ -533,6 +533,13 @@ export async function relatorioMargens(i: Intervalo, consultorId?: string): Prom
     });
 }
 
+/** Nome do consultor do filtro da margem por viagem (com ou sem vendas no período); `undefined` se não existe. */
+export async function nomeDoConsultor(consultorId: string): Promise<string | undefined> {
+  await exigirPerfil(...PERFIS_FINANCEIRO);
+  const [u] = await db.select({ nome: usuarios.nome }).from(usuarios).where(eq(usuarios.id, consultorId));
+  return u?.nome;
+}
+
 export type LinhaConsultor = { consultorId: string; nome: string; viagens: number; vendido: bigint; margemPct: string | null };
 export type RelatorioConsultores = { linhas: LinhaConsultor[]; total: { viagens: number; vendido: bigint; margemPct: string | null } };
 

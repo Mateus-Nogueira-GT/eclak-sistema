@@ -4,7 +4,8 @@ import { Card, CardHeader, PageHeader } from "@/components/ui";
 import { AVISO_PERIODO_INVALIDO, rotuloMes, rotuloPeriodoMeses, RELATORIOS, RELATORIOS_TIPOS } from "@/domain/paineis";
 import { somarMeses } from "@/domain/venda";
 import { ErroAcesso } from "@/server/auth";
-import { carregarRelatorio, nomeDoConsultor, parametrosDoRelatorio, type RelatorioCarregado } from "@/server/relatorios";
+import { carregarRelatorio, parametrosDoRelatorio, type RelatorioCarregado } from "@/server/relatorios";
+import { nomeDoConsultor } from "@/server/queries/paineis";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { TabelaRelatorio } from "./tabelas";
 
@@ -30,7 +31,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
   let nomeConsultor: string | undefined;
   try {
     carregado = await carregarRelatorio(rel, intervalo, consultorId);
-    if (consultorId) nomeConsultor = await nomeDoConsultor(intervalo, consultorId);
+    if (consultorId) nomeConsultor = await nomeDoConsultor(consultorId);
   } catch (e) {
     if (e instanceof ErroAcesso) redirect("/sem-acesso");
     throw e;

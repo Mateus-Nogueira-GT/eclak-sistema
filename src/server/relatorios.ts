@@ -82,7 +82,3 @@ export async function gerarCsv(params: ParametrosRelatorio): Promise<{ nome: str
   return { nome: nomeArquivoRelatorio(rel, periodo.de, periodo.ate, consultorId !== undefined), corpo: paraCsv(cabecalho, linhas) };
 }
 
-/** Nome do consultor do filtro da margem por viagem (pelas vendas dele no intervalo); exige o perfil financeiro. */
-export async function nomeDoConsultor(i: Intervalo, consultorId: string): Promise<string | undefined> {
-  return (await relatorioConsultores(i)).linhas.find((l) => l.consultorId === consultorId)?.nome;
-}
