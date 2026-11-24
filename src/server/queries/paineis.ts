@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, between, count, eq, inArray, isNull, lt, lte, min, ne, or, sql, type SQL } from "drizzle-orm";
 import type { PeriodoCaixa } from "@/domain/caixa";
 import { hojeEmCuiaba } from "@/domain/clientes";
+import { DIAS_AVISO } from "@/domain/conciliacao";
 import { formatarPercentual, formatarReais } from "@/domain/dinheiro";
 import { rotuloSituacao, type Lado, type Origem } from "@/domain/financeiro";
 import {
@@ -16,8 +17,10 @@ import {
   variacaoPct,
   type Aviso,
   type Intervalo,
+  type LinhaConciliacaoRel,
   type LinhaDre,
   type PeriodoPainel,
+  type TotalConciliacaoRel,
 } from "@/domain/paineis";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { somarDias, statusDaViagem } from "@/domain/venda";
@@ -34,6 +37,7 @@ import {
   versoesPrecificacao,
   viagens,
 } from "@/server/db/schema";
+import { obterConciliacao, pendentesParaAviso, SITUACOES_CONCILIACAO } from "@/server/queries/conciliacao";
 import { obterFluxoDeCaixa, saldoAtualSql, type FluxoDeCaixa } from "@/server/queries/caixa";
 import { situacaoSql } from "@/server/queries/financeiro";
 import { regrasVigentes } from "@/server/queries/regras";
@@ -205,7 +209,7 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
   const ontem = somarDias(hoje, -1);
   const limitePagar = somarDias(hoje, DIAS_A_PAGAR);
 
-  const [linhas, vendidoAnterior, caixa, fluxo, regras, parcelas, comissoesVencidas, aPagar, categoriaVendas, aguardando] = await Promise.all([
+  const [linhas, vendidoAnterior, caixa, fluxo, regras, parcelas, comissoesVencidas, aPagar, categoriaVendas, aguardando, semPar] = await Promise.all([
     // Do período (vendido, margens) e as não conciliadas (avisos de margem, perdas), numa leitura.
     linhasVendidas(or(aceiteNo(intervalo), isNull(viagens.conciliadaEm))),
     vendidoNoIntervalo(intervaloAnterior(periodo, intervalo)),
@@ -217,6 +221,7 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
     emAberto(and(eq(lf.lado, "pagar"), eq(lf.transitaCaixa, true), inArray(lf.origem, ["pagamento", "manual", "fatura_cartao"]), lte(lf.vencimento, limitePagar))),
     db.select({ id: categoriasFinanceiras.id }).from(categoriasFinanceiras).where(eq(categoriasFinanceiras.sistema, "vendas_viagem")),
     usuario.perfil === "diretor" ? pedidosAguardando() : Promise.resolve(0),
+    pendentesParaAviso(hoje),
   ]);
 
   const margens = await margensVendidas(linhas.map((l) => l.viagemId));
@@ -327,6 +332,20 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
         plural(aPagar.quantidade, "conta a pagar vencida ou vencendo em 7 dias", "contas a pagar vencidas ou vencendo em 7 dias"),
         `${formatarReais(aPagar.total)} em aberto`,
         lista({ lado: "pagar", base: "vencimento", situacao: "em_aberto", de: aPagar.desde, ate: limitePagar }),
+        true,
+      ),
+    );
+  }
+  if (semPar.qtd > 0) {
+    // Abre a conta com a pendência mais antiga, do dia dela até hoje: a lista não cai vazia.
+    const primeira = semPar.contas[0];
+    const href = `/financeiro/conciliacao?${new URLSearchParams({ conta: primeira.contaId, de: primeira.maisAntiga, ate: hoje, situacao: "nao_conciliado" }).toString()}`;
+    avisos.push(
+      aviso(
+        "conciliacao",
+        `${plural(semPar.qtd, "transação", "transações")} do extrato sem par no sistema`,
+        `${formatarReais(semPar.valor)} em transações sem par com mais de ${DIAS_AVISO} dias${semPar.contas.length > 1 ? `, em ${semPar.contas.length} contas` : ""}`,
+        href,
         true,
       ),
     );
@@ -571,4 +590,51 @@ export async function relatorioConsultores(i: Intervalo): Promise<RelatorioConsu
     linhas,
     total: { viagens: vendidas.length, vendido: vendidas.reduce((s, v) => s + v.vendido, 0n), margemPct: margemPonderada(todas) },
   };
+}
+
+export type RelatorioConciliacao = { linhas: LinhaConciliacaoRel[]; totais: TotalConciliacaoRel[] };
+
+const ROTULO_TOTAL_CONCILIACAO: Record<TotalConciliacaoRel["tipo"], string> = {
+  confere: "Confere",
+  diferenca: "Diferença",
+  nao_conciliado: "Não conciliado",
+  ignorado: "Ignorado",
+  baixa_mudou: "A baixa mudou: confira",
+};
+
+/**
+ * Conciliação extrato x sistema: as transações do extrato com data no intervalo, de todas as contas (ou só de uma),
+ * por data e conta, com o valor da baixa conciliada e a situação; totais por situação (só as que têm transação).
+ */
+export async function relatorioConciliacao(i: Intervalo, contaBancariaId?: string): Promise<RelatorioConciliacao> {
+  await exigirPerfil(...PERFIS_FINANCEIRO);
+  const contas = await db
+    .select({ id: contasBancarias.id })
+    .from(contasBancarias)
+    .where(and(isNull(contasBancarias.excluidoEm), contaBancariaId ? eq(contasBancarias.id, contaBancariaId) : undefined))
+    .orderBy(asc(contasBancarias.nome));
+  const lidas = (await Promise.all(contas.map((c) => obterConciliacao({ contaBancariaId: c.id, de: i.de, ate: i.ate }, { sugestoes: false })))).flatMap((r) =>
+    r ? [r] : [],
+  );
+
+  const linhas: LinhaConciliacaoRel[] = lidas
+    .flatMap((r) =>
+      r.linhas.map((l) => ({
+        data: l.transacao.data,
+        conta: r.conta.nome,
+        contaId: r.conta.id,
+        descricao: l.transacao.descricao,
+        valorExtrato: l.transacao.valor,
+        valorSistema: l.linha?.valor ?? null,
+        situacao: l.situacao.rotulo,
+      })),
+    )
+    .sort((a, b) => a.data.localeCompare(b.data) || a.conta.localeCompare(b.conta, "pt-BR") || a.descricao.localeCompare(b.descricao, "pt-BR"));
+
+  const totais: TotalConciliacaoRel[] = SITUACOES_CONCILIACAO.flatMap((tipo) => {
+    const qtd = lidas.reduce((s, r) => s + r.totais[tipo].qtd, 0);
+    const valor = lidas.reduce((s, r) => s + r.totais[tipo].valor, 0n);
+    return qtd > 0 ? [{ tipo, rotulo: ROTULO_TOTAL_CONCILIACAO[tipo], qtd, valor }] : [];
+  });
+  return { linhas, totais };
 }

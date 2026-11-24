@@ -20,6 +20,10 @@ const mes = (data: string) => data.slice(0, 7);
 export function hrefConta(contaId: string, i: Intervalo) {
   return `/financeiro/lancamentos?lado=todos&base=baixa&de=${i.de}&ate=${i.ate}&contaBancariaId=${contaId}`;
 }
+/** Conciliação de uma conta no período (as datas da transação). */
+export function hrefConciliacao(contaId: string, i: Intervalo) {
+  return `/financeiro/conciliacao?conta=${contaId}&de=${i.de}&ate=${i.ate}`;
+}
 /** Margem por viagem do mesmo período (a origem da "Receita de viagens" da DRE). */
 export function hrefMargens(i: Intervalo) {
   return `/financeiro/relatorios?rel=margens&de=${mes(i.de)}&ate=${mes(i.ate)}`;
@@ -147,6 +151,38 @@ export function TabelaRelatorio({ carregado, intervalo, links }: { carregado: Re
             ])}
           />
           {linhas.length === 0 && <p className="px-6 py-4 text-[14px] text-cinza">Nenhuma viagem com aceite no período.</p>}
+        </>
+      );
+    }
+    case "conciliacao": {
+      const { linhas, totais } = carregado.dados;
+      return (
+        <>
+          <p className="px-6 pt-1 text-[13px] text-cinza">Valores com sinal: entrada positiva, saída negativa. A diferença e a falta de par aparecem em ouro.</p>
+          <Grade
+            className="mt-3"
+            right={[3, 4]}
+            head={cab}
+            rows={linhas.map((l) => [
+              <span key="d" className="num">{dataBr(l.data)}</span>,
+              links ? <Link key="c" href={hrefConciliacao(l.contaId, intervalo)} className={tipoLink}>{l.conta}</Link> : <b key="c" className="font-semibold">{l.conta}</b>,
+              l.descricao,
+              <Valor key="e" c={l.valorExtrato} />,
+              l.valorSistema === null ? <span key="s" className="text-cinza">—</span> : <Valor key="s" c={l.valorSistema} />,
+              <span key="t" className={cx(l.situacao !== "Confere" && l.situacao !== "Ignorado" && "font-semibold text-ouro")}>{l.situacao}</span>,
+            ])}
+          />
+          {linhas.length === 0 && <p className="px-6 py-4 text-[14px] text-cinza">Nenhuma transação de extrato no período.</p>}
+          {totais.length > 0 && (
+            <dl className="mx-6 mt-3 max-w-[420px] border-t-2 border-verde">
+              {totais.map((t) => (
+                <div key={t.tipo} className="flex justify-between gap-4 border-b border-linha py-2 text-[14px]">
+                  <dt className="font-semibold">{t.rotulo} <span className="num font-normal text-cinza">({t.qtd})</span></dt>
+                  <dd><Valor c={t.valor} forte /></dd>
+                </div>
+              ))}
+            </dl>
+          )}
         </>
       );
     }

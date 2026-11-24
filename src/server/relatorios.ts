@@ -1,4 +1,5 @@
 import "server-only";
+import { eq } from "drizzle-orm";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import {
   linhasCsv,
@@ -10,14 +11,18 @@ import {
   type PeriodoRelatorio,
   type Relatorio,
 } from "@/domain/paineis";
+import { db } from "@/server/db/client";
+import { contasBancarias } from "@/server/db/schema";
 import {
   relatorioBancos,
+  relatorioConciliacao,
   relatorioConsultores,
   relatorioContas,
   relatorioDre,
   relatorioMargens,
   type LinhaMargem,
   type RelatorioBancos,
+  type RelatorioConciliacao,
   type RelatorioConsultores,
   type RelatorioContas,
   type RelatorioDre,
@@ -27,16 +32,18 @@ type Parametro = string | string[] | undefined;
 const primeiro = (v: Parametro) => (Array.isArray(v) ? v[0] : v)?.trim() || undefined;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export type ParametrosRelatorio = { rel: Relatorio; periodo: PeriodoRelatorio; consultorId?: string };
+export type ParametrosRelatorio = { rel: Relatorio; periodo: PeriodoRelatorio; consultorId?: string; contaId?: string };
 
-/** Parâmetros da URL das telas e da planilha: relatório (padrão DRE), meses `de`/`ate` e, na margem, `consultor`. */
+/** Parâmetros da URL das telas e da planilha: relatório (padrão DRE), meses `de`/`ate` e, na margem, `consultor`; na conciliação, `conta`. */
 export function parametrosDoRelatorio(params: Record<string, Parametro>, hoje: string = hojeEmCuiaba()): ParametrosRelatorio {
   const rel = RELATORIOS_TIPOS.find((r) => r === primeiro(params.rel)) ?? "dre";
   const consultor = primeiro(params.consultor);
+  const conta = primeiro(params.conta);
   return {
     rel,
     periodo: periodoDosRelatorios(primeiro(params.de), primeiro(params.ate), hoje),
     consultorId: rel === "margens" && consultor && UUID.test(consultor) ? consultor : undefined,
+    contaId: rel === "conciliacao" && conta && UUID.test(conta) ? conta : undefined,
   };
 }
 
@@ -47,10 +54,11 @@ type Lidos = {
   bancos: RelatorioBancos;
   margens: LinhaMargem[];
   consultores: RelatorioConsultores;
+  conciliacao: RelatorioConciliacao;
 };
 export type RelatorioCarregado = { [R in Relatorio]: { rel: R; dados: Lidos[R] } }[Relatorio];
 
-function ler<R extends Relatorio>(rel: R, i: Intervalo, consultorId?: string): Promise<Lidos[R]> {
+function ler<R extends Relatorio>(rel: R, i: Intervalo, consultorId?: string, contaId?: string): Promise<Lidos[R]> {
   const lido = (() => {
     switch (rel) {
       case "dre":
@@ -64,21 +72,25 @@ function ler<R extends Relatorio>(rel: R, i: Intervalo, consultorId?: string): P
         return relatorioMargens(i, consultorId);
       case "consultores":
         return relatorioConsultores(i);
+      case "conciliacao":
+        return relatorioConciliacao(i, contaId);
     }
   })();
   return lido as Promise<Lidos[R]>;
 }
 
 /** Lê o relatório (cada leitura exige o perfil financeiro; sem ele lança `ErroAcesso`). */
-export async function carregarRelatorio(rel: Relatorio, i: Intervalo, consultorId?: string): Promise<RelatorioCarregado> {
-  return { rel, dados: await ler(rel, i, consultorId) } as RelatorioCarregado;
+export async function carregarRelatorio(rel: Relatorio, i: Intervalo, consultorId?: string, contaId?: string): Promise<RelatorioCarregado> {
+  return { rel, dados: await ler(rel, i, consultorId, contaId) } as RelatorioCarregado;
 }
 
 /** O CSV e o nome do arquivo de um relatório, pelos mesmos parâmetros da tela. Lança `ErroAcesso` sem o perfil. */
 export async function gerarCsv(params: ParametrosRelatorio): Promise<{ nome: string; corpo: string }> {
-  const { rel, periodo, consultorId } = params;
-  const dados = await ler(rel, periodo.intervalo, consultorId);
+  const { rel, periodo, consultorId, contaId } = params;
+  const dados = await ler(rel, periodo.intervalo, consultorId, contaId);
   const { cabecalho, linhas } = linhasCsv(rel, dados);
-  return { nome: nomeArquivoRelatorio(rel, periodo.de, periodo.ate, consultorId !== undefined), corpo: paraCsv(cabecalho, linhas) };
+  const [conta] = contaId ? await db.select({ nome: contasBancarias.nome }).from(contasBancarias).where(eq(contasBancarias.id, contaId)) : [];
+  const nomeConta = conta?.nome;
+  return { nome: nomeArquivoRelatorio(rel, periodo.de, periodo.ate, consultorId !== undefined, nomeConta), corpo: paraCsv(cabecalho, linhas) };
 }
 

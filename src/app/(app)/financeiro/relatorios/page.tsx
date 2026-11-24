@@ -6,6 +6,7 @@ import { somarMeses } from "@/domain/venda";
 import { ErroAcesso } from "@/server/auth";
 import { carregarRelatorio, parametrosDoRelatorio, type RelatorioCarregado } from "@/server/relatorios";
 import { nomeDoConsultor } from "@/server/queries/paineis";
+import { listarContasBancarias } from "@/server/queries/financeiro";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { TabelaRelatorio } from "./tabelas";
 
@@ -25,12 +26,14 @@ function opcoesDeMes(hoje: string, escolhidos: string[]): string[] {
 // Defesa em profundidade: o proxy já barra, mas a tela não depende só dele.
 export default async function Pagina({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const hoje = hojeEmCuiaba();
-  const { rel, periodo, consultorId } = parametrosDoRelatorio(await searchParams, hoje);
+  const { rel, periodo, consultorId, contaId } = parametrosDoRelatorio(await searchParams, hoje);
   const { intervalo } = periodo;
   let carregado: RelatorioCarregado;
   let nomeConsultor: string | undefined;
+  let contas: Awaited<ReturnType<typeof listarContasBancarias>> = [];
   try {
-    carregado = await carregarRelatorio(rel, intervalo, consultorId);
+    carregado = await carregarRelatorio(rel, intervalo, consultorId, contaId);
+    if (rel === "conciliacao") contas = await listarContasBancarias();
     if (consultorId) nomeConsultor = await nomeDoConsultor(consultorId);
   } catch (e) {
     if (e instanceof ErroAcesso) redirect("/sem-acesso");
@@ -38,7 +41,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
   }
 
   const periodoUrl = `de=${periodo.de}&ate=${periodo.ate}`;
-  const query = `rel=${rel}&${periodoUrl}${consultorId ? `&consultor=${consultorId}` : ""}`;
+  const query = `rel=${rel}&${periodoUrl}${consultorId ? `&consultor=${consultorId}` : ""}${contaId ? `&conta=${contaId}` : ""}`;
   const rotuloPeriodo = rotuloPeriodoMeses(periodo.de, periodo.ate);
   const meses = opcoesDeMes(hoje, [periodo.de, periodo.ate]);
   const botao = "inline-flex items-center rounded-[5px] border border-[#C9CDD1] bg-white px-3.5 py-2 text-[14px] font-semibold text-texto hover:border-verde hover:text-verde";
@@ -77,6 +80,15 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
                 {meses.map((m) => <option key={m} value={m}>{rotuloMes(m)}</option>)}
               </select>
             </label>
+            {rel === "conciliacao" && (
+              <label className="text-[13px] text-cinza">
+                Conta
+                <select name="conta" defaultValue={contaId ?? ""} className={cx(campoCls, "mt-1")}>
+                  <option value="">Todas as contas</option>
+                  {contas.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+              </label>
+            )}
             <button type="submit" className="cursor-pointer rounded-[5px] bg-verde px-3.5 py-2 text-[14px] font-semibold text-white hover:bg-[#254B5C]">Aplicar</button>
             <span className="ml-auto flex gap-2">
               {/* Download de arquivo: link comum (não `next/link`, que tentaria navegar pelo roteador). */}

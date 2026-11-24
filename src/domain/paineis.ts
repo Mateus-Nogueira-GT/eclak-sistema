@@ -16,7 +16,7 @@ export const ROTULO_PERIODO: Record<PeriodoPainel, string> = {
   ano: "Este ano",
 };
 
-export const RELATORIOS_TIPOS = ["dre", "pagar", "receber", "bancos", "margens", "consultores"] as const;
+export const RELATORIOS_TIPOS = ["dre", "pagar", "receber", "bancos", "margens", "consultores", "conciliacao"] as const;
 export type Relatorio = (typeof RELATORIOS_TIPOS)[number];
 
 /** Nome e descrição de cada relatório (texto do protótipo). */
@@ -27,6 +27,7 @@ export const RELATORIOS: Record<Relatorio, { nome: string; descricao: string }> 
   bancos: { nome: "Volume por banco", descricao: "Entradas e saídas por conta" },
   margens: { nome: "Margem por viagem", descricao: "Planejada e real" },
   consultores: { nome: "Vendas por consultor", descricao: "Valor vendido e margem" },
+  conciliacao: { nome: "Conciliação extrato x sistema", descricao: "Extrato OFX conferido com as baixas do sistema" },
 };
 
 /** Datas ISO (AAAA-MM-DD), ambas inclusivas. */
@@ -181,7 +182,7 @@ export function montarDre(viagens: BlocoViagensDre, empresa: LinhaEmpresaDre[]):
 }
 
 export type Aviso = {
-  tipo: "caixa" | "margem" | "parcela" | "comissao" | "pagar" | "aprovacao";
+  tipo: "caixa" | "margem" | "parcela" | "comissao" | "pagar" | "conciliacao" | "aprovacao";
   titulo: string;
   detalhe: string;
   href: string;
@@ -190,7 +191,7 @@ export type Aviso = {
   agregado: boolean;
 };
 
-const ORDEM_AVISO: Aviso["tipo"][] = ["caixa", "margem", "parcela", "comissao", "pagar", "aprovacao"];
+const ORDEM_AVISO: Aviso["tipo"][] = ["caixa", "margem", "parcela", "comissao", "pagar", "conciliacao", "aprovacao"];
 
 export const RESPONSAVEL_AVISO: Record<Aviso["tipo"], Aviso["responsavel"]> = {
   caixa: "Gestão",
@@ -199,9 +200,10 @@ export const RESPONSAVEL_AVISO: Record<Aviso["tipo"], Aviso["responsavel"]> = {
   parcela: "Financeiro",
   comissao: "Financeiro",
   pagar: "Financeiro",
+  conciliacao: "Financeiro",
 };
 
-/** Caixa, margem, parcela, comissão, pagar, aprovação; estável dentro do tipo. */
+/** Caixa, margem, parcela, comissão, pagar, conciliação, aprovação; estável dentro do tipo. */
 export function ordenarAvisos(avisos: Aviso[]): Aviso[] {
   return [...avisos].sort((a, b) => ORDEM_AVISO.indexOf(a.tipo) - ORDEM_AVISO.indexOf(b.tipo));
 }
@@ -250,9 +252,15 @@ export function periodoDosRelatorios(de: string | undefined, ate: string | undef
   }
 }
 
-/** `relatorio-{rel}-{de}[_{ate}][-consultor].csv` (`-consultor` quando só as viagens de um consultor). */
-export function nomeArquivoRelatorio(rel: Relatorio, de: string, ate: string, porConsultor = false): string {
-  return `relatorio-${rel}-${de}${ate === de ? "" : `_${ate}`}${porConsultor ? "-consultor" : ""}.csv`;
+/** `relatorio-{rel}-{de}[_{ate}][-consultor].csv` (`-consultor` quando só as viagens de um consultor; `-conta-<nome>` quando só uma conta). */
+export function nomeArquivoRelatorio(rel: Relatorio, de: string, ate: string, porConsultor = false, conta?: string): string {
+  const slug = conta
+    ?.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `relatorio-${rel}-${de}${ate === de ? "" : `_${ate}`}${porConsultor ? "-consultor" : ""}${slug ? `-conta-${slug}` : ""}.csv`;
 }
 
 export const CABECALHOS: Record<Relatorio, string[]> = {
@@ -262,10 +270,24 @@ export const CABECALHOS: Record<Relatorio, string[]> = {
   bancos: ["Conta", "Entradas", "Saídas", "Saldo do período", "Saldo atual"],
   margens: ["Viagem", "Cliente", "Destino", "Valor vendido", "Planejada", "Real", "Diferença"],
   consultores: ["Consultor", "Viagens", "Valor vendido", "Margem real"],
+  conciliacao: ["Data", "Conta", "Lançamento no extrato", "Extrato (R$)", "Sistema (R$)", "Situação"],
 };
 
 type LinhaContaCsv = { vencimento: string; pessoa: string; descricao: string; categoria: string; viagemCodigo: string | null; situacao: string; valor: bigint };
 type LinhaMargemCsv = { codigo: string; cliente: string; destino: string; vendido: bigint; planejadaPct: string; realPct: string | null; diferencaPp: string | null };
+
+export type LinhaConciliacaoRel = {
+  data: string;
+  conta: string;
+  contaId: string;
+  descricao: string;
+  valorExtrato: bigint;
+  /** Valor da baixa conciliada (com sinal); null sem par. */
+  valorSistema: bigint | null;
+  /** Rótulo exibido: "Confere", "Diferença de R$ x", "Não conciliado"... */
+  situacao: string;
+};
+export type TotalConciliacaoRel = { tipo: "confere" | "diferenca" | "nao_conciliado" | "ignorado" | "baixa_mudou"; rotulo: string; qtd: number; valor: bigint };
 
 /** Dados de cada relatório, como saem das leituras (só o que a tela e o CSV usam). */
 export type DadosRelatorios = {
@@ -281,6 +303,7 @@ export type DadosRelatorios = {
     linhas: { nome: string; viagens: number; vendido: bigint; margemPct: string | null }[];
     total: { viagens: number; vendido: bigint; margemPct: string | null };
   };
+  conciliacao: { linhas: LinhaConciliacaoRel[]; totais: TotalConciliacaoRel[] };
 };
 
 const dataBrCsv = (iso: string) => iso.split("-").reverse().join("/");
@@ -331,6 +354,16 @@ export function linhasCsv<R extends Relatorio>(rel: R, dados: DadosRelatorios[R]
           l.diferencaPp === null ? null : l.diferencaPp.replace(".", ","),
         ]),
       };
+    case "conciliacao": {
+      const { linhas, totais } = d as DadosRelatorios["conciliacao"];
+      return {
+        cabecalho,
+        linhas: [
+          ...linhas.map((l) => [dataBrCsv(l.data), l.conta, l.descricao, l.valorExtrato, l.valorSistema, l.situacao]),
+          ...totais.map((t) => ["Total", "", `${t.qtd} ${t.qtd === 1 ? "transação" : "transações"}`, t.valor, null, t.rotulo]),
+        ],
+      };
+    }
     case "consultores": {
       const { linhas, total } = d as DadosRelatorios["consultores"];
       const m = (p: string | null) => (p === null ? SEM_MARGEM : formatarPercentual(p));
