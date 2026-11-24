@@ -144,10 +144,7 @@ async function tomar(integracoes: IntegracaoFila[], agora: Date, limite: number)
     return tx
       .update(t)
       .set({ situacao: "enviando", tentativas: sql`${t.tentativas} + 1`, tomadoEm: agora })
-      .where(inArray(
-        t.id,
-        alvo.map((a) => a.id),
-      ))
+      .where(inArray(t.id, alvo.map((a) => a.id)))
       .returning();
   });
   return linhas
@@ -213,21 +210,27 @@ async function gravarFalha(envio: EnvioTomado, erro: ErroEnvio, agora: Date): Pr
 }
 
 /**
- * Manda o que está na fila: solta os `enviando` presos, toma até `limite` pendentes vencidos das integrações
- * configuradas e com processador, e chama cada um fora de transação (um por vez).
+ * Manda o que está na fila: solta os `enviando` presos e, até `limite` vezes, toma o pendente vencido mais antigo das
+ * integrações configuradas e com processador e o chama fora de transação. `enviado_em` e a próxima tentativa contam
+ * da hora em que a chamada terminou.
  */
 export async function processarFila(
   opts: { limite?: number; agora?: Date; buscar?: Buscar } = {},
 ): Promise<{ enviados: number; falhas: number }> {
-  const agora = opts.agora ?? new Date();
+  const relogio = () => opts.agora ?? new Date();
   const buscar = opts.buscar ?? fetch;
-  await soltarPresos(agora);
+  await soltarPresos(relogio());
   const ativas = INTEGRACOES_FILA.filter((i) => processadorDe(i) !== null && estadoIntegracao(i).configurada);
   if (ativas.length === 0) return { enviados: 0, falhas: 0 };
-  const envios = await tomar(ativas, agora, opts.limite ?? LOTE_FILA);
+  const limite = opts.limite ?? LOTE_FILA;
   let enviados = 0;
   let falhas = 0;
-  for (const envio of envios) {
+  // Um envio tomado por vez, com o relógio da hora: os ainda não tomados ficam `pendente` (outra execução pode
+  // pegá-los) e um lote demorado não faz os últimos parecerem presos (`tomado_em` antigo) para o cron seguinte.
+  for (let n = 0; n < limite; n++) {
+    const agora = relogio();
+    const [envio] = await tomar(ativas, agora, 1);
+    if (!envio) break;
     const processador = processadorDe(envio.integracao);
     const deps: DepsProcessador = {
       buscar,
@@ -242,12 +245,12 @@ export async function processarFila(
     try {
       if (!processador) throw new ErroIntegracao("servidor", null);
       const resultado = await processador(envio, deps);
-      await gravarSucesso(envio, resultado, agora);
+      await gravarSucesso(envio, resultado, relogio());
       enviados++;
     } catch (e) {
       const erro = erroDe(e);
       logarFalha(envio.integracao, erro);
-      await gravarFalha(envio, erro, agora);
+      await gravarFalha(envio, erro, relogio());
       falhas++;
     }
   }

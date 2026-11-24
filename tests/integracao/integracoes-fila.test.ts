@@ -267,6 +267,23 @@ describe("processarFila", () => {
     expect(chamadas.map((c) => c.chave).sort()).toEqual(["k0", "k1", "k2", "k3", "k4", "k5"]);
   });
 
+  it("execução longa: o que ainda não foi tomado não é solto por outra execução nem mandado duas vezes", async () => {
+    let primeira = true;
+    definirProcessadorParaTestes("trello", async (envio) => {
+      chamadas.push({ chave: envio.chave, resultado: null, payload: null });
+      if (primeira) {
+        primeira = false;
+        // Outra execução (o cron) começa 11 min depois, enquanto esta ainda está no primeiro envio.
+        await processarFila({ agora: depois(11) });
+      }
+      return { ok: true };
+    });
+    await inserir({ chave: "a", proximaEm: antes(2) });
+    await inserir({ chave: "b", proximaEm: antes(1) });
+    await processarFila({ agora });
+    expect(chamadas.filter((c) => c.chave === "b")).toHaveLength(1);
+  });
+
   it("passa o fetch injetado ao processador", async () => {
     const buscar = (async () => new Response("{}")) as typeof fetch;
     let recebido: unknown;
