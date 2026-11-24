@@ -34,12 +34,18 @@ export type EnvioTomado = {
   tentativas: number;
   /** O que tentativas anteriores já gravaram (ids externos), para não criar de novo. */
   resultado: unknown;
+  /** Marca desta tomada: toda escrita desta execução só vale enquanto o envio ainda é dela (fencing). */
+  tomadoEm: Date;
 };
 
 export type DepsProcessador = {
   buscar: Buscar;
   agora: Date;
-  /** Grava um resultado parcial já (ex.: o id do cartão criado antes do checklist), mantido se a tentativa falhar. */
+  /**
+   * Grava um resultado parcial já (ex.: o id do cartão criado antes do checklist), mantido se a tentativa falhar.
+   * Substitui o `resultado` inteiro. Lança se o envio já não é desta execução (foi solto e tomado por outra): o
+   * processador para ali, sem mais chamadas externas.
+   */
   gravarResultado: (resultado: unknown) => Promise<void>;
 };
 
@@ -95,10 +101,20 @@ function logarFalha(integracao: IntegracaoFila, erro: ErroEnvio): void {
 }
 
 function codigoDoErro(e: unknown): string {
-  const codigo = (e as { code?: unknown } | null)?.code;
+  const x = e as { code?: unknown; cause?: { code?: unknown } } | null;
+  // O Drizzle embrulha o erro do Postgres: o código (SQLSTATE) fica na causa.
+  const codigo = x?.cause?.code ?? x?.code;
   if (typeof codigo === "string") return codigo;
   return e instanceof Error ? e.name : "desconhecido";
 }
+
+/** Erro do sistema da fila (não do serviço): só o código, sem mensagem nem parâmetros. */
+function logarErroDaFila(contexto: string, e: unknown): void {
+  console.error(`[integracoes] ${contexto}: ${codigoDoErro(e)}`);
+}
+
+/** Preso que gastou as tentativas: a tela mostra uma classe (o processo caiu ou a chamada nunca voltou). */
+const ERRO_PRESO: ErroEnvio = { classe: "rede", status: null };
 
 const situacaoAuditada = (l: { situacao: string; tentativas: number; ultimoErro: ErroEnvio | null }) => ({
   situacao: l.situacao,
@@ -114,6 +130,7 @@ async function soltarPresos(agora: Date): Promise<void> {
       .update(t)
       .set({
         situacao: sql`case when ${t.tentativas} >= ${MAX_TENTATIVAS} then 'falhou'::situacao_envio else 'pendente'::situacao_envio end`,
+        ultimoErro: sql`case when ${t.tentativas} >= ${MAX_TENTATIVAS} then ${JSON.stringify(ERRO_PRESO)}::jsonb else ${t.ultimoErro} end`,
         proximaEm: agora,
       })
       .where(and(eq(t.situacao, "enviando"), lt(t.tomadoEm, limite)))
@@ -158,11 +175,16 @@ async function tomar(integracoes: IntegracaoFila[], agora: Date, limite: number)
       payload: l.payload,
       tentativas: l.tentativas,
       resultado: l.resultado,
+      tomadoEm: l.tomadoEm!,
     }));
 }
 
-async function gravarSucesso(envio: EnvioTomado, resultado: unknown, agora: Date): Promise<void> {
-  await db.transaction(async (tx) => {
+/** O envio ainda é desta execução: `enviando` com a marca desta tomada. */
+const aindaMeu = (envio: EnvioTomado) => and(eq(t.id, envio.id), eq(t.situacao, "enviando"), eq(t.tomadoEm, envio.tomadoEm));
+
+/** Devolve se gravou (false = o envio já não era desta execução). */
+async function gravarSucesso(envio: EnvioTomado, resultado: unknown, agora: Date): Promise<boolean> {
+  return db.transaction(async (tx) => {
     const [l] = await tx
       .update(t)
       .set({
@@ -171,9 +193,9 @@ async function gravarSucesso(envio: EnvioTomado, resultado: unknown, agora: Date
         ultimoErro: null,
         ...(resultado === undefined ? {} : { resultado }),
       })
-      .where(and(eq(t.id, envio.id), eq(t.situacao, "enviando")))
+      .where(aindaMeu(envio))
       .returning();
-    if (!l) return;
+    if (!l) return false;
     await registrarAuditoria(tx, {
       usuarioId: null,
       tabela: "integracao_envios",
@@ -182,12 +204,14 @@ async function gravarSucesso(envio: EnvioTomado, resultado: unknown, agora: Date
       antes: { situacao: "enviando", tentativas: l.tentativas },
       depois: { ...situacaoAuditada(l), resultado: l.resultado },
     });
+    return true;
   });
 }
 
-async function gravarFalha(envio: EnvioTomado, erro: ErroEnvio, agora: Date): Promise<void> {
+/** Devolve se gravou (false = o envio já não era desta execução). */
+async function gravarFalha(envio: EnvioTomado, erro: ErroEnvio, agora: Date): Promise<boolean> {
   const proxima = repete(erro.classe) ? proximaTentativa(envio.tentativas, agora) : null;
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const [l] = await tx
       .update(t)
       .set(
@@ -195,9 +219,9 @@ async function gravarFalha(envio: EnvioTomado, erro: ErroEnvio, agora: Date): Pr
           ? { situacao: "pendente", proximaEm: proxima, ultimoErro: erro }
           : { situacao: "falhou", ultimoErro: erro },
       )
-      .where(and(eq(t.id, envio.id), eq(t.situacao, "enviando")))
+      .where(aindaMeu(envio))
       .returning();
-    if (!l) return;
+    if (!l) return false;
     await registrarAuditoria(tx, {
       usuarioId: null,
       tabela: "integracao_envios",
@@ -206,6 +230,7 @@ async function gravarFalha(envio: EnvioTomado, erro: ErroEnvio, agora: Date): Pr
       antes: { situacao: "enviando", tentativas: l.tentativas },
       depois: { ...situacaoAuditada(l), proximaEm: proxima },
     });
+    return true;
   });
 }
 
@@ -229,29 +254,45 @@ export async function processarFila(
   // pegá-los) e um lote demorado não faz os últimos parecerem presos (`tomado_em` antigo) para o cron seguinte.
   for (let n = 0; n < limite; n++) {
     const agora = relogio();
-    const [envio] = await tomar(ativas, agora, 1);
+    let envio: EnvioTomado | undefined;
+    try {
+      [envio] = await tomar(ativas, agora, 1);
+    } catch (e) {
+      // Banco fora: o resto do lote também não seria tomado; o cron tenta de novo.
+      logarErroDaFila("falha ao tomar da fila", e);
+      break;
+    }
     if (!envio) break;
+    const meu = envio;
     const processador = processadorDe(envio.integracao);
     const deps: DepsProcessador = {
       buscar,
       agora,
       gravarResultado: async (resultado) => {
-        await db
-          .update(t)
-          .set({ resultado })
-          .where(and(eq(t.id, envio.id), eq(t.situacao, "enviando")));
+        const gravou = await db.update(t).set({ resultado }).where(aindaMeu(meu)).returning({ id: t.id });
+        if (gravou.length === 0) throw new Error("O envio já não é desta execução");
       },
     };
+    // A chamada e a gravação do resultado ficam separadas: erro ao gravar não pode virar "falha" de um envio que
+    // saiu (seria mandado de novo). O envio fica `enviando`, o cron o solta depois de 10 min e o resultado parcial
+    // gravado pelo processador evita criar de novo.
+    let resultado: unknown;
+    let erro: ErroEnvio | null = null;
     try {
       if (!processador) throw new ErroIntegracao("servidor", null);
-      const resultado = await processador(envio, deps);
-      await gravarSucesso(envio, resultado, relogio());
-      enviados++;
+      resultado = await processador(envio, deps);
     } catch (e) {
-      const erro = erroDe(e);
-      logarFalha(envio.integracao, erro);
-      await gravarFalha(envio, erro, relogio());
-      falhas++;
+      erro = erroDe(e);
+    }
+    try {
+      if (erro) {
+        logarFalha(envio.integracao, erro);
+        if (await gravarFalha(envio, erro, relogio())) falhas++;
+      } else if (await gravarSucesso(envio, resultado, relogio())) {
+        enviados++;
+      }
+    } catch (e) {
+      logarErroDaFila(`${envio.integracao}: falha ao gravar o envio`, e);
     }
   }
   return { enviados, falhas };
@@ -262,16 +303,18 @@ export async function processarFila(
  * lança para quem chama: o cron pega o que ficar para trás.
  */
 export function processarDepois(): void {
+  // Nenhuma integração da fila ligada: nada a mandar (e nenhum trabalho depois da resposta).
+  if (!INTEGRACOES_FILA.some((i) => estadoIntegracao(i).configurada)) return;
   try {
     after(async () => {
       try {
         await processarFila();
       } catch (e) {
-        console.error(`[integracoes] falha ao processar a fila: ${codigoDoErro(e)}`);
+        logarErroDaFila("falha ao processar a fila", e);
       }
     });
   } catch (e) {
-    console.error(`[integracoes] não agendou a fila: ${codigoDoErro(e)}`);
+    logarErroDaFila("não agendou a fila", e);
   }
 }
 

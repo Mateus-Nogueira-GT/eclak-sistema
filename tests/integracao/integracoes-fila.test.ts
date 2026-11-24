@@ -229,7 +229,9 @@ describe("processarFila", () => {
     expect(await processarFila({ agora })).toEqual({ enviados: 1, falhas: 0 });
     expect(await ler(velho.id)).toMatchObject({ situacao: "enviado", tentativas: 2 });
     expect(await ler(recente.id)).toMatchObject({ situacao: "enviando", tentativas: 1 });
-    expect(await ler(esgotado.id)).toMatchObject({ situacao: "falhou", tentativas: 6 });
+    expect(await ler(esgotado.id)).toMatchObject({ situacao: "falhou", tentativas: 6, ultimoErro: { classe: "rede", status: null } });
+    // O que volta a pendente mantém o último erro que tinha (nenhum aqui).
+    expect(await ler(recente.id)).toMatchObject({ ultimoErro: null });
   });
 
   it("não toma: próxima no futuro, enviado, falhou, integração sem processador ou desligada", async () => {
@@ -282,6 +284,91 @@ describe("processarFila", () => {
     await inserir({ chave: "b", proximaEm: antes(1) });
     await processarFila({ agora });
     expect(chamadas.filter((c) => c.chave === "b")).toHaveLength(1);
+  });
+
+  describe("execução velha (o envio foi solto e tomado por outra) não grava por cima", () => {
+    /**
+     * A execução de `agora` está no meio do envio quando outra (o cron, 11 min depois) solta o envio como preso e o
+     * toma de novo. A outra fica parada no processador até `soltar()`; enquanto isso a velha termina do jeito de `fim`.
+     */
+    async function corrida(fim: (deps: Parameters<Processador>[1]) => Promise<unknown>) {
+      let tomou!: () => void;
+      const tomado = new Promise<void>((ok) => (tomou = ok));
+      let soltar!: () => void;
+      const solta = new Promise<void>((ok) => (soltar = ok));
+      let vez = 0;
+      let outra!: Promise<{ enviados: number; falhas: number }>;
+      definirProcessadorParaTestes("trello", async (envio, deps) => {
+        vez++;
+        chamadas.push({ chave: envio.chave, resultado: envio.resultado, payload: null });
+        if (vez === 1) {
+          outra = processarFila({ agora: depois(11) });
+          await tomado;
+          return fim(deps);
+        }
+        tomou();
+        await solta;
+        return { de: "nova" };
+      });
+      const e = await inserir({ chave: "a" });
+      const velha = await processarFila({ agora });
+      const noMeio = await ler(e.id);
+      soltar();
+      return { e, velha, noMeio, nova: await outra };
+    }
+
+    it("sucesso da velha: não conta nem grava; a nova grava o dela", async () => {
+      const { e, velha, noMeio, nova } = await corrida(async () => ({ de: "velha" }));
+      expect(velha).toEqual({ enviados: 0, falhas: 0 });
+      expect(noMeio).toMatchObject({ situacao: "enviando", tentativas: 2, resultado: null });
+      expect(noMeio.tomadoEm).toEqual(depois(11));
+      expect(nova).toEqual({ enviados: 1, falhas: 0 });
+      expect(await ler(e.id)).toMatchObject({ situacao: "enviado", resultado: { de: "nova" } });
+    });
+
+    it("falha da velha: não conta nem grava", async () => {
+      const { velha, noMeio } = await corrida(async () => {
+        throw new ErroIntegracao("servidor", 500);
+      });
+      expect(velha).toEqual({ enviados: 0, falhas: 0 });
+      expect(noMeio).toMatchObject({ situacao: "enviando", ultimoErro: null });
+    });
+
+    it("resultado parcial da velha: recusado (a velha para) e não grava", async () => {
+      let recusou = false;
+      const { velha, noMeio } = await corrida(async (deps) => {
+        try {
+          await deps.gravarResultado({ cartaoId: "velho" });
+        } catch {
+          recusou = true;
+          throw new ErroIntegracao("servidor", null);
+        }
+        return { de: "velha" };
+      });
+      expect(recusou).toBe(true);
+      expect(velha).toEqual({ enviados: 0, falhas: 0 });
+      expect(noMeio.resultado).toBeNull();
+    });
+  });
+
+  it("erro de banco ao gravar um envio: loga só o código e segue com os outros", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    definirProcessadorParaTestes("trello", async (envio) => {
+      chamadas.push({ chave: envio.chave, resultado: null, payload: null });
+      // jsonb não aceita \u0000: o UPDATE do resultado falha no banco.
+      return envio.chave === "a" ? { texto: "segredo-xyz\u0000" } : { ok: true };
+    });
+    const a = await inserir({ chave: "a", proximaEm: antes(2) });
+    const b = await inserir({ chave: "b", proximaEm: antes(1) });
+    expect(await processarFila({ agora })).toEqual({ enviados: 1, falhas: 0 });
+    expect(chamadas.map((c) => c.chave)).toEqual(["a", "b"]);
+    // "a" fica `enviando` (o cron solta depois de 10 min e o resultado parcial evita duplicar); não vira falha.
+    expect(await ler(a.id)).toMatchObject({ situacao: "enviando", ultimoErro: null });
+    expect(await ler(b.id)).toMatchObject({ situacao: "enviado" });
+    const logs = JSON.stringify(log.mock.calls);
+    expect(logs).toContain("22P05");
+    expect(logs).not.toContain("segredo-xyz");
+    log.mockRestore();
   });
 
   it("passa o fetch injetado ao processador", async () => {
