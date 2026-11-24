@@ -545,6 +545,11 @@ describe("planilha dos relatórios (CSV)", () => {
     expect(texto.startsWith("\uFEFFViagem;Cliente;Destino;Valor vendido;Planejada;Real;Diferença (pontos)\r\n")).toBe(true);
     expect(texto).toContain("Itália");
 
+    // Filtrada por consultor: o nome do arquivo diz que é só de um consultor.
+    const doConsultor = await comSessao(a.fin.id, () => GET(url(`rel=margens&de=2027-01&ate=2027-01&consultor=${a.u.id}`)));
+    expect(doConsultor.headers.get("content-disposition")).toBe('attachment; filename="relatorio-margens-2027-01-consultor.csv"');
+    expect(await doConsultor.text()).toContain("Itália");
+
     const dre = await comSessao(a.fin.id, () => GET(url("rel=dre&de=2027-01&ate=2027-03")));
     expect(dre.headers.get("content-disposition")).toBe('attachment; filename="relatorio-dre-2027-01_2027-03.csv"');
     expect(await dre.text()).toMatch(/^Linha;Valor\r\n/);

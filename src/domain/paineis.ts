@@ -143,12 +143,13 @@ export type BlocoViagensDre = { receita: bigint; custo: bigint; imposto: bigint;
 export type LinhaDre = { rotulo: string; valor: bigint; nivel: "total" | "grupo" | "categoria"; categoriaId?: string };
 
 const comparar = (a: string, b: string) => a.localeCompare(b, "pt-BR");
+export const ROTULO_RECEITA_VIAGENS = "Receita de viagens";
 
 export function montarDre(viagens: BlocoViagensDre, empresa: LinhaEmpresaDre[]): { linhas: LinhaDre[]; resultado: bigint } {
   const margemBruta = viagens.receita - viagens.custo;
   const margemViagens = margemBruta - viagens.imposto - viagens.taxas;
   const linhas: LinhaDre[] = [
-    { rotulo: "Receita de viagens", valor: viagens.receita, nivel: "total" },
+    { rotulo: ROTULO_RECEITA_VIAGENS, valor: viagens.receita, nivel: "total" },
     { rotulo: "(-) Custo dos fornecedores", valor: -viagens.custo, nivel: "total" },
     { rotulo: "(=) Margem bruta", valor: margemBruta, nivel: "total" },
     { rotulo: "(-) Imposto sobre a margem", valor: -viagens.imposto, nivel: "total" },
@@ -232,6 +233,8 @@ export function paraCsv(cabecalho: string[], linhas: (string | bigint | null)[][
 // Relatórios: período da URL, cabeçalhos e linhas do CSV (as mesmas da tela)
 // ---------------------------------------------------------------------------
 
+export const AVISO_PERIODO_INVALIDO = "Período inválido: escolha meses em ordem e até 24 meses. Mostrando o mês atual.";
+
 export type PeriodoRelatorio = { de: string; ate: string; intervalo: Intervalo; invalido: boolean };
 
 /** Período `AAAA-MM` a `AAAA-MM` da URL; ausente ou inválido vale o mês de `hoje` (`invalido` só se veio e não valeu). */
@@ -247,9 +250,9 @@ export function periodoDosRelatorios(de: string | undefined, ate: string | undef
   }
 }
 
-/** `relatorio-{rel}-{de}[_{ate}].csv` */
-export function nomeArquivoRelatorio(rel: Relatorio, de: string, ate: string): string {
-  return `relatorio-${rel}-${de}${ate === de ? "" : `_${ate}`}.csv`;
+/** `relatorio-{rel}-{de}[_{ate}][-consultor].csv` (`-consultor` quando só as viagens de um consultor). */
+export function nomeArquivoRelatorio(rel: Relatorio, de: string, ate: string, porConsultor = false): string {
+  return `relatorio-${rel}-${de}${ate === de ? "" : `_${ate}`}${porConsultor ? "-consultor" : ""}.csv`;
 }
 
 export const CABECALHOS: Record<Relatorio, string[]> = {

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Grade } from "@/components/kit";
 import { formatarPercentual, formatarReais } from "@/domain/dinheiro";
-import { CABECALHOS, ppBr, SEM_CALCULO, SEM_MARGEM, type Intervalo } from "@/domain/paineis";
+import { CABECALHOS, ppBr, ROTULO_RECEITA_VIAGENS, SEM_CALCULO, SEM_MARGEM, type Intervalo } from "@/domain/paineis";
 import type { RelatorioCarregado } from "@/server/relatorios";
 import { dataBr } from "../../viagens/formatos";
 
@@ -19,6 +19,10 @@ const mes = (data: string) => data.slice(0, 7);
 /** Lançamentos de uma conta bancária pelas baixas do período. */
 export function hrefConta(contaId: string, i: Intervalo) {
   return `/financeiro/lancamentos?lado=todos&base=baixa&de=${i.de}&ate=${i.ate}&contaBancariaId=${contaId}`;
+}
+/** Margem por viagem do mesmo período (a origem da "Receita de viagens" da DRE). */
+export function hrefMargens(i: Intervalo) {
+  return `/financeiro/relatorios?rel=margens&de=${mes(i.de)}&ate=${mes(i.ate)}`;
 }
 /** Lançamentos manuais de uma categoria da DRE, pela competência do período, com as compras no cartão uma a uma. */
 export function hrefCategoria(categoriaId: string, i: Intervalo) {
@@ -39,6 +43,7 @@ export function TabelaRelatorio({ carregado, intervalo, links }: { carregado: Re
       const { linhas, semMargem } = carregado.dados;
       return (
         <>
+          <p className="px-6 pt-1 text-[13px] text-cinza">Receita de viagens pela margem real (preço do pacote ± recebimentos); pode diferir do valor vendido.</p>
           <Grade
             className="mt-3"
             right={[1]}
@@ -46,6 +51,8 @@ export function TabelaRelatorio({ carregado, intervalo, links }: { carregado: Re
             rows={linhas.map((l) => [
               l.nivel === "categoria" && l.categoriaId && links ? (
                 <Link key="l" href={hrefCategoria(l.categoriaId, intervalo)} className={cx(tipoLink, "pl-5")}>{l.rotulo}</Link>
+              ) : l.rotulo === ROTULO_RECEITA_VIAGENS && links ? (
+                <Link key="l" href={hrefMargens(intervalo)} className={tipoLink}>{l.rotulo}</Link>
               ) : (
                 <span key="l" className={cx(l.nivel === "total" && "font-bold text-verde", l.nivel === "grupo" && "font-semibold", l.nivel === "categoria" && "pl-5 text-cinza")}>{l.rotulo}</span>
               ),
@@ -103,19 +110,22 @@ export function TabelaRelatorio({ carregado, intervalo, links }: { carregado: Re
     case "bancos": {
       const { contas, total } = carregado.dados;
       return (
-        <Grade
-          className="mt-3"
-          right={[1, 2, 3, 4]}
-          head={cab}
-          rows={contas.map((c) => [
-            links ? <Link key="n" href={hrefConta(c.contaId, intervalo)} className={tipoLink}>{c.nome}</Link> : <b key="n" className="font-semibold">{c.nome}</b>,
-            <Valor key="e" c={c.entradas} />,
-            <Valor key="s" c={c.saidas} />,
-            <Valor key="p" c={c.saldoPeriodo} />,
-            <Valor key="a" c={c.saldoAtual} />,
-          ])}
-          foot={["Total", <Valor key="e" c={total.entradas} forte />, <Valor key="s" c={total.saidas} forte />, <Valor key="p" c={total.saldoPeriodo} forte />, ""]}
-        />
+        <>
+          <p className="px-6 pt-1 text-[13px] text-cinza">Inclui todas as baixas que passam pelo caixa (viagens e contas da empresa).</p>
+          <Grade
+            className="mt-3"
+            right={[1, 2, 3, 4]}
+            head={cab}
+            rows={contas.map((c) => [
+              links ? <Link key="n" href={hrefConta(c.contaId, intervalo)} className={tipoLink}>{c.nome}</Link> : <b key="n" className="font-semibold">{c.nome}</b>,
+              <Valor key="e" c={c.entradas} />,
+              <Valor key="s" c={c.saidas} />,
+              <Valor key="p" c={c.saldoPeriodo} />,
+              <Valor key="a" c={c.saldoAtual} />,
+            ])}
+            foot={["Total", <Valor key="e" c={total.entradas} forte />, <Valor key="s" c={total.saidas} forte />, <Valor key="p" c={total.saldoPeriodo} forte />, ""]}
+          />
+        </>
       );
     }
     case "margens": {

@@ -210,6 +210,8 @@ describe("relatórios: período, arquivo e linhas do CSV", () => {
   it("nome do arquivo", () => {
     expect(nomeArquivoRelatorio("dre", "2026-11", "2026-11")).toBe("relatorio-dre-2026-11.csv");
     expect(nomeArquivoRelatorio("bancos", "2026-09", "2026-11")).toBe("relatorio-bancos-2026-09_2026-11.csv");
+    expect(nomeArquivoRelatorio("margens", "2026-11", "2026-11", true)).toBe("relatorio-margens-2026-11-consultor.csv");
+    expect(nomeArquivoRelatorio("margens", "2026-09", "2026-11", true)).toBe("relatorio-margens-2026-09_2026-11-consultor.csv");
   });
   it("DRE", () => {
     const r = linhasCsv("dre", { linhas: [{ rotulo: "Receita de viagens", valor: 123456n, nivel: "total" }, { rotulo: "(-) Custo", valor: -5000n, nivel: "total" }] });

@@ -1,11 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Card, CardHeader, PageHeader } from "@/components/ui";
-import { rotuloMes, rotuloPeriodoMeses, RELATORIOS, RELATORIOS_TIPOS } from "@/domain/paineis";
+import { AVISO_PERIODO_INVALIDO, rotuloMes, rotuloPeriodoMeses, RELATORIOS, RELATORIOS_TIPOS } from "@/domain/paineis";
 import { somarMeses } from "@/domain/venda";
 import { ErroAcesso } from "@/server/auth";
-import { carregarRelatorio, parametrosDoRelatorio, type RelatorioCarregado } from "@/server/relatorios";
-import { relatorioConsultores } from "@/server/queries/paineis";
+import { carregarRelatorio, nomeDoConsultor, parametrosDoRelatorio, type RelatorioCarregado } from "@/server/relatorios";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { TabelaRelatorio } from "./tabelas";
 
@@ -31,7 +30,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
   let nomeConsultor: string | undefined;
   try {
     carregado = await carregarRelatorio(rel, intervalo, consultorId);
-    if (consultorId) nomeConsultor = (await relatorioConsultores(intervalo)).linhas.find((l) => l.consultorId === consultorId)?.nome;
+    if (consultorId) nomeConsultor = await nomeDoConsultor(intervalo, consultorId);
   } catch (e) {
     if (e instanceof ErroAcesso) redirect("/sem-acesso");
     throw e;
@@ -64,6 +63,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
         <div>
           <form method="get" className="mb-4 flex flex-wrap items-end gap-3">
             <input type="hidden" name="rel" value={rel} />
+            {consultorId && <input type="hidden" name="consultor" value={consultorId} />}
             <label className="text-[13px] text-cinza">
               De
               <select name="de" defaultValue={periodo.de} className={cx(campoCls, "mt-1")}>
@@ -78,13 +78,14 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
             </label>
             <button type="submit" className="cursor-pointer rounded-[5px] bg-verde px-3.5 py-2 text-[14px] font-semibold text-white hover:bg-[#254B5C]">Aplicar</button>
             <span className="ml-auto flex gap-2">
-              <Link href={`/financeiro/relatorios/planilha?${query}`} prefetch={false} className={botao}>Planilha</Link>
+              {/* Download de arquivo: link comum (não `next/link`, que tentaria navegar pelo roteador). */}
+              <a href={`/financeiro/relatorios/planilha?${query}`} download className={botao}>Planilha</a>
               <Link href={`/financeiro/relatorios/imprimir?${query}`} target="_blank" className={botao}>PDF</Link>
             </span>
           </form>
           {periodo.invalido && (
             <p role="status" className="mb-4 rounded-[5px] border border-ouro bg-ouro/15 px-4 py-3 text-[14px] text-texto">
-              Período inválido: escolha meses em ordem e até 24 meses. Mostrando o mês atual.
+              {AVISO_PERIODO_INVALIDO}
             </p>
           )}
           {consultorId && (

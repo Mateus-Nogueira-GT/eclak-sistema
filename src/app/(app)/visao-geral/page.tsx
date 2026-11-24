@@ -183,7 +183,7 @@ function resumo(v: VisaoGeral) {
     { k: "Margem real", v: margem.v, sub: margem.sub, ruim: margem.ruim, forte: false },
     { k: "Recebido de clientes", v: formatarReais(v.recebido), sub: "pelas baixas no período, líquido da taxa", ruim: false, forte: false },
     { k: "Pago a fornecedores", v: formatarReais(v.pago), sub: "pelas baixas no período", ruim: false, forte: false },
-    { k: "Resultado de caixa", v: formatarReais(v.resultadoCaixa), sub: "recebido menos pago", ruim: v.resultadoCaixa < 0n, forte: true },
+    { k: "Resultado de caixa", v: formatarReais(v.resultadoCaixa), sub: "recebido de clientes menos pago a fornecedores", ruim: v.resultadoCaixa < 0n, forte: true },
   ];
 }
 
