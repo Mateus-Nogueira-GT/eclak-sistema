@@ -39,7 +39,7 @@ export function TestarConexao({ integracao }: { integracao: string }) {
   );
 }
 
-/** Reenviar um envio que falhou (ou tentar agora um pendente). */
+/** Reenviar um envio que falhou. */
 export function Reenviar({ envioId, rotulo }: { envioId: string; rotulo: string }) {
   const acao = useAcao();
   return (

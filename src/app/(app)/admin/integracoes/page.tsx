@@ -151,12 +151,13 @@ const envio = (e: EnvioLista): ReactNode => (
   </span>
 );
 
+/** Rótulo do erro com o status HTTP, quando houver (ex.: "Credencial recusada · HTTP 401"). */
+const textoErro = (e: EnvioLista): string =>
+  `${e.erro ?? ROTULO_CLASSE_ERRO.servidor}${e.status !== null ? ` · HTTP ${e.status}` : ""}`;
+
 const erroDe = (e: EnvioLista): ReactNode =>
   e.erro ? (
-    <span>
-      {e.erro}
-      {e.status !== null && <span className="text-cinza"> · HTTP {e.status}</span>}
-    </span>
+    <span>{textoErro(e)}</span>
   ) : (
     <span className="text-cinza">Nenhum</span>
   );
@@ -198,8 +199,7 @@ export default async function Pagina() {
               envio(e),
               <Viagem key="v" e={e} />,
               <Badge key="e" tom="ouro">
-                {e.erro ?? ROTULO_CLASSE_ERRO.servidor}
-                {e.status !== null && ` · HTTP ${e.status}`}
+                {textoErro(e)}
               </Badge>,
               e.tentativas,
               dataHora(e.criadoEm),
@@ -210,7 +210,7 @@ export default async function Pagina() {
         <Secao titulo="Na fila" vazio="Nada esperando para sair." vazia={fila.pendentes.length === 0}>
           <Grade
             className="mt-2"
-            head={["Envio", "Viagem", "Situação", "Último erro", "Tentativas", ""]}
+            head={["Envio", "Viagem", "Situação", "Último erro", "Tentativas"]}
             right={[4]}
             rows={fila.pendentes.map((e) => [
               envio(e),
@@ -218,7 +218,6 @@ export default async function Pagina() {
               e.situacao === "enviando" ? "Enviando agora" : `Próxima tentativa ${dataHora(e.proximaEm)}`,
               erroDe(e),
               e.tentativas,
-              e.situacao === "pendente" ? <Reenviar key="r" envioId={e.id} rotulo="Tentar agora" /> : null,
             ])}
           />
         </Secao>

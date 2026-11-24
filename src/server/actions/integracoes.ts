@@ -170,6 +170,8 @@ export async function testarConexao(integracao: string): Promise<{ ok: true; con
     if (!conexao) return DESLIGADA;
     const registro = conexao;
     try {
+      // `acao: "criar"`: o enum de ações da auditoria não tem "testar"; cada teste é um registro novo (o resultado em
+      // `depois`) e "Último teste" lê a auditoria mais recente de `tabela = 'integracoes'`.
       await db.transaction((tx) =>
         registrarAuditoria(tx, { usuarioId: usuario.id, tabela: "integracoes", registroId: integracao, acao: "criar", depois: registro }),
       );
