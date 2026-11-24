@@ -27,7 +27,7 @@ Os PRs #1 a #6 foram mergeados em `main` em ordem (merge commit, branches mantid
 | 3b Venda → margem real | `claude/fatia-3b-venda` | [#4](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/4) |
 | 4a Lançamentos e faturas | `claude/fatia-4-financeiro` | [#5](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/5) |
 | 4b Caixa, reserva, anexos e cartão corporativo | `claude/fatia-4b-caixa` | [#6](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/6) |
-| 5a Operação (tarefas, roteiro, dailies) | `claude/fatia-5a-operacao` | a abrir (base `main`, só com o "sim" do Mateus) |
+| 5a Operação (tarefas, roteiro, dailies) | `claude/fatia-5a-operacao` | [#7](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/7) (base `main`, merge só com o "sim" do Mateus) |
 | 6a Painéis (Visão geral e Relatórios) | `claude/fatia-6a-paineis` | [#8](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/8), base `claude/fatia-5a-operacao` até o #7 entrar (depois, `main`) |
 
 **Integração da 5a com a 4b (feita em 23/11/2026).** A 5a foi construída sobre `main` sem a 4b, e as duas fatias criaram migrações com os mesmos números. Em vez de renomear, as migrações da 5a foram apagadas num commit, `main` (com a 4b) foi mergeada na branch da 5a e as migrações foram **regeneradas** depois das da 4b (0035_operacao e 0036_operacao_rls), com o SQL custom de RLS, índices parciais e CHECKs colado sem mudança. Motivo: o `drizzle-kit migrate` registra no banco só o `created_at` da última migração aplicada e **pula as entradas do journal mais antigas que ela**, então uma migração renumerada mas com data antiga nunca rodaria num banco que já tem a 4b. Quem tinha banco local da 5a antiga precisa de `npx supabase db reset && npm run db:migrate`.
