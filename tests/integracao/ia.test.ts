@@ -79,7 +79,7 @@ const pedido: PedidoIA = {
 describe("adaptador Claude (SDK com fetch falso)", () => {
   it("pedido: modelo, beta de fallback, fallbacks default, effort, max_tokens; sem thinking, temperatura nem prefill", async () => {
     const { f, chamadas } = apiFalsa();
-    const r = await provedorClaude(CFG, { fetch: f, maxRetries: 0 }).responder(pedido);
+    const r = await provedorClaude(CFG, { fetch: f }).responder(pedido);
     expect(chamadas).toHaveLength(1);
     const c = chamadas[0];
     expect(new URL(c.url).pathname).toBe("/v1/messages");
@@ -102,7 +102,7 @@ describe("adaptador Claude (SDK com fetch falso)", () => {
   it("esforço médio, max_tokens e ferramentas com tool_choice auto", async () => {
     const { f, chamadas } = apiFalsa();
     const ferramenta = { name: "buscar", description: "Busca", input_schema: { type: "object" as const, properties: {} }, strict: true };
-    await provedorClaude(CFG, { fetch: f, maxRetries: 0 }).responder({ ...pedido, esforco: "medium", maxTokens: 300, ferramentas: [ferramenta] });
+    await provedorClaude(CFG, { fetch: f }).responder({ ...pedido, esforco: "medium", maxTokens: 300, ferramentas: [ferramenta] });
     expect(chamadas[0].body).toMatchObject({ output_config: { effort: "medium" }, max_tokens: 300, tools: [ferramenta], tool_choice: { type: "auto" } });
   });
 
@@ -111,13 +111,13 @@ describe("adaptador Claude (SDK com fetch falso)", () => {
     expect(configIA()).toEqual({ apiKey: CHAVE, modelo: "claude-opus-5-5" });
     vi.stubEnv("IA_MODELO", "claude-sonnet-5-5");
     const { f, chamadas } = apiFalsa();
-    await provedorClaude(configIA()!, { fetch: f, maxRetries: 0 }).responder(pedido);
+    await provedorClaude(configIA()!, { fetch: f }).responder(pedido);
     expect(chamadas[0].body.model).toBe("claude-sonnet-5-5");
   });
 
   it("recusa: parada refusal e nenhum texto", async () => {
     const { f } = apiFalsa(mensagem({ stop_reason: "refusal", content: [{ type: "text", text: "parcial" }] }));
-    const r = await provedorClaude(CFG, { fetch: f, maxRetries: 0 }).responder(pedido);
+    const r = await provedorClaude(CFG, { fetch: f }).responder(pedido);
     expect(r).toMatchObject({ parada: "refusal", texto: "" });
   });
 
@@ -131,7 +131,7 @@ describe("adaptador Claude (SDK com fetch falso)", () => {
   ] as const)("HTTP %i vira %s; nem a mensagem nem o log têm o corpo ou a chave", async (status, classe) => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const { f } = apiFalsa(status);
-    const erro = await provedorClaude(CFG, { fetch: f, maxRetries: 0 })
+    const erro = await provedorClaude(CFG, { fetch: f })
       .responder(pedido)
       .catch((e: unknown) => e);
     expect(erro).toBeInstanceOf(ErroIntegracao);
@@ -141,10 +141,35 @@ describe("adaptador Claude (SDK com fetch falso)", () => {
     expect(JSON.stringify(log.mock.calls)).not.toContain("inválida");
   });
 
+  it("429 com retry-after longo: sem nova tentativa, volta logo como limite", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    let n = 0;
+    const f = (async () => {
+      n++;
+      return Response.json({ type: "error", error: { type: "rate_limit_error", message: "x" } }, { status: 429, headers: { "retry-after": "120" } });
+    }) as typeof fetch;
+    const inicio = Date.now();
+    await expect(provedorClaude(CFG, { fetch: f }).responder(pedido)).rejects.toMatchObject({ classe: "limite", status: 429 });
+    expect(n).toBe(1);
+    expect(Date.now() - inicio).toBeLessThan(2000);
+  });
+
+  it("prazo total estourado: o pedido é abortado e vira rede", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // Fetch que só termina quando o sinal aborta (como um servidor que não responde).
+    const f = ((_: unknown, init?: RequestInit) =>
+      new Promise<Response>((_ok, falha) => {
+        init?.signal?.addEventListener("abort", () => falha(init.signal?.reason ?? new DOMException("abortado", "AbortError")));
+      })) as typeof fetch;
+    const inicio = Date.now();
+    await expect(provedorClaude(CFG, { fetch: f, prazoMs: 50 }).responder(pedido)).rejects.toMatchObject({ classe: "rede", status: null });
+    expect(Date.now() - inicio).toBeLessThan(2000);
+  });
+
   it("falha de rede vira rede, sem status", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const { f } = apiFalsa("rede");
-    await expect(provedorClaude(CFG, { fetch: f, maxRetries: 0 }).responder(pedido)).rejects.toMatchObject({ classe: "rede", status: null });
+    await expect(provedorClaude(CFG, { fetch: f }).responder(pedido)).rejects.toMatchObject({ classe: "rede", status: null });
   });
 });
 
@@ -286,7 +311,10 @@ describe("reescreverTexto", () => {
       erro: "A IA não respondeu a este pedido",
     });
     provedorFalso({ texto: "   " });
-    expect(await comSessao(op.id, () => reescreverTexto({ texto: "Dica.", finalidade: "dica", idioma: "italiano" }))).toMatchObject({ ok: false });
+    expect(await comSessao(op.id, () => reescreverTexto({ texto: "Dica.", finalidade: "dica", idioma: "italiano" }))).toEqual({
+      ok: false,
+      erro: "A IA não respondeu a este pedido",
+    });
   });
 
   it("sugestão maior que o campo (dica: 1000) é recusada", async () => {

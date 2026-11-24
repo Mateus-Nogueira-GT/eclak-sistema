@@ -45,50 +45,56 @@ export interface ProvedorIA {
 export const BETA_FALLBACK = "server-side-fallback-2026-07-01";
 export const MAX_TOKENS_IA = 4000;
 /**
- * Uma chamada com pensamento pode passar bem dos 15 s das outras integrações: 60 s por tentativa e uma repetição
- * (o SDK repete só 408/409/429/5xx e falha de conexão), no máximo uns 2 min de espera para quem clicou.
+ * Chamada interativa (alguém espera na tela). O modelo sempre pensa, então os 15 s das outras integrações não bastam:
+ * 60 s por pedido, nenhuma nova tentativa (um 429 com `retry-after` longo não segura a tela) e prazo total de 90 s
+ * (`AbortSignal.timeout`, que cobre também a leitura da resposta). Ou seja, ninguém espera mais de 90 s; estourado o
+ * prazo, o erro é `rede`.
  */
 export const TIMEOUT_IA_MS = 60_000;
-export const REPETICOES_IA = 1;
+export const PRAZO_IA_MS = 90_000;
 
 function classeDoErro(e: unknown): ErroIntegracao {
   if (e instanceof ErroIntegracao) return e;
   // Antes de APIError: a falha de conexão (e o timeout) é um APIError sem status.
   if (e instanceof Anthropic.APIConnectionError) return new ErroIntegracao("rede", null);
+  // Prazo total estourado (o sinal de `AbortSignal.timeout` abortou o pedido): também é `rede`.
+  if (e instanceof Anthropic.APIUserAbortError) return new ErroIntegracao("rede", null);
   if (e instanceof Anthropic.APIError && typeof e.status === "number") return new ErroIntegracao(classificarStatus(e.status), e.status);
   return new ErroIntegracao("servidor", null);
 }
 
 /** Adaptador do Claude. `fetch` injetável (testes e "Testar conexão"). */
-export function provedorClaude(
-  cfg: ConfigIA,
-  opcoes: { fetch?: Buscar; maxRetries?: number; timeoutMs?: number } = {},
-): ProvedorIA {
+export function provedorClaude(cfg: ConfigIA, opcoes: { fetch?: Buscar; timeoutMs?: number; prazoMs?: number } = {}): ProvedorIA {
   return {
     modelo: cfg.modelo,
     async responder(p) {
       const cliente = new Anthropic({
         apiKey: cfg.apiKey,
-        // Só a chave da configuração: nada de token, perfil ou credencial que o SDK acharia no ambiente.
+        // Com `apiKey` passado aqui, o SDK já ignora as credenciais do ambiente; `authToken: null` só deixa isso
+        // explícito. `ANTHROPIC_BASE_URL` e `ANTHROPIC_CUSTOM_HEADERS` do ambiente continuam valendo (a configuração
+        // não tem base URL própria; o teste no navegador usa isso para apontar a um servidor falso local).
         authToken: null,
         fetch: opcoes.fetch,
-        maxRetries: opcoes.maxRetries ?? REPETICOES_IA,
+        maxRetries: 0,
         timeout: opcoes.timeoutMs ?? TIMEOUT_IA_MS,
       });
       let r: Anthropic.Beta.BetaMessage;
       try {
         // Sem `thinking` (no Opus 5.5 ele está sempre ligado; desligar dá 400), sem temperatura e sem prefill: a
         // profundidade vem de `effort`. `fallbacks: "default"` refaz no servidor um pedido recusado por política.
-        r = await cliente.beta.messages.create({
-          model: cfg.modelo,
-          max_tokens: p.maxTokens ?? MAX_TOKENS_IA,
-          betas: [BETA_FALLBACK],
-          fallbacks: "default",
-          output_config: { effort: p.esforco },
-          system: p.sistema,
-          messages: p.mensagens,
-          ...(p.ferramentas?.length ? { tools: p.ferramentas, tool_choice: { type: "auto" as const } } : {}),
-        });
+        r = await cliente.beta.messages.create(
+          {
+            model: cfg.modelo,
+            max_tokens: p.maxTokens ?? MAX_TOKENS_IA,
+            betas: [BETA_FALLBACK],
+            fallbacks: "default",
+            output_config: { effort: p.esforco },
+            system: p.sistema,
+            messages: p.mensagens,
+            ...(p.ferramentas?.length ? { tools: p.ferramentas, tool_choice: { type: "auto" as const } } : {}),
+          },
+          { signal: AbortSignal.timeout(opcoes.prazoMs ?? PRAZO_IA_MS) },
+        );
       } catch (e) {
         const erro = classeDoErro(e);
         // Só a classe e o status (a mensagem do SDK pode ecoar o corpo da resposta).
@@ -126,7 +132,7 @@ export function provedorIA(): ProvedorIA | null {
 /** "Testar conexão": um pedido mínimo; qualquer resposta 200 conta como funcionando (o texto não importa). */
 export async function testarIA(cfg: ConfigIA, buscar: Buscar): Promise<{ ok: true } | { ok: false; classe: ErroIntegracao["classe"] }> {
   try {
-    await provedorClaude(cfg, { fetch: buscar, maxRetries: 0 }).responder({
+    await provedorClaude(cfg, { fetch: buscar }).responder({
       sistema: "Responda apenas: ok",
       mensagens: [{ role: "user", content: "Teste de conexão." }],
       esforco: "low",

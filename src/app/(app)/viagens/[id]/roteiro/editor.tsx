@@ -625,12 +625,13 @@ function EditorDia({
 
       <div className="mt-4 border-l-[3px] border-terracota bg-fundo px-4 py-3">
         <p className="text-[11px] font-bold uppercase tracking-[0.06em] text-texto">DICA ECLAK{dica.tema.trim() ? ` · ${dica.tema.trim().toUpperCase()}` : ""}</p>
-        <div className="mt-2 grid gap-2 sm:grid-cols-[200px_minmax(0,1fr)]">
+        <div className="mt-2 grid items-start gap-2 sm:grid-cols-[200px_minmax(0,1fr)]">
           <input aria-label="Tema da dica" placeholder="Tema" maxLength={40} value={dica.tema} onChange={(e) => { const tema = e.target.value; onChange((d) => ({ ...d, dica: { tema, texto: d.dica?.texto ?? "" } })); }} className={inputPequeno} />
           <ComReescrita
             {...ia}
             texto={dica.texto}
             finalidade="dica"
+            abaixo
             onUsar={(texto) => onChange((d) => ({ ...d, dica: { tema: d.dica?.tema ?? "", texto } }))}
           >
             <textarea aria-label="Texto da dica" placeholder="Texto da dica" rows={2} maxLength={1000} value={dica.texto} onChange={(e) => { const texto = e.target.value; onChange((d) => ({ ...d, dica: { tema: d.dica?.tema ?? "", texto } })); }} className={inputPequeno} />

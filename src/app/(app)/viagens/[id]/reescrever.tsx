@@ -12,8 +12,9 @@ type Finalidade = "abertura" | "dica" | "porque" | "daily";
 const TEM_MARCADOR = new RegExp(Object.values(MARCADORES).map((m) => m.replace(/[[\]]/g, "\\$&")).join("|"));
 
 /**
- * Campo com "Reescrever com IA" logo abaixo (só quando a IA está ligada). A sugestão aparece ao lado do campo, com
- * "Usar este texto" (só preenche o campo: a pessoa ainda salva) e "Descartar". Nada é gravado aqui.
+ * Campo com "Reescrever com IA" logo abaixo (só quando a IA está ligada). A sugestão aparece ao lado do campo (ou
+ * logo abaixo, com `abaixo`, para campo estreito como a DICA ECLAK), com "Usar este texto" (só preenche o campo: a
+ * pessoa ainda salva) e "Descartar". Nada é gravado aqui.
  */
 export function ComReescrita({
   ligada,
@@ -22,6 +23,7 @@ export function ComReescrita({
   idioma,
   roteiroId,
   onUsar,
+  abaixo = false,
   children,
 }: {
   ligada: boolean;
@@ -30,6 +32,7 @@ export function ComReescrita({
   idioma: Idioma;
   roteiroId: string;
   onUsar: (texto: string) => void;
+  abaixo?: boolean;
   children: ReactNode;
 }) {
   const [pendente, iniciar] = useTransition();
@@ -48,7 +51,7 @@ export function ComReescrita({
   }
 
   return (
-    <div className={cx("min-w-0", sugestao !== null && "grid items-start gap-3 lg:grid-cols-2")}>
+    <div className={cx("min-w-0", sugestao !== null && "grid items-start gap-3", sugestao !== null && !abaixo && "lg:grid-cols-2")}>
       <div className="min-w-0">
         {children}
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
