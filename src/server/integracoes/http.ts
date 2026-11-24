@@ -2,7 +2,9 @@ import "server-only";
 import { TIMEOUT_MS, classificarStatus, type ClasseErro, type MotivoEspera } from "@/domain/integracoes";
 
 // Chamada HTTP das integrações: `fetch` injetável (os testes passam um falso), timeout e erro classificado. O corpo
-// de uma resposta de erro nunca é lido nem guardado (pode ecoar o token); só a classe e o status saem daqui.
+// de uma resposta de erro é descartado sem leitura (pode ecoar o token). Única exceção: com `limite403`, o corpo de
+// um 403 é lido só para extrair o motivo (`reason`/`status`, limite de uso ou não); o resto é descartado na hora e
+// nada do corpo é guardado, logado ou posto na mensagem. Só a classe e o status saem daqui.
 
 export type Buscar = typeof fetch;
 

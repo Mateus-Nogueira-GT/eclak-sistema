@@ -271,7 +271,8 @@ async function gravarEspera(envio: EnvioTomado, motivo: MotivoEspera, agora: Dat
       tabela: "integracao_envios",
       registroId: l.id,
       acao: "alterar",
-      antes: { situacao: "enviando", tentativas: envio.tentativas },
+      // A tomada contou esta tentativa e a espera a devolveu: o registro mostra as que o envio tinha antes dela.
+      antes: { situacao: "enviando", tentativas: l.tentativas },
       depois: { ...situacaoAuditada(l), proximaEm: proxima },
     });
     return true;

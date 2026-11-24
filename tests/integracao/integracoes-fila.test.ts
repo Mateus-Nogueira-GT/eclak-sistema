@@ -232,6 +232,9 @@ describe("processarFila", () => {
     const aud = await db.select().from(auditoria).where(eq(auditoria.registroId, e.id));
     expect(aud).toHaveLength(1);
     expect(aud[0]).toMatchObject({ usuarioId: null, acao: "alterar" });
+    // A espera não gasta tentativa: antes e depois mostram as 2 que o envio já tinha (não as 3 contadas na tomada).
+    expect(aud[0].antes).toEqual({ situacao: "enviando", tentativas: 2 });
+    expect(aud[0].depois).toMatchObject({ situacao: "pendente", tentativas: 2 });
   });
 
   it("processador que não devolve nada mantém o resultado", async () => {
