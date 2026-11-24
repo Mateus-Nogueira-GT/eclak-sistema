@@ -13,7 +13,7 @@ import { db } from "@/server/db/client";
 import { auditoria, clientes, integracaoEnvios, viagens } from "@/server/db/schema";
 import { processarDepois, processarFila } from "@/server/integracoes/fila";
 import { ErroIntegracao } from "@/server/integracoes/http";
-import { clienteDrive, LIMITE_UPLOAD_BYTES } from "@/server/integracoes/drive";
+import { clienteDrive, LIMITE_UPLOAD_BYTES, processarDrive } from "@/server/integracoes/drive";
 import { esquecerTokensGoogle } from "@/server/integracoes/google";
 import { criarPastasNoDrive } from "@/server/actions/integracoes";
 import { salvarCliente } from "@/server/actions/clientes";
@@ -306,8 +306,37 @@ describe("processar a pasta", () => {
       resultado: { pastaId: "id2", link: "https://drive.google.com/drive/folders/id2", publicaId: "id3", internaId: "id4" },
     });
     // Nem o token nem a chave no banco.
-    expect(JSON.stringify(e)).not.toContain(TOKEN);
-    expect(JSON.stringify(await db.select().from(auditoria))).not.toContain(TOKEN);
+    const aud = JSON.stringify(await db.select().from(auditoria));
+    for (const x of [JSON.stringify(e), aud]) {
+      expect(x).not.toContain(TOKEN);
+      expect(x).not.toContain("PRIVATE KEY");
+    }
+  });
+
+  it("grava o resultado depois de cada pasta criada (inclusive a última)", async () => {
+    const g = googleFalso();
+    const gravados: unknown[] = [];
+    const r = await processarDrive(
+      {
+        id: "e1",
+        integracao: "drive",
+        tipo: "pasta_viagem",
+        viagemId: null,
+        chave: "pasta:x",
+        payload: { viagemId: "x", nome: "ECL-0001_X" },
+        tentativas: 1,
+        resultado: null,
+        tomadoEm: agora,
+      },
+      { buscar: g.buscar, agora, gravarResultado: async (x) => void gravados.push(x) },
+    );
+    const final = { pastaId: "id2", link: "https://drive.google.com/drive/folders/id2", publicaId: "id3", internaId: "id4" };
+    expect(r).toEqual(final);
+    expect(gravados).toEqual([
+      { pastaId: "id2", link: "https://drive.google.com/drive/folders/id2" },
+      { pastaId: "id2", link: "https://drive.google.com/drive/folders/id2", publicaId: "id3" },
+      final,
+    ]);
   });
 
   it("falha depois da pasta-mãe: a retomada não cria outra pasta-mãe", async () => {

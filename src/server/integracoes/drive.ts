@@ -171,6 +171,8 @@ async function pastaDaViagem(cliente: ClienteDrive, cfg: ConfigDrive, envio: Env
   }
   if (!feito.internaId) {
     feito = { ...feito, internaId: (await cliente.criarPasta(SUBPASTA_INTERNA, pastaId)).id };
+    // Também a última: se a gravação do sucesso falhar, a retomada não cria outra "Uso interno".
+    await deps.gravarResultado(feito);
   }
   return {
     pastaId,
