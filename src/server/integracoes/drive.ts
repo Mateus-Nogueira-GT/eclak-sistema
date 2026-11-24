@@ -6,8 +6,8 @@ import { SUBPASTA_INTERNA, SUBPASTA_PUBLICA } from "@/domain/drive";
 import { configDrive, type ConfigDrive } from "./config";
 // Só tipos: `fila.ts` importa o processador daqui (sem ciclo de valores).
 import type { DepsProcessador, EnvioTomado, Processador } from "./fila";
-import { tokenGoogle } from "./google";
-import { chamar, ErroIntegracao, type Buscar } from "./http";
+import { descartarTokenGoogle, tokenGoogle } from "./google";
+import { chamar, ErroIntegracao, type Buscar, type Motivo403 } from "./http";
 
 // Google Drive: cliente REST v3 (token Bearer da conta de serviço, só no cabeçalho) e o processador da fila. Conta de
 // serviço não tem cota própria: tudo é criado dentro da pasta raiz, que fica num drive compartilhado
@@ -33,6 +33,10 @@ const literalQ = (s: string) => `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'"
 /** Tipo MIME simples (`tipo/subtipo`): nada de quebra de linha nem parâmetro no cabeçalho da parte. */
 const MIME_VALIDO = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/;
 
+/** O Drive manda o limite de chamadas como 403 com estes motivos (doc do Google: "Resolve errors"). */
+const MOTIVOS_LIMITE = new Set(["rateLimitExceeded", "userRateLimitExceeded"]);
+const ehLimiteDoDrive = (m: Motivo403) => (m.reason !== null && MOTIVOS_LIMITE.has(m.reason)) || m.status === "RESOURCE_EXHAUSTED";
+
 export type ArquivoDrive = { id: string; nome: string; mime: string; link: string | null };
 
 export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
@@ -44,8 +48,12 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
     const r = await chamar(buscar, url, {
       ...init,
       headers: { ...(init.headers as Record<string, string>), Authorization: await autorizacao(), Accept: "application/json" },
+      limite403: ehLimiteDoDrive,
     });
-    if (!r.ok) throw new ErroIntegracao(r.classe, r.status);
+    if (!r.ok) {
+      if (r.status === 401) descartarTokenGoogle(cfg.email);
+      throw new ErroIntegracao(r.classe, r.status);
+    }
     if (typeof r.json !== "object" || r.json === null) throw new ErroIntegracao("servidor", r.status);
     return { json: r.json as Json, status: r.status };
   }

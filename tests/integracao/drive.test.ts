@@ -248,6 +248,97 @@ describe("clienteDrive", () => {
   });
 });
 
+describe("drive: limite e token revogado", () => {
+  it("401 numa chamada do Drive descarta o token guardado: a próxima chamada pede outro", async () => {
+    let primeira = true;
+    const g = googleFalso((c) => {
+      if (!ehToken(c) && primeira) {
+        primeira = false;
+        return 401;
+      }
+      return null;
+    });
+    const cli = clienteDrive(CFG, g.buscar);
+    await expect(cli.criarPasta("a", "p")).rejects.toMatchObject({ classe: "autenticacao", status: 401 });
+    expect(await cli.criarPasta("b", "p")).toMatchObject({ id: expect.any(String) });
+    expect(g.chamadas.filter(ehToken)).toHaveLength(2);
+  });
+
+  it("403 de outro erro não descarta o token", async () => {
+    let primeira = true;
+    const g = googleFalso((c) => {
+      if (!ehToken(c) && primeira) {
+        primeira = false;
+        return 403;
+      }
+      return null;
+    });
+    const cli = clienteDrive(CFG, g.buscar);
+    await expect(cli.criarPasta("a", "p")).rejects.toMatchObject({ classe: "autenticacao", status: 403 });
+    await cli.criarPasta("b", "p");
+    expect(g.chamadas.filter(ehToken)).toHaveLength(1);
+  });
+
+  it("403 de limite do Drive (rateLimitExceeded, userRateLimitExceeded) é limite; 403 comum continua autenticação", async () => {
+    const corpo403 = (reason: string, status = "PERMISSION_DENIED") =>
+      JSON.stringify({ error: { code: 403, message: `quota ${TOKEN}`, status, errors: [{ domain: "usageLimits", reason, message: "x" }] } });
+    const com = (texto: string) => {
+      const chamadas: string[] = [];
+      const buscar = (async (url: string | URL | Request) => {
+        chamadas.push(String(url));
+        if (String(url) === "https://oauth2.googleapis.com/token") return Response.json({ access_token: TOKEN, expires_in: 3600 });
+        return new Response(texto, { status: 403, headers: { "Content-Type": "application/json" } });
+      }) as typeof fetch;
+      return buscar;
+    };
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const reason of ["rateLimitExceeded", "userRateLimitExceeded"]) {
+      esquecerTokensGoogle();
+      const e = await clienteDrive(CFG, com(corpo403(reason))).criarPasta("a", "p").catch((x) => x);
+      expect(e).toBeInstanceOf(ErroIntegracao);
+      expect(e).toMatchObject({ classe: "limite", status: 403 });
+      expect(String(e.message)).not.toContain(TOKEN);
+      expect(String(e.message)).not.toContain(reason);
+    }
+    esquecerTokensGoogle();
+    expect(await clienteDrive(CFG, com(corpo403("RESOURCE_EXHAUSTED", "RESOURCE_EXHAUSTED"))).criarPasta("a", "p").catch((x) => x)).toMatchObject({
+      classe: "limite",
+    });
+    esquecerTokensGoogle();
+    expect(await clienteDrive(CFG, com(corpo403("insufficientFilePermissions"))).criarPasta("a", "p").catch((x) => x)).toMatchObject({
+      classe: "autenticacao",
+      status: 403,
+    });
+    esquecerTokensGoogle();
+    expect(await clienteDrive(CFG, com("não é json")).criarPasta("a", "p").catch((x) => x)).toMatchObject({ classe: "autenticacao", status: 403 });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(TOKEN);
+  });
+
+  it("403 de limite no token não vira limite (só nas chamadas do Drive)", async () => {
+    const buscar = (async () =>
+      new Response(JSON.stringify({ error: { errors: [{ reason: "rateLimitExceeded" }] } }), { status: 403 })) as typeof fetch;
+    expect(await clienteDrive(CFG, buscar).criarPasta("a", "p").catch((x) => x)).toMatchObject({ classe: "autenticacao", status: 403 });
+  });
+
+  it("limite 403 no processador: pendente para tentar de novo (não falhou)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = await vendida();
+    let primeira = true;
+    const buscar = (async (url: string | URL | Request) => {
+      if (String(url) === "https://oauth2.googleapis.com/token") return Response.json({ access_token: TOKEN, expires_in: 3600 });
+      if (primeira) {
+        primeira = false;
+        return new Response(JSON.stringify({ error: { errors: [{ reason: "userRateLimitExceeded" }] } }), { status: 403 });
+      }
+      return Response.json({ id: "idx", webViewLink: "https://drive.google.com/drive/folders/idx" });
+    }) as typeof fetch;
+    await processarFila({ agora, buscar });
+    const e = await envioDe(`pasta:${f.viagemId}`);
+    expect(e).toMatchObject({ situacao: "pendente", ultimoErro: { classe: "limite", status: 403 } });
+    expect(JSON.stringify(e)).not.toContain("userRateLimitExceeded");
+  });
+});
+
 describe("fechar venda", () => {
   it("Drive ligado: um envio pasta:<viagem> com o nome da pasta (código do cliente); sem valor nem CPF; agenda", async () => {
     const f = await vendida();
@@ -258,14 +349,15 @@ describe("fechar venda", () => {
     const codigo = await codigoClienteDa(f.viagemId);
     expect(codigo).toMatch(/^ECL-\d{4}$/);
     expect(e.payload).toEqual({ viagemId: f.viagemId, nome: `${codigo}_SOUZA_ITALIA_20270814-20270901` });
-    const json = JSON.stringify(e.payload);
-    expect(json).not.toContain("R$");
-    expect(json).not.toContain("529.982.247-25");
-    expect(json).not.toContain("52998224725");
-    expect(json).not.toMatch(/\d{11}/);
-    expect(json).not.toMatch(/3\.?106|8\.?000|1\.000|500,00/);
+    // As regras de documento e valor olham só o nome (o viagemId, um UUID aleatório, poderia ter 11 dígitos seguidos).
+    const nome = (e.payload as { nome: string }).nome;
+    expect(nome).not.toContain("R$");
+    expect(nome).not.toContain("529.982.247-25");
+    expect(nome).not.toContain("52998224725");
+    expect(nome).not.toMatch(/\d{11}/);
+    expect(nome).not.toMatch(/3\.?106|8\.?000|1\.000|500,00/);
     // A raiz vem da configuração na hora de processar, não do payload.
-    expect(json).not.toContain(RAIZ);
+    expect(JSON.stringify(e.payload)).not.toContain(RAIZ);
     expect(processarDepois).toHaveBeenCalledTimes(1);
   });
 

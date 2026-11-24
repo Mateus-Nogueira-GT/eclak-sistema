@@ -44,6 +44,11 @@ export function esquecerTokensGoogle(): void {
   tokens.clear();
 }
 
+/** Token recusado pelo serviço (401: revogado ou expirado antes da hora): o próximo pedido busca outro. */
+export function descartarTokenGoogle(email: string): void {
+  tokens.delete(email);
+}
+
 /** Token de acesso (Bearer) da conta de serviço, reaproveitado até 60 s antes de expirar. */
 export async function tokenGoogle(cfg: Pick<ConfigDrive, "email" | "chave">, buscar: Buscar, agora: Date = new Date()): Promise<string> {
   const guardado = tokens.get(cfg.email);

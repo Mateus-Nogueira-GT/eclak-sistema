@@ -8,13 +8,14 @@ export const SUBPASTA_INTERNA = "Uso interno";
 
 export const chavePasta = (viagemId: string) => `pasta:${viagemId}`;
 
-/** Maiúsculas, sem acento, sem espaço e sem pontuação: só letras A–Z e dígitos. */
+/** Maiúsculas, sem acento, sem espaço e sem pontuação: só letras A–Z e dígitos; nada sobrando vira "X". */
 function parte(t: string): string {
-  return t
+  const p = t
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
+  return p || "X";
 }
 
 const data = (iso: string) => iso.slice(0, 10).replace(/-/g, "");

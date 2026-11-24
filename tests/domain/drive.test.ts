@@ -36,6 +36,15 @@ describe("nomeDaPasta", () => {
     ).toBe("ECL-0003_DAVILA_COSTAAMALFITANACAPRIPOSITANO_20270501-20270510");
   });
 
+  it("parte que fica vazia vira X (o nome nunca tem __)", () => {
+    expect(nomeDaPasta({ codigoCliente: "ECL-0004", titular: "Øster", destino: "東京", inicio: "2027-05-01", fim: "2027-05-10" })).toBe(
+      "ECL-0004_STER_X_20270501-20270510",
+    );
+    expect(nomeDaPasta({ codigoCliente: "ECL-0005", titular: "", destino: "—", inicio: "2027-05-01", fim: "2027-05-10" })).toBe(
+      "ECL-0005_X_X_20270501-20270510",
+    );
+  });
+
   it("chave e subpastas", () => {
     expect(chavePasta("v1")).toBe("pasta:v1");
     expect(SUBPASTA_PUBLICA).toBe("Público");

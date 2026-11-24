@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { hojeEmCuiaba } from "@/domain/clientes";
+import { chavePasta } from "@/domain/drive";
 import {
   ordenarTarefas,
   prazoEfetivo,
@@ -36,7 +37,6 @@ import { formatarCodigoViagem, noites } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { chavePasta } from "@/domain/drive";
 import {
   clientes,
   dailies,

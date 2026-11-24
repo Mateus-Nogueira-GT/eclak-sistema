@@ -31,12 +31,32 @@ export class EsperaIntegracao extends Error {
   }
 }
 
+/** Só o motivo de um 403 (o resto do corpo é descartado na hora, nunca logado nem guardado). */
+export type Motivo403 = { reason: string | null; status: string | null };
+
+function motivoDe(texto: string): Motivo403 {
+  try {
+    const erro = (JSON.parse(texto) as { error?: { status?: unknown; errors?: { reason?: unknown }[] } } | null)?.error;
+    const reason = Array.isArray(erro?.errors) ? erro.errors[0]?.reason : undefined;
+    return {
+      reason: typeof reason === "string" ? reason : null,
+      status: typeof erro?.status === "string" ? erro.status : null,
+    };
+  } catch {
+    return { reason: null, status: null };
+  }
+}
+
+/**
+ * `limite403`: para serviços que mandam o limite de chamadas como 403 (o Drive): lê só `error.errors[0].reason` e
+ * `error.status` do corpo do 403 e, se a função disser que é limite, classifica como `limite` (repete).
+ */
 export async function chamar(
   buscar: Buscar,
   url: string,
-  init: RequestInit & { timeoutMs?: number },
+  init: RequestInit & { timeoutMs?: number; limite403?: (m: Motivo403) => boolean },
 ): Promise<RespostaIntegracao> {
-  const { timeoutMs, ...resto } = init;
+  const { timeoutMs, limite403, ...resto } = init;
   const tempo = AbortSignal.timeout(timeoutMs ?? TIMEOUT_MS);
   const signal = resto.signal ? AbortSignal.any([resto.signal, tempo]) : tempo;
   let resposta: Response;
@@ -47,6 +67,16 @@ export async function chamar(
   }
   const status = resposta.status;
   if (!resposta.ok) {
+    if (status === 403 && limite403) {
+      let texto = "";
+      try {
+        texto = await resposta.text();
+      } catch {
+        // corpo ilegível: fica 403 comum
+      }
+      const limite = limite403(motivoDe(texto));
+      return { ok: false, classe: limite ? "limite" : classificarStatus(status), status };
+    }
     try {
       await resposta.body?.cancel();
     } catch {
