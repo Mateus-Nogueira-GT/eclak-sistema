@@ -30,6 +30,13 @@ describe("perfis", () => {
       expect(podeAcessar(p, "/viagensX")).toBe(false);
     }
   });
+  it("admin › integrações: só o diretor acessa", () => {
+    expect(podeAcessar("diretor", "/admin/integracoes")).toBe(true);
+    expect(podeAcessar("diretor", "/admin/integracoesX")).toBe(false);
+    for (const p of PERFIS_VALORES.filter((x) => x !== "diretor")) {
+      expect(podeAcessar(p, "/admin/integracoes")).toBe(false);
+    }
+  });
   it("aprovações: só o diretor acessa", () => {
     expect(podeAcessar("diretor", "/aprovacoes")).toBe(true);
     expect(podeAcessar("diretor", "/aprovacoes/x")).toBe(true);

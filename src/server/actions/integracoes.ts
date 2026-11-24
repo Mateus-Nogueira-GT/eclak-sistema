@@ -3,7 +3,7 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { chavePasta } from "@/domain/drive";
-import type { IntegracaoFila } from "@/domain/integracoes";
+import { INTEGRACOES, type Integracao, type IntegracaoFila } from "@/domain/integracoes";
 import { chaveRoteiro, chaveVenda } from "@/domain/trello";
 import { comPerfil, ehUuid } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
@@ -13,6 +13,7 @@ import { integracaoEnvios, roteiros, tarefas, viagens } from "@/server/db/schema
 import { estadoIntegracao } from "@/server/integracoes/config";
 import { agendarEnvios, eventoCartaoDaViagem, eventoChecklistDoRoteiro, eventoPastaDaViagem } from "@/server/integracoes/eventos";
 import { inserirEnvio, reenviarNaTransacao } from "@/server/integracoes/fila";
+import { TESTES_CONEXAO, type ResultadoTeste } from "@/server/integracoes/testes";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint). Só o Diretor.
 
@@ -24,6 +25,11 @@ const TRELLO_DESLIGADO: Falha = { ok: false, erro: "O Trello não está configur
 const JA_NO_TRELLO: Falha = { ok: false, erro: "Esta viagem já foi enviada ao Trello" };
 const DRIVE_DESLIGADO: Falha = { ok: false, erro: "O Google Drive não está configurado" };
 const JA_NO_DRIVE: Falha = { ok: false, erro: "As pastas desta viagem já foram criadas no Drive" };
+const DESCONHECIDA: Falha = { ok: false, erro: "Integração desconhecida" };
+const DESLIGADA: Falha = { ok: false, erro: "Integração desligada" };
+const SEM_TESTE: Falha = { ok: false, erro: "Esta integração não tem teste de conexão" };
+const ENVIO_NAO_ENCONTRADO: Falha = { ok: false, erro: "Envio não encontrado" };
+const NAO_REENVIA: Falha = { ok: false, erro: "Este envio não pode ser reenviado agora" };
 
 function erroDeBanco(mensagem: string, e: unknown): Error {
   const x = e as { code?: string; cause?: { code?: string } } | null;
@@ -138,5 +144,82 @@ export async function criarPastasNoDrive(viagemId: string): Promise<{ ok: true }
     revalidatePath(`/viagens/${viagemId}`);
     agendarEnvios();
     return r;
+  });
+}
+
+const ehIntegracao = (v: unknown): v is Integracao => typeof v === "string" && (INTEGRACOES as readonly string[]).includes(v);
+
+/**
+ * "Testar conexão" (Admin › Integrações): só com a integração ligada; uma chamada de leitura ao serviço, FORA de
+ * transação; depois audita `{ ok, classe }` (tabela `integracoes`, registro = nome da integração), sem segredo nem
+ * resposta do serviço. Teste que falhou também é `{ ok: true }` (o teste rodou); o resultado vem em `conexao`.
+ */
+export async function testarConexao(integracao: string): Promise<{ ok: true; conexao: ResultadoTeste } | Falha> {
+  return comPerfil(["diretor"], async (usuario) => {
+    if (!ehIntegracao(integracao)) return DESCONHECIDA;
+    if (!estadoIntegracao(integracao).configurada) return DESLIGADA;
+    const testar = TESTES_CONEXAO[integracao];
+    if (!testar) return SEM_TESTE;
+    let conexao: ResultadoTeste | null;
+    try {
+      conexao = await testar(fetch);
+    } catch {
+      // Os testadores não lançam; se lançar, é falha do serviço do ponto de vista da tela (sem a mensagem).
+      conexao = { ok: false, classe: "servidor" };
+    }
+    if (!conexao) return DESLIGADA;
+    const registro = conexao;
+    try {
+      await db.transaction((tx) =>
+        registrarAuditoria(tx, { usuarioId: usuario.id, tabela: "integracoes", registroId: integracao, acao: "criar", depois: registro }),
+      );
+    } catch (x) {
+      throw erroDeBanco("Erro ao registrar o teste de conexão", x);
+    }
+    revalidatePath("/admin/integracoes");
+    return { ok: true as const, conexao: registro };
+  });
+}
+
+/**
+ * Reenviar (Admin › Integrações): `falhou` ou `pendente` volta para agora com as tentativas zeradas (ver
+ * `reenviarNaTransacao`). Reenviar o cartão do Trello (`venda:`) reabre junto, na mesma transação, o checklist do
+ * roteiro da mesma viagem que falhou esperando por ele; o que está pendente ou enviado fica.
+ */
+export async function reenviarEnvio(envioId: string): Promise<{ ok: true } | Falha> {
+  return comPerfil(["diretor"], async (usuario) => {
+    if (!ehUuid(envioId)) return ENVIO_NAO_ENCONTRADO;
+    let r: { ok: true; viagemId: string | null } | Falha;
+    try {
+      r = await db.transaction(async (tx) => {
+        const [e] = await tx
+          .select({ integracao: integracaoEnvios.integracao, chave: integracaoEnvios.chave, viagemId: integracaoEnvios.viagemId })
+          .from(integracaoEnvios)
+          .where(eq(integracaoEnvios.id, envioId));
+        if (!e) return ENVIO_NAO_ENCONTRADO;
+        if (!(await reenviarNaTransacao(tx, envioId, usuario.id))) return NAO_REENVIA;
+        if (e.integracao === "trello" && e.viagemId && e.chave === chaveVenda(e.viagemId)) {
+          const [roteiro] = await tx
+            .select({ id: integracaoEnvios.id })
+            .from(integracaoEnvios)
+            .where(
+              and(
+                eq(integracaoEnvios.integracao, "trello"),
+                eq(integracaoEnvios.chave, chaveRoteiro(e.viagemId)),
+                eq(integracaoEnvios.situacao, "falhou"),
+              ),
+            );
+          if (roteiro) await reenviarNaTransacao(tx, roteiro.id, usuario.id);
+        }
+        return { ok: true as const, viagemId: e.viagemId };
+      });
+    } catch (x) {
+      throw erroDeBanco("Erro ao reenviar", x);
+    }
+    if (!r.ok) return r;
+    revalidatePath("/admin/integracoes");
+    if (r.viagemId) revalidatePath(`/viagens/${r.viagemId}`);
+    agendarEnvios();
+    return { ok: true as const };
   });
 }

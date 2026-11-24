@@ -54,9 +54,29 @@ export const ROTULO_MOTIVO_ESPERA: Record<MotivoEspera, string> = {
 };
 
 export const ROTULO_CLASSE_ERRO: Record<ClasseErro, string> = {
-  rede: "rede",
-  autenticacao: "autenticação",
-  limite: "limite de chamadas",
-  recusado: "recusado",
-  servidor: "servidor",
+  rede: "Sem conexão",
+  autenticacao: "Credencial recusada",
+  limite: "Limite de uso atingido",
+  recusado: "Pedido recusado",
+  servidor: "Erro no serviço",
 };
+
+/**
+ * Rótulo do `ultimo_erro` de um envio para a tela. O motivo de espera vem antes da classe (`aguardando` não é classe
+ * de erro). Forma desconhecida cai em "Erro no serviço"; sem erro, null.
+ */
+export function rotuloDoErro(e: { classe: string; status?: number | null; motivo?: string } | null | undefined): string | null {
+  if (!e) return null;
+  if (e.motivo && Object.hasOwn(ROTULO_MOTIVO_ESPERA, e.motivo)) return ROTULO_MOTIVO_ESPERA[e.motivo as MotivoEspera];
+  return Object.hasOwn(ROTULO_CLASSE_ERRO, e.classe) ? ROTULO_CLASSE_ERRO[e.classe as ClasseErro] : ROTULO_CLASSE_ERRO.servidor;
+}
+
+/** Link externo guardado no `resultado` (cartão, pasta): só `https:`; qualquer outra coisa vira null. */
+export function linkHttps(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  try {
+    return new URL(v).protocol === "https:" ? v : null;
+  } catch {
+    return null;
+  }
+}

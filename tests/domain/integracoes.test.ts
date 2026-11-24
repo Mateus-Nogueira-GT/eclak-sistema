@@ -8,6 +8,8 @@ import {
   classificarStatus,
   proximaTentativa,
   repete,
+  linkHttps,
+  rotuloDoErro,
 } from "@/domain/integracoes";
 import { VARIAVEIS, configDrive, configIA, configTrello, estadoIntegracao } from "@/server/integracoes/config";
 import { ErroIntegracao, chamar, type Buscar } from "@/server/integracoes/http";
@@ -218,5 +220,34 @@ describe("ErroIntegracao", () => {
     expect(e.status).toBe(503);
     expect(e.message).toBe("Falha na integração: servidor (HTTP 503)");
     expect(new ErroIntegracao("rede", null).message).toBe("Falha na integração: rede");
+  });
+});
+
+describe("rotuloDoErro", () => {
+  it("o motivo de espera vem antes da classe", () => {
+    expect(rotuloDoErro({ classe: "aguardando", status: null, motivo: "aguardando_cartao" })).toBe("Aguardando o cartão da venda");
+  });
+  it("cada classe tem rótulo em pt-BR", () => {
+    expect(rotuloDoErro({ classe: "rede", status: null })).toBe("Sem conexão");
+    expect(rotuloDoErro({ classe: "autenticacao", status: 401 })).toBe("Credencial recusada");
+    expect(rotuloDoErro({ classe: "limite", status: 429 })).toBe("Limite de uso atingido");
+    expect(rotuloDoErro({ classe: "recusado", status: 400 })).toBe("Pedido recusado");
+    expect(rotuloDoErro({ classe: "servidor", status: 503 })).toBe("Erro no serviço");
+  });
+  it("sem erro, ou com forma desconhecida, não inventa rótulo", () => {
+    expect(rotuloDoErro(null)).toBeNull();
+    expect(rotuloDoErro({ classe: "outra", status: null })).toBe("Erro no serviço");
+    expect(rotuloDoErro({ classe: "toString", status: null, motivo: "constructor" })).toBe("Erro no serviço");
+  });
+});
+
+describe("linkHttps", () => {
+  it("só https passa", () => {
+    expect(linkHttps("https://trello.com/c/x")).toBe("https://trello.com/c/x");
+    expect(linkHttps("http://trello.com/c/x")).toBeNull();
+    expect(linkHttps("javascript:alert(1)")).toBeNull();
+    expect(linkHttps("não é url")).toBeNull();
+    expect(linkHttps(42)).toBeNull();
+    expect(linkHttps(undefined)).toBeNull();
   });
 });

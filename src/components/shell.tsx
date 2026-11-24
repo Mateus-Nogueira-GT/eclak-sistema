@@ -53,6 +53,7 @@ const areas: { titulo: string; itens: Item[] }[] = [
     itens: [
       { href: "/admin/usuarios", label: "Usuários e acessos" },
       { href: "/admin/parametros", label: "Parâmetros" },
+      { href: "/admin/integracoes", label: "Integrações" },
     ],
   },
 ];
