@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  CABECALHOS,
   diferencaPp,
   intervaloAnterior,
   intervaloDeMeses,
@@ -160,15 +161,21 @@ describe("ordenarAvisos", () => {
 describe("paraCsv", () => {
   const csv = paraCsv(["Nome", "Valor"], [["A; B", 123456n], ['Diz "oi"', -1000n], ["x", null]]);
   it("BOM, CRLF, escape e decimal com vírgula", () => {
-    expect(csv.startsWith("﻿")).toBe(true);
+    expect(csv.startsWith("\uFEFF")).toBe(true);
     expect(csv).toContain("\r\n");
     expect(csv).toContain('"A; B";1234,56');
     expect(csv).toContain('"Diz ""oi""";-10,00');
     expect(csv).toContain("x;");
-    expect(csv.split("\r\n")[0]).toBe("﻿Nome;Valor");
+    expect(csv.split("\r\n")[0]).toBe("\uFEFFNome;Valor");
   });
   it("centavos negativos pequenos", () => {
     expect(paraCsv(["v"], [[-5n]])).toContain("-0,05");
+  });
+  it("texto que começa como fórmula ganha um espaço; número em texto não", () => {
+    const linhas = paraCsv(["a", "b", "c", "d", "e"], [["=SOMA(A1)", "+55 65", "-x", "@cmd", "=A1;B1"], ["-2,5", "-5,3%", "16,5%", "2,0", "Normal"]]).split("\r\n");
+    expect(linhas[1]).toBe(' =SOMA(A1); +55 65; -x; @cmd;" =A1;B1"');
+    expect(linhas[2]).toBe("-2,5;-5,3%;16,5%;2,0;Normal");
+    expect(paraCsv(["v"], [[-1000n]]).split("\r\n")[1]).toBe("-10,00");
   });
 });
 
@@ -231,8 +238,13 @@ describe("relatórios: período, arquivo e linhas do CSV", () => {
       { codigo: "ECL-1", cliente: "Souza", destino: "Itália", vendido: 5000n, planejadaPct: "19.000", realPct: "16.5", diferencaPp: "-2.5" },
       { codigo: "ECL-2", cliente: "Lima", destino: "Chile", vendido: 100n, planejadaPct: "20.0", realPct: null, diferencaPp: null },
     ]);
-    expect(r.cabecalho).toEqual(["Viagem", "Cliente", "Destino", "Valor vendido", "Planejada", "Real", "Diferença"]);
-    expect(r.linhas).toEqual([["ECL-1", "Souza", "Itália", 5000n, "19%", "16,5%", "-2,5 pontos"], ["ECL-2", "Lima", "Chile", 100n, "20%", "Sem cálculo", null]]);
+    expect(r.cabecalho).toEqual(["Viagem", "Cliente", "Destino", "Valor vendido", "Planejada", "Real", "Diferença (pontos)"]);
+    expect(r.linhas).toEqual([["ECL-1", "Souza", "Itália", 5000n, "19%", "16,5%", "-2,5"], ["ECL-2", "Lima", "Chile", 100n, "20%", "Sem cálculo", null]]);
+    // Positiva sem "+": número puro para o Excel.
+    const positiva = linhasCsv("margens", [{ codigo: "ECL-3", cliente: "Reis", destino: "Peru", vendido: 1n, planejadaPct: "10.0", realPct: "12.0", diferencaPp: "2.0" }]);
+    expect(positiva.linhas[0][6]).toBe("2,0");
+    // A tela continua com o cabeçalho "Diferença".
+    expect(CABECALHOS.margens.at(-1)).toBe("Diferença");
   });
   it("vendas por consultor", () => {
     const r = linhasCsv("consultores", {

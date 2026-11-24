@@ -209,16 +209,21 @@ function reaisCsv(c: bigint): string {
   return `${neg ? "-" : ""}${abs / 100n},${(abs % 100n).toString().padStart(2, "0")}`;
 }
 
+/** Número em texto ("-2,5", "16,5%"): o Excel lê como número, não como fórmula. */
+const NUMERO_CSV = /^-?\d+(,\d+)?%?$/;
+
 function celulaCsv(v: string | bigint | null): string {
   if (v === null) return "";
   if (typeof v === "bigint") return reaisCsv(v);
-  return /[;"\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  // Texto que começa como fórmula (=, +, -, @) ganha um espaço na frente: o Excel não executa.
+  const t = /^[=+\-@]/.test(v) && !NUMERO_CSV.test(v) ? ` ${v}` : v;
+  return /[;"\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
 }
 
 /** CSV para Excel brasileiro: BOM, `;`, CRLF, decimal com vírgula e sem milhar. */
 export function paraCsv(cabecalho: string[], linhas: (string | bigint | null)[][]): string {
   const todas = [cabecalho, ...linhas].map((l) => l.map(celulaCsv).join(";"));
-  return "﻿" + todas.join("\r\n");
+  return "\uFEFF" + todas.join("\r\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +314,8 @@ export function linhasCsv<R extends Relatorio>(rel: R, dados: DadosRelatorios[R]
     }
     case "margens":
       return {
-        cabecalho,
+        // Na planilha a diferença é um número (em pontos), sem "+" nem "pontos", para o Excel somar.
+        cabecalho: cabecalho.map((c) => (c === "Diferença" ? "Diferença (pontos)" : c)),
         linhas: (d as DadosRelatorios["margens"]).map((l) => [
           l.codigo,
           l.cliente,
@@ -317,7 +323,7 @@ export function linhasCsv<R extends Relatorio>(rel: R, dados: DadosRelatorios[R]
           l.vendido,
           formatarPercentual(l.planejadaPct),
           l.realPct === null ? SEM_CALCULO : formatarPercentual(l.realPct),
-          l.diferencaPp === null ? null : ppBr(l.diferencaPp),
+          l.diferencaPp === null ? null : l.diferencaPp.replace(".", ","),
         ]),
       };
     case "consultores": {

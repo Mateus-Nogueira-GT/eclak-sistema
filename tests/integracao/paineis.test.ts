@@ -467,7 +467,7 @@ describe("planilha dos relatórios (CSV)", () => {
     const bytes = new Uint8Array(await resposta.arrayBuffer());
     expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
     const texto = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
-    expect(texto.startsWith("﻿Viagem;Cliente;Destino;Valor vendido;Planejada;Real;Diferença\r\n")).toBe(true);
+    expect(texto.startsWith("\uFEFFViagem;Cliente;Destino;Valor vendido;Planejada;Real;Diferença (pontos)\r\n")).toBe(true);
     expect(texto).toContain("Itália");
 
     const dre = await comSessao(a.fin.id, () => GET(url("rel=dre&de=2027-01&ate=2027-03")));
