@@ -54,7 +54,12 @@ export function descartarTokenGoogle(email: string): void {
 }
 
 /** Token de acesso (Bearer) da conta de serviço, reaproveitado até 60 s antes de expirar. */
-export async function tokenGoogle(cfg: Pick<ConfigDrive, "email" | "chave">, buscar: Buscar, agora: Date = new Date()): Promise<string> {
+export async function tokenGoogle(
+  cfg: Pick<ConfigDrive, "email" | "chave">,
+  buscar: Buscar,
+  agora: Date = new Date(),
+  opcoes: { timeoutMs?: number; prazoAte?: number } = {},
+): Promise<string> {
   const guardado = tokens.get(cfg.email);
   if (guardado && agora.getTime() < guardado.expiraEm - MARGEM_S * 1000) return guardado.token;
   const corpo = new URLSearchParams({ grant_type: GRANT_JWT, assertion: jwtGoogle(cfg, agora) }).toString();
@@ -62,6 +67,8 @@ export async function tokenGoogle(cfg: Pick<ConfigDrive, "email" | "chave">, bus
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body: corpo,
+    timeoutMs: opcoes.timeoutMs,
+    prazoAte: opcoes.prazoAte,
   });
   // No endpoint de token, 400 e 401 são credencial recusada (`invalid_grant`, `invalid_client`: chave revogada,
   // conta apagada, relógio errado): `autenticacao`, não `recusado`. Os dois vão direto a `falhou` (repetir não resolve).

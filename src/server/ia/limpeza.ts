@@ -6,6 +6,8 @@ import { removerObjeto } from "@/server/storage";
 
 // Limpeza periódica do agente do chat (chamada pelo cron `/api/cron/integracoes` depois da fila):
 // marca propostas pendentes vencidas como `expirada` e remove anexos vencidos do bucket e da tabela.
+// Só apaga a linha do banco quando o Storage confirma a exclusão do objeto (inclusive de anexos já usados,
+// cobrindo eventual falha na exclusão após o upload).
 export async function limparChat(agora: Date = new Date()): Promise<{ expiradas: number; anexosRemovidos: number }> {
   const expiradas = await db
     .update(chatAcoes)
@@ -14,24 +16,18 @@ export async function limparChat(agora: Date = new Date()): Promise<{ expiradas:
     .returning({ id: chatAcoes.id });
 
   const vencidos = await db
-    .select({ id: chatAnexos.id, caminho: chatAnexos.caminho, usadoEm: chatAnexos.usadoEm })
+    .select({ id: chatAnexos.id, caminho: chatAnexos.caminho })
     .from(chatAnexos)
     .where(lte(chatAnexos.expiraEm, agora));
 
+  const removidosIds: string[] = [];
   for (const a of vencidos) {
-    // Anexos já usados tiveram o objeto removido no upload; remove do bucket os que venceram sem uso.
-    if (!a.usadoEm) await removerObjeto(a.caminho);
+    const rem = await removerObjeto(a.caminho);
+    if (rem.ok) removidosIds.push(a.id);
   }
-  if (vencidos.length > 0) {
-    await db
-      .delete(chatAnexos)
-      .where(
-        inArray(
-          chatAnexos.id,
-          vencidos.map((a) => a.id),
-        ),
-      );
+  if (removidosIds.length > 0) {
+    await db.delete(chatAnexos).where(inArray(chatAnexos.id, removidosIds));
   }
 
-  return { expiradas: expiradas.length, anexosRemovidos: vencidos.length };
+  return { expiradas: expiradas.length, anexosRemovidos: removidosIds.length };
 }

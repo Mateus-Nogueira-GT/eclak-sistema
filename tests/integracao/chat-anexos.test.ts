@@ -16,7 +16,8 @@ import { definirBuscarDoChatParaTestes } from "@/server/ia/ferramentas";
 import { limparChat } from "@/server/ia/limpeza";
 import { esquecerTokensGoogle, GOOGLE_TOKEN_URL } from "@/server/integracoes/google";
 import { definirProvedorIAParaTestes, type PedidoIA, type ProvedorIA, type RespostaIA } from "@/server/integracoes/ia";
-import { BUCKET_ANEXOS } from "@/server/storage";
+import { BUCKET_ANEXOS, removerObjeto } from "@/server/storage";
+import * as supabaseMod from "@/server/supabase";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
 import { vendida, type Fixture } from "../helpers/venda";
 
@@ -233,12 +234,182 @@ describe("conversar com anexos e drive_enviar_arquivo", () => {
     const p2 = await comSessao(f.u.id, () => conversar([{ de: "eu", texto: "Tenta de novo" }], [rAnexo.id]));
     if (!p2.ok) throw new Error(p2.erro);
     const ok2 = await comSessao(f.u.id, () => confirmarAcaoChat(p2.propostas[0].id));
-    expect(ok2).toMatchObject({ ok: true, link: "https://drive.google.com/file/d/drive-file-1/view" });
+    expect(ok2).toMatchObject({
+      ok: true,
+      link: "https://drive.google.com/file/d/drive-file-1/view",
+      anexoConsumidoId: rAnexo.id,
+    });
     expect(uploads).toHaveLength(1);
     expect(uploads[0].toString("utf8")).toContain("CONTEUDO-SECRETO-BINARIO-999");
     expect((await db.select().from(chatAnexos).where(eq(chatAnexos.id, rAnexo.id)))[0].usadoEm).not.toBeNull();
     const { data: depoisBucket } = await admin().storage.from(BUCKET_ANEXOS).download(anexoRow.caminho);
     expect(depoisBucket).toBeNull();
+  });
+
+  it("duas propostas para o mesmo anexo confirmadas em paralelo executam apenas um upload (reserva atômica) e devolvem anexoConsumidoId mesmo com nome alterado", async () => {
+    const rAnexo = await comSessao(f.u.id, () => anexarNoChat(formArquivo(PDF, "voucher.pdf")));
+    if (!rAnexo.ok) throw new Error(rAnexo.erro);
+    const [anexoRow] = await db.select().from(chatAnexos).where(eq(chatAnexos.id, rAnexo.id));
+    subidos.push(anexoRow.caminho);
+
+    const uploads: Buffer[] = [];
+    const arvore: Record<string, Record<string, unknown>> = {
+      raiz: { id: "raiz", name: "Raiz", mimeType: "application/vnd.google-apps.folder", parents: [] },
+      "pasta-v1": { id: "pasta-v1", name: "ECL-0001_SOUZA", mimeType: "application/vnd.google-apps.folder", parents: ["raiz"] },
+      "pub-1": { id: "pub-1", name: "Público", mimeType: "application/vnd.google-apps.folder", parents: ["pasta-v1"] },
+    };
+    const buscarDrive = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = new URL(String(url));
+      if (u.href === GOOGLE_TOKEN_URL) return Response.json({ access_token: "tok", expires_in: 3600 });
+      if (init?.method === "POST" && u.pathname === "/upload/drive/v3/files") {
+        await new Promise((r) => setTimeout(r, 80));
+        uploads.push(Buffer.from(init.body as Uint8Array));
+        return Response.json({ id: "drive-file-par", webViewLink: "https://drive.google.com/file/d/drive-file-par/view" });
+      }
+      const m = /^\/drive\/v3\/files\/([^/]+)$/.exec(u.pathname);
+      if (m && arvore[m[1]]) return Response.json(arvore[m[1]]);
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+    definirBuscarDoChatParaTestes(buscarDrive);
+
+    // Duas propostas distintas para o mesmo anexo (com nome renomeado diferente do arquivo original).
+    provedorFalso([
+      {
+        parada: "tool_use",
+        conteudo: [
+          usoDe("u1", "drive_enviar_arquivo", { viagem: codigo, anexo: rAnexo.id, destino: "publico", nome: "Voucher Roma A.pdf" }),
+          usoDe("u2", "drive_enviar_arquivo", { viagem: codigo, anexo: rAnexo.id, destino: "publico", nome: "Voucher Roma B.pdf" }),
+        ],
+      },
+      { parada: "end_turn", texto: "Duas propostas.", conteudo: [textoDe("Duas propostas.")] },
+    ]);
+    const resp = await comSessao(f.u.id, () => conversar([{ de: "eu", texto: "Guarda o voucher" }], [rAnexo.id]));
+    expect(resp.ok).toBe(true);
+    if (!resp.ok) throw new Error(resp.erro);
+    expect(resp.propostas).toHaveLength(2);
+
+    const [a, b] = await comSessao(f.u.id, () =>
+      Promise.all([confirmarAcaoChat(resp.propostas[0].id), confirmarAcaoChat(resp.propostas[1].id)]),
+    );
+    expect([a.ok, b.ok].sort()).toEqual([false, true]);
+    const sucesso = a.ok ? a : b;
+    const falha = a.ok ? b : a;
+    expect(sucesso.ok && sucesso.anexoConsumidoId).toBe(rAnexo.id);
+    expect(!falha.ok && falha.erro).toBe("O arquivo anexado expirou ou já foi usado.");
+    expect(uploads).toHaveLength(1);
+  });
+});
+
+describe("falhas no Storage preservam caminho para nova tentativa", () => {
+  function interceptarFalhaRemove(deveFalhar: () => boolean) {
+    const real = admin();
+    vi.spyOn(supabaseMod, "supabaseAdmin").mockImplementation(() => {
+      const storageProxy = new Proxy(real.storage, {
+        get(target, prop, receiver) {
+          if (prop === "from") {
+            return (bucketName: string) => {
+              const b = target.from(bucketName);
+              return new Proxy(b, {
+                get(bt, bp, br) {
+                  if (bp === "remove") {
+                    return async (paths: string[]) => {
+                      if (deveFalhar()) {
+                        return { data: null, error: { name: "StorageApiError", message: "falha simulada", statusCode: "503" } };
+                      }
+                      return bt.remove(paths);
+                    };
+                  }
+                  const val = Reflect.get(bt, bp, br);
+                  return typeof val === "function" ? val.bind(bt) : val;
+                },
+              });
+            };
+          }
+          const val = Reflect.get(target, prop, receiver);
+          return typeof val === "function" ? val.bind(target) : val;
+        },
+      });
+      return new Proxy(real, {
+        get(target, prop, receiver) {
+          if (prop === "storage") return storageProxy;
+          const val = Reflect.get(target, prop, receiver);
+          return typeof val === "function" ? val.bind(target) : val;
+        },
+      });
+    });
+  }
+
+  it("removerObjeto devolve ok: false em erro do Storage; cron preserva linha de anexo vencido e de anexo usado com falha até confirmar exclusão", async () => {
+    let falharRemove = true;
+    interceptarFalhaRemove(() => falharRemove);
+
+    // 1) Anexo vencido sem uso: falha no remove -> linha permanece; na nova tentativa -> remove objeto e apaga linha.
+    const rVencido = await comSessao(f.u.id, () => anexarNoChat(formArquivo(PDF, "vencido.pdf")));
+    if (!rVencido.ok) throw new Error(rVencido.erro);
+    const [rowVencido] = await db.select().from(chatAnexos).where(eq(chatAnexos.id, rVencido.id));
+    subidos.push(rowVencido.caminho);
+    await db.update(chatAnexos).set({ expiraEm: new Date(Date.now() - 60_000) }).where(eq(chatAnexos.id, rVencido.id));
+
+    expect(await removerObjeto(rowVencido.caminho)).toEqual({ ok: false });
+    expect(await limparChat()).toEqual({ expiradas: 0, anexosRemovidos: 0 });
+    expect(await db.select().from(chatAnexos).where(eq(chatAnexos.id, rVencido.id))).toHaveLength(1);
+
+    // 2) Anexo usado cujo remove após o upload falhou: linha permanece e o cron tenta remover mesmo estando usado.
+    const rUsado = await comSessao(f.u.id, () => anexarNoChat(formArquivo(PDF, "usado.pdf")));
+    if (!rUsado.ok) throw new Error(rUsado.erro);
+    const [rowUsado] = await db.select().from(chatAnexos).where(eq(chatAnexos.id, rUsado.id));
+    subidos.push(rowUsado.caminho);
+
+    const arvore: Record<string, Record<string, unknown>> = {
+      raiz: { id: "raiz", name: "Raiz", mimeType: "application/vnd.google-apps.folder", parents: [] },
+      "pasta-v1": { id: "pasta-v1", name: "ECL-0001_SOUZA", mimeType: "application/vnd.google-apps.folder", parents: ["raiz"] },
+      "pub-1": { id: "pub-1", name: "Público", mimeType: "application/vnd.google-apps.folder", parents: ["pasta-v1"] },
+    };
+    definirBuscarDoChatParaTestes((async (url: string | URL | Request, init?: RequestInit) => {
+      const u = new URL(String(url));
+      if (u.href === GOOGLE_TOKEN_URL) return Response.json({ access_token: "tok", expires_in: 3600 });
+      if (init?.method === "POST" && u.pathname === "/upload/drive/v3/files") {
+        return Response.json({ id: "drive-file-u", webViewLink: "https://drive.google.com/file/d/drive-file-u/view" });
+      }
+      const m = /^\/drive\/v3\/files\/([^/]+)$/.exec(u.pathname);
+      if (m && arvore[m[1]]) return Response.json(arvore[m[1]]);
+      return new Response(null, { status: 404 });
+    }) as typeof fetch);
+
+    provedorFalso([
+      {
+        parada: "tool_use",
+        conteudo: [usoDe("u1", "drive_enviar_arquivo", { viagem: codigo, anexo: rUsado.id, destino: "publico", nome: "" })],
+      },
+      { parada: "end_turn", texto: "Confirme.", conteudo: [textoDe("Confirme.")] },
+    ]);
+    const prop = await comSessao(f.u.id, () => conversar([{ de: "eu", texto: "Enviar" }], [rUsado.id]));
+    if (!prop.ok) throw new Error(prop.erro);
+    const conf = await comSessao(f.u.id, () => confirmarAcaoChat(prop.propostas[0].id));
+    expect(conf).toMatchObject({ ok: true, anexoConsumidoId: rUsado.id });
+
+    // Ainda falhando no Storage: os dois caminhos seguem preservados no banco.
+    expect(await limparChat()).toEqual({ expiradas: 0, anexosRemovidos: 0 });
+    expect(await db.select().from(chatAnexos).where(eq(chatAnexos.id, rUsado.id))).toHaveLength(1);
+    const { data: aindaNoBucket } = await admin().storage.from(BUCKET_ANEXOS).download(rowUsado.caminho);
+    expect(aindaNoBucket).not.toBeNull();
+
+    // 3) removerAnexoDoChat também preserva linha vencida quando Storage falha, mas libera a vaga para o usuário.
+    const rRem = await comSessao(f.u.id, () => anexarNoChat(formArquivo(PDF, "remover.pdf")));
+    if (!rRem.ok) throw new Error(rRem.erro);
+    const [rowRem] = await db.select().from(chatAnexos).where(eq(chatAnexos.id, rRem.id));
+    subidos.push(rowRem.caminho);
+    expect(await comSessao(f.u.id, () => removerAnexoDoChat(rRem.id))).toEqual({ ok: true });
+    expect(await db.select().from(chatAnexos).where(eq(chatAnexos.id, rRem.id))).toHaveLength(1);
+
+    // Storage se recupera: cron remove os 3 objetos do bucket e limpa as 3 linhas.
+    falharRemove = false;
+    expect(await limparChat()).toEqual({ expiradas: 0, anexosRemovidos: 3 });
+    expect(await db.select().from(chatAnexos)).toEqual([]);
+    for (const caminho of [rowVencido.caminho, rowUsado.caminho, rowRem.caminho]) {
+      const { data } = await admin().storage.from(BUCKET_ANEXOS).download(caminho);
+      expect(data).toBeNull();
+    }
   });
 });
 

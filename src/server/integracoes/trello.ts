@@ -56,7 +56,7 @@ type Json = Record<string, unknown>;
 
 const texto = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 
-export function clienteTrello(cfg: ConfigTrello, buscar: Buscar, opcoes: { timeoutMs?: number } = {}) {
+export function clienteTrello(cfg: ConfigTrello, buscar: Buscar, opcoes: { timeoutMs?: number; prazoAte?: number } = {}) {
   const autorizacao = autorizacaoTrello(cfg);
   const api = baseTrello();
 
@@ -65,6 +65,7 @@ export function clienteTrello(cfg: ConfigTrello, buscar: Buscar, opcoes: { timeo
       method: "GET",
       headers: { Authorization: autorizacao, Accept: "application/json" },
       timeoutMs: opcoes.timeoutMs,
+      prazoAte: opcoes.prazoAte,
     });
     if (!r.ok) throw new ErroIntegracao(r.classe, r.status);
     return { json: r.json, status: r.status };
@@ -76,6 +77,7 @@ export function clienteTrello(cfg: ConfigTrello, buscar: Buscar, opcoes: { timeo
       headers: { Authorization: autorizacao, Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(corpo),
       timeoutMs: opcoes.timeoutMs,
+      prazoAte: opcoes.prazoAte,
     });
     if (!r.ok) throw new ErroIntegracao(r.classe, r.status);
     if (typeof r.json !== "object" || r.json === null) throw new ErroIntegracao("servidor", r.status);
@@ -88,6 +90,7 @@ export function clienteTrello(cfg: ConfigTrello, buscar: Buscar, opcoes: { timeo
       headers: { Authorization: autorizacao, Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(corpo),
       timeoutMs: opcoes.timeoutMs,
+      prazoAte: opcoes.prazoAte,
     });
     if (!r.ok) throw new ErroIntegracao(r.classe, r.status);
   }
@@ -164,6 +167,7 @@ export function clienteTrello(cfg: ConfigTrello, buscar: Buscar, opcoes: { timeo
           method: "GET",
           headers: { Authorization: autorizacao, Accept: "application/json" },
           timeoutMs: opcoes.timeoutMs,
+          prazoAte: opcoes.prazoAte,
         },
       );
       if (!r.ok) {
@@ -267,6 +271,7 @@ export function clienteTrello(cfg: ConfigTrello, buscar: Buscar, opcoes: { timeo
         method: "GET",
         headers: { Authorization: autorizacao, Accept: "application/json" },
         timeoutMs: opcoes.timeoutMs,
+        prazoAte: opcoes.prazoAte,
       });
       if (!r.ok) return { ok: false, classe: r.classe };
       const nome = texto((r.json as Json | null)?.name);

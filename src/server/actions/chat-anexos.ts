@@ -90,15 +90,22 @@ export async function anexarNoChat(
 export async function removerAnexoDoChat(id: string): Promise<{ ok: true } | Falha> {
   return comPerfil([...PERFIS_ACAO_CHAT], async (u): Promise<{ ok: true } | Falha> => {
     if (typeof id !== "string" || !ehUuid(id)) return ANEXO_NAO_ENCONTRADO;
-    const removido = await db.transaction(async (tx) => {
+    const agora = new Date();
+    const marcado = await db.transaction(async (tx) => {
+      // Marca como usado e vencido atomicamente (libera vaga e impede envio ao Drive) preservando `caminho`
+      // caso a exclusão no Storage falhe, para o cron tentar novamente.
       const [linha] = await tx
-        .delete(chatAnexos)
+        .update(chatAnexos)
+        .set({ usadoEm: agora, expiraEm: agora })
         .where(and(eq(chatAnexos.id, id), eq(chatAnexos.usuarioId, u.id), isNull(chatAnexos.usadoEm)))
-        .returning({ caminho: chatAnexos.caminho });
+        .returning({ id: chatAnexos.id, caminho: chatAnexos.caminho });
       return linha ?? null;
     });
-    if (!removido) return ANEXO_NAO_ENCONTRADO;
-    await removerObjeto(removido.caminho);
+    if (!marcado) return ANEXO_NAO_ENCONTRADO;
+    const rem = await removerObjeto(marcado.caminho);
+    if (rem.ok) {
+      await db.delete(chatAnexos).where(eq(chatAnexos.id, marcado.id));
+    }
     return { ok: true };
   });
 }

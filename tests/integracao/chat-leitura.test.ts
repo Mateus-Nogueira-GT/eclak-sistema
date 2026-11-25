@@ -9,6 +9,7 @@ import { clientes, integracaoEnvios, pessoas, viagens } from "@/server/db/schema
 import { conversar } from "@/server/actions/chat";
 import { ERRO_DO_SERVICO } from "@/server/ia/erros-servico";
 import { definirBuscarDoChatParaTestes, ferramentasDoChat } from "@/server/ia/ferramentas";
+import { executarLeituraDrive } from "@/server/ia/ferramentas-drive";
 import { esquecerTokensGoogle, GOOGLE_TOKEN_URL } from "@/server/integracoes/google";
 import { definirProvedorIAParaTestes, type PedidoIA, type ProvedorIA, type RespostaIA } from "@/server/integracoes/ia";
 import { esquecerQuadrosTrello } from "@/server/integracoes/trello";
@@ -436,6 +437,105 @@ describe("ferramentas de leitura do Drive", () => {
     const rFora = resultado(pedidos[1], 4);
     expect(rFora.is_error).toBe(true);
     expect(rFora.content).toContain("Arquivo não encontrado");
+  });
+
+  it("drive_buscar consulta a segunda página quando a primeira só traz arquivo fora da raiz", async () => {
+    const arvore: Record<string, Record<string, unknown>> = {
+      raiz: { id: "raiz", name: "Raiz", mimeType: "application/vnd.google-apps.folder", parents: [] },
+      "pasta-v1": { id: "pasta-v1", name: "ECL-0001_SOUZA", mimeType: "application/vnd.google-apps.folder", parents: ["raiz"] },
+      "pub-1": { id: "pub-1", name: "Público", mimeType: "application/vnd.google-apps.folder", parents: ["pasta-v1"] },
+      "fora-pasta": { id: "fora-pasta", name: "Externo", mimeType: "application/vnd.google-apps.folder", parents: ["outra-raiz"] },
+      "arq-fora": {
+        id: "arq-fora",
+        name: "voucher-externo.pdf",
+        mimeType: "application/pdf",
+        parents: ["fora-pasta"],
+        webViewLink: "https://drive.google.com/file/d/arq-fora/view",
+      },
+      "pdf-pag2": {
+        id: "pdf-pag2",
+        name: "voucher-roma.pdf",
+        mimeType: "application/pdf",
+        parents: ["pub-1"],
+        webViewLink: "https://drive.google.com/file/d/pdf-pag2/view",
+      },
+    };
+    const paginasPedidas: (string | null)[] = [];
+    definirBuscarDoChatParaTestes((async (url: string | URL | Request) => {
+      const u = new URL(String(url));
+      if (u.href === GOOGLE_TOKEN_URL) return Response.json({ access_token: "tok", expires_in: 3600 });
+      if (u.pathname === "/drive/v3/files") {
+        const pt = u.searchParams.get("pageToken");
+        paginasPedidas.push(pt);
+        if (!pt) return Response.json({ nextPageToken: "pag-2", files: [arvore["arq-fora"]] });
+        if (pt === "pag-2") return Response.json({ files: [arvore["pdf-pag2"]] });
+      }
+      const mFile = /^\/drive\/v3\/files\/([^/]+)$/.exec(u.pathname);
+      if (mFile && arvore[mFile[1]]) return Response.json(arvore[mFile[1]]);
+      return new Response(null, { status: 404 });
+    }) as typeof fetch);
+
+    const pedidos = provedorFalso([
+      { parada: "tool_use", conteudo: [usoDe("b1", "drive_buscar", { texto: "voucher" })] },
+      { parada: "end_turn", texto: "Achei na página 2.", conteudo: [textoDe("Achei na página 2.")] },
+    ]);
+    await comSessao(f.u.id, () => conversar([{ de: "eu", texto: "Buscar voucher" }]));
+    expect(paginasPedidas).toEqual([null, "pag-2"]);
+    const d = JSON.parse(resultado(pedidos[1], 0).content);
+    expect(d.arquivos).toHaveLength(1);
+    expect(d.arquivos[0]).toMatchObject({
+      id: "pdf-pag2",
+      nome: "voucher-roma.pdf",
+      caminho: ["ECL-0001_SOUZA", "Público"],
+    });
+  });
+
+  it("ferramenta do Drive compartilha prazoAte absoluto entre múltiplas requisições e não ultrapassa o prazo", async () => {
+    const esperarComSignal = (ms: number, signal?: AbortSignal | null) =>
+      new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, ms);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(t);
+            reject(signal.reason ?? new Error("aborted"));
+          },
+          { once: true },
+        );
+      });
+
+    let chamadas = 0;
+    const buscarLento = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = new URL(String(url));
+      if (u.href === GOOGLE_TOKEN_URL) return Response.json({ access_token: "tok", expires_in: 3600 });
+      chamadas++;
+      // Cada requisição do Drive leva 800 ms; com prazo total de 1.150 ms, a 2ª chamada precisa abortar no prazo.
+      await esperarComSignal(800, init?.signal);
+      if (u.pathname === "/drive/v3/files") {
+        return Response.json({
+          files: [{ id: "pdf-1", name: "voucher.pdf", mimeType: "application/pdf", parents: ["pub-1"] }],
+        });
+      }
+      if (u.pathname === "/drive/v3/files/pub-1") {
+        return Response.json({ id: "pub-1", name: "Público", mimeType: "application/vnd.google-apps.folder", parents: ["pasta-v1"] });
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+
+    const inicio = Date.now();
+    const res = await executarLeituraDrive("drive_buscar", { texto: "voucher" }, {
+      usuario: { id: f.u.id, nome: "Teste", email: f.u.email, perfil: "consultor", filial: "Rondonópolis" },
+      conhecidos: { nascimentos: [], documentos: [] },
+      buscar: buscarLento,
+      prazoAte: inicio + 1150,
+    });
+    const duracao = Date.now() - inicio;
+    expect(chamadas).toBe(2);
+    expect(res).toEqual({
+      conteudo: "O tempo da resposta está no fim. Tente uma pergunta mais específica.",
+      erro: true,
+    });
+    expect(duracao).toBeLessThan(1500);
   });
 });
 

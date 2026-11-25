@@ -79,12 +79,13 @@ function itemDe(f: Json): ItemDrive | null {
 }
 
 const MAX_PAGINAS_LISTAGEM = 50;
+const MAX_PAGINAS_BUSCA = 10;
 
-export function clienteDrive(cfg: ConfigDrive, buscar: Buscar, opcoes: { timeoutMs?: number } = {}) {
+export function clienteDrive(cfg: ConfigDrive, buscar: Buscar, opcoes: { timeoutMs?: number; prazoAte?: number } = {}) {
   const { api, upload } = baseDrive();
 
   async function autorizacao(): Promise<string> {
-    return `Bearer ${await tokenGoogle(cfg, buscar)}`;
+    return `Bearer ${await tokenGoogle(cfg, buscar, new Date(), opcoes)}`;
   }
 
   async function pedir(url: string, init: RequestInit, jaRenovou = false): Promise<{ json: Json; status: number }> {
@@ -93,6 +94,7 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar, opcoes: { timeout
       headers: { ...(init.headers as Record<string, string>), Authorization: await autorizacao(), Accept: "application/json" },
       limite403: ehLimiteDoDrive,
       timeoutMs: opcoes.timeoutMs,
+      prazoAte: opcoes.prazoAte,
     });
     if (!r.ok) {
       if (r.status === 401) {
@@ -112,6 +114,7 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar, opcoes: { timeout
       maxBytes: LIMITE_UPLOAD_BYTES,
       limite403: ehLimiteDoDrive,
       timeoutMs: opcoes.timeoutMs,
+      prazoAte: opcoes.prazoAte,
     });
     if (!r.ok) {
       if (r.status === 401) {
@@ -121,6 +124,29 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar, opcoes: { timeout
       throw new ErroIntegracao(r.classe, r.status);
     }
     return { bytes: r.bytes, mime: r.mime };
+  }
+
+  async function buscarPagina(
+    termo: string,
+    pagina?: string | null,
+  ): Promise<{ itens: ItemDrive[]; proximaPagina: string | null }> {
+    const lit = literalQ(termo);
+    const q = new URLSearchParams({
+      q: `(fullText contains ${lit} or name contains ${lit}) and trashed = false`,
+      supportsAllDrives: "true",
+      includeItemsFromAllDrives: "true",
+      pageSize: "50",
+      fields: "nextPageToken,files(id,name,mimeType,parents,modifiedTime,size,webViewLink)",
+    });
+    if (pagina) q.set("pageToken", pagina);
+    const r = await pedir(`${api}/files?${q}`, { method: "GET" });
+    const files = Array.isArray(r.json.files) ? (r.json.files as Json[]) : [];
+    const itens: ItemDrive[] = [];
+    for (const f of files) {
+      const item = itemDe(f);
+      if (item) itens.push(item);
+    }
+    return { itens, proximaPagina: texto(r.json.nextPageToken) };
   }
 
   /** Resposta 2xx sem o `id` do que foi criado: conta como erro do serviço (tenta de novo). */
@@ -173,21 +199,19 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar, opcoes: { timeout
       return todos;
     },
 
-    async buscar(termo: string): Promise<ItemDrive[]> {
-      const lit = literalQ(termo);
-      const q = new URLSearchParams({
-        q: `(fullText contains ${lit} or name contains ${lit}) and trashed = false`,
-        supportsAllDrives: "true",
-        includeItemsFromAllDrives: "true",
-        pageSize: "50",
-        fields: "files(id,name,mimeType,parents,modifiedTime,size,webViewLink)",
-      });
-      const r = await pedir(`${api}/files?${q}`, { method: "GET" });
-      const files = Array.isArray(r.json.files) ? (r.json.files as Json[]) : [];
+    buscarPagina,
+
+    async buscar(termo: string, opcoesBusca: { maxPaginas?: number } = {}): Promise<ItemDrive[]> {
+      const limite = Math.max(1, Math.min(MAX_PAGINAS_LISTAGEM, opcoesBusca.maxPaginas ?? MAX_PAGINAS_BUSCA));
       const saida: ItemDrive[] = [];
-      for (const f of files) {
-        const item = itemDe(f);
-        if (item) saida.push(item);
+      const vistos = new Set<string>();
+      let pagina: string | null = null;
+      for (let i = 0; i < limite; i++) {
+        const { itens, proximaPagina } = await buscarPagina(termo, pagina);
+        saida.push(...itens);
+        if (!proximaPagina || vistos.has(proximaPagina)) break;
+        vistos.add(proximaPagina);
+        pagina = proximaPagina;
       }
       return saida;
     },

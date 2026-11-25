@@ -295,14 +295,8 @@ export function ChatIA({
       if (r.ok) {
         setEstados((prev) => ({ ...prev, [proposta.id]: { fase: "feita", texto: r.texto, link: r.link } }));
         setMsgs((m) => [...m, { de: "eu", texto: notaDeDecisao("confirmou", proposta.titulo, "feito"), oculto: true }]);
-        // Se foi envio de arquivo ao Drive, remove a etiqueta correspondente da fila local.
-        if (proposta.titulo === "Enviar arquivo ao Drive") {
-          const nomeLinha = proposta.linhas.find(([k]) => k === "Arquivo")?.[1];
-          setAnexos((lista) => {
-            if (lista.length <= 1) return [];
-            const idx = nomeLinha ? lista.findIndex((a) => a.nome === nomeLinha) : -1;
-            return idx >= 0 ? [...lista.slice(0, idx), ...lista.slice(idx + 1)] : lista;
-          });
+        if (r.anexoConsumidoId) {
+          setAnexos((lista) => lista.filter((a) => a.id !== r.anexoConsumidoId));
         }
       } else {
         const ehExpirada = r.erro === "Esta ação expirou. Peça de novo.";

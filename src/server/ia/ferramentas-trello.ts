@@ -2,7 +2,6 @@ import "server-only";
 import { z } from "zod";
 import { semAcento } from "@/domain/chat-acoes";
 import { protegerTexto } from "@/domain/ia-privacidade";
-import { TIMEOUT_MS } from "@/domain/integracoes";
 import { configTrello } from "@/server/integracoes/config";
 import { ErroIntegracao } from "@/server/integracoes/http";
 import type { FerramentaIA } from "@/server/integracoes/ia";
@@ -18,6 +17,7 @@ const MAX_CARTOES = 30;
 const MAX_DESCRICAO = 4000;
 const MAX_COMENTARIO = 1000;
 const CODIGO_VIAGEM_RE = /^ECL-\d+-\d+$/i;
+const MSG_TEMPO_FIM = "O tempo da resposta está no fim. Tente uma pergunta mais específica.";
 const LINK_VIAGEM_UUID_RE =
   /(?:Viagem no sistema:\s*)?(?:https?:\/\/[^\s]+)?\/viagens\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
@@ -167,11 +167,6 @@ export function ehLeituraTrello(nome: string): nome is keyof typeof ENTRADAS {
   return nome in ENTRADAS;
 }
 
-function timeoutDe(prazoAte: number): number | null {
-  const restante = prazoAte - Date.now();
-  return restante < 1000 ? null : Math.min(TIMEOUT_MS, restante);
-}
-
 export async function executarLeituraTrello(
   nome: keyof typeof ENTRADAS,
   entrada: unknown,
@@ -181,11 +176,10 @@ export async function executarLeituraTrello(
   if (!cfg) return { conteudo: `Ferramenta ${nome} não está disponível.`, erro: true };
   const v = ENTRADAS[nome].safeParse(entrada);
   if (!v.success) return { conteudo: `Entrada inválida para ${nome}.`, erro: true };
-  const timeoutMs = timeoutDe(ctx.prazoAte);
-  if (timeoutMs === null) return { conteudo: "O tempo da resposta está no fim. Tente uma pergunta mais específica.", erro: true };
+  if (ctx.prazoAte - Date.now() < 1000) return { conteudo: MSG_TEMPO_FIM, erro: true };
 
   const prot = (s: string) => protegerTexto(s, ctx.conhecidos);
-  const cli = clienteTrello(cfg, ctx.buscar, { timeoutMs });
+  const cli = clienteTrello(cfg, ctx.buscar, { prazoAte: ctx.prazoAte });
 
   try {
     if (nome === "trello_listas") {
@@ -278,7 +272,10 @@ export async function executarLeituraTrello(
       erro: false,
     };
   } catch (e) {
-    if (e instanceof ErroIntegracao) return { conteudo: ERRO_DO_SERVICO.trello[e.classe], erro: true };
+    if (e instanceof ErroIntegracao) {
+      if (e.classe === "rede" && Date.now() >= ctx.prazoAte - 50) return { conteudo: MSG_TEMPO_FIM, erro: true };
+      return { conteudo: ERRO_DO_SERVICO.trello[e.classe], erro: true };
+    }
     console.error("Erro na ferramenta do Trello", { ferramenta: nome, code: (e as { code?: string } | null)?.code });
     return { conteudo: ERRO_DO_SERVICO.trello.servidor, erro: true };
   }

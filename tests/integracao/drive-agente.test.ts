@@ -202,4 +202,66 @@ describe("clienteDrive: leitura e escrita do agente", () => {
     expect(mov.url.searchParams.get("addParents")).toBe("pasta-2");
     expect(mov.url.searchParams.get("removeParents")).toBe("pasta-1");
   });
+
+  it("buscar e buscarPagina paginam com nextPageToken e ignoram token repetido", async () => {
+    const d = driveFalso((c) => {
+      if (c.metodo === "GET" && c.url.pathname === "/drive/v3/files") {
+        const pt = c.url.searchParams.get("pageToken");
+        if (!pt) {
+          return Response.json({
+            nextPageToken: "pag-2",
+            files: [{ id: "fora-1", name: "voucher.pdf", mimeType: "application/pdf", parents: ["outra"] }],
+          });
+        }
+        if (pt === "pag-2") {
+          return Response.json({
+            nextPageToken: "pag-2",
+            files: [{ id: "valido-2", name: "voucher-roma.pdf", mimeType: "application/pdf", parents: ["pasta-1"] }],
+          });
+        }
+      }
+      return null;
+    });
+    const cli = clienteDrive(CFG, d.buscar);
+    const achados = await cli.buscar("voucher");
+    expect(achados.map((x) => x.id)).toEqual(["fora-1", "valido-2"]);
+    const chamadasBusca = d.drive();
+    expect(chamadasBusca).toHaveLength(2);
+    expect(chamadasBusca[0].url.searchParams.get("fields")).toContain("nextPageToken");
+    expect(chamadasBusca[1].url.searchParams.get("pageToken")).toBe("pag-2");
+  });
+
+  it("prazoAte absoluto compartilhado limita chamadas sequenciais sem ultrapassar o prazo total", async () => {
+    const buscarLento = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = new URL(String(url));
+      if (u.href === GOOGLE_TOKEN_URL) return Response.json({ access_token: TOKEN, expires_in: 3600 });
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, 120);
+        init?.signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(init.signal?.reason ?? new Error("aborted"));
+          },
+          { once: true },
+        );
+      });
+      return Response.json({
+        id: "f1",
+        name: "voucher.pdf",
+        mimeType: "application/pdf",
+        parents: ["pasta-1"],
+        trashed: false,
+      });
+    }) as typeof fetch;
+
+    const inicio = Date.now();
+    const cli = clienteDrive(CFG, buscarLento, { prazoAte: inicio + 190 });
+    // 1ª chamada (120 ms) cabe no prazo de 190 ms.
+    const primeiro = await cli.obter("f1");
+    expect(primeiro?.id).toBe("f1");
+    // 2ª chamada (precisaria de 120 ms, mas só restam ~70 ms) aborta no prazo compartilhado.
+    await expect(cli.obter("f1")).rejects.toThrow(/rede/);
+    expect(Date.now() - inicio).toBeLessThan(260);
+  });
 });

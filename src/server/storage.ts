@@ -21,10 +21,23 @@ export async function subirObjeto(caminho: string, bytes: Uint8Array, tipo: Tipo
   return { ok: true };
 }
 
-/** Remove o objeto (só para desfazer um envio cuja gravação falhou; anexo removido mantém o objeto). */
-export async function removerObjeto(caminho: string): Promise<void> {
-  const { error } = await bucket().remove([caminho]);
-  if (error) console.error("Falha ao remover o anexo do Storage", { code: (error as { statusCode?: string }).statusCode ?? error.name });
+/** Remove o objeto do bucket; devolve `{ ok: false }` se o Storage falhar para permitir nova tentativa. */
+export async function removerObjeto(caminho: string): Promise<{ ok: true } | { ok: false }> {
+  try {
+    const { error } = await bucket().remove([caminho]);
+    if (error) {
+      console.error("Falha ao remover o anexo do Storage", {
+        code: (error as { statusCode?: string }).statusCode ?? error.name,
+      });
+      return { ok: false };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("Falha ao remover o anexo do Storage", {
+      code: (e as { code?: string; name?: string } | null)?.code ?? (e as { name?: string } | null)?.name ?? "desconhecido",
+    });
+    return { ok: false };
+  }
 }
 
 /** URL assinada de download (60 s). */

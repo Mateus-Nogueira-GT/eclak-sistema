@@ -71,16 +71,30 @@ function motivoDe(texto: string): Motivo403 {
 }
 
 /**
+ * Timeout efetivo em ms para uma chamada: respeita `timeoutMs` (padrão `TIMEOUT_MS`) e o prazo absoluto
+ * compartilhado `prazoAte` (quando informado). Devolve `null` se o prazo absoluto já venceu.
+ */
+export function resolverTimeoutMs(opcoes: { timeoutMs?: number; prazoAte?: number }): number | null {
+  const base = opcoes.timeoutMs ?? TIMEOUT_MS;
+  if (opcoes.prazoAte === undefined) return base;
+  const restante = opcoes.prazoAte - Date.now();
+  if (restante <= 0) return null;
+  return Math.min(base, restante);
+}
+
+/**
  * `limite403`: para serviços que mandam o limite de chamadas como 403 (o Drive): lê só `error.errors[0].reason` e
  * `error.status` do corpo do 403 e, se a função disser que é limite, classifica como `limite` (repete).
  */
 export async function chamar(
   buscar: Buscar,
   url: string,
-  init: RequestInit & { timeoutMs?: number; limite403?: (m: Motivo403) => boolean },
+  init: RequestInit & { timeoutMs?: number; prazoAte?: number; limite403?: (m: Motivo403) => boolean },
 ): Promise<RespostaIntegracao> {
-  const { timeoutMs, limite403, ...resto } = init;
-  const tempo = AbortSignal.timeout(timeoutMs ?? TIMEOUT_MS);
+  const { timeoutMs, prazoAte, limite403, ...resto } = init;
+  const efetivo = resolverTimeoutMs({ timeoutMs, prazoAte });
+  if (efetivo === null) return { ok: false, classe: "rede", status: null };
+  const tempo = AbortSignal.timeout(efetivo);
   const signal = resto.signal ? AbortSignal.any([resto.signal, tempo]) : tempo;
   let resposta: Response;
   try {
@@ -129,10 +143,12 @@ export async function chamar(
 export async function baixar(
   buscar: Buscar,
   url: string,
-  init: RequestInit & { maxBytes: number; timeoutMs?: number; limite403?: (m: Motivo403) => boolean },
+  init: RequestInit & { maxBytes: number; timeoutMs?: number; prazoAte?: number; limite403?: (m: Motivo403) => boolean },
 ): Promise<RespostaBytes> {
-  const { maxBytes, timeoutMs, limite403, ...resto } = init;
-  const tempo = AbortSignal.timeout(timeoutMs ?? TIMEOUT_MS);
+  const { maxBytes, timeoutMs, prazoAte, limite403, ...resto } = init;
+  const efetivo = resolverTimeoutMs({ timeoutMs, prazoAte });
+  if (efetivo === null) return { ok: false, classe: "rede", status: null };
+  const tempo = AbortSignal.timeout(efetivo);
   const signal = resto.signal ? AbortSignal.any([resto.signal, tempo]) : tempo;
   let resposta: Response;
   try {

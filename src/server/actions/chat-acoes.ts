@@ -19,10 +19,15 @@ type Falha = { ok: false; erro: string };
 const NAO_ENCONTRADA: Falha = { ok: false, erro: "Ação não encontrada" };
 const EXPIRADA: Falha = { ok: false, erro: "Esta ação expirou. Peça de novo." };
 
+const msgDesconhecido = (servico: "trello" | "drive") => {
+  const onde = servico === "trello" ? "no Trello" : "no Drive";
+  return `Não sei se esta ação foi concluída. Confira ${onde} antes de pedir de novo.`;
+};
+
 /** Confirma e executa uma ação proposta pelo agente (só quem pediu pode confirmar). */
 export async function confirmarAcaoChat(
   id: string,
-): Promise<{ ok: true; texto: string; link: string | null } | Falha> {
+): Promise<{ ok: true; texto: string; link: string | null; anexoConsumidoId?: string } | Falha> {
   return comPerfil([...PERFIS_ACAO_CHAT], async (usuario) => {
     if (typeof id !== "string" || !ehUuid(id)) return NAO_ENCONTRADA;
 
@@ -62,12 +67,27 @@ export async function confirmarAcaoChat(
       const preso = atual.tomadoEm && agora.getTime() - atual.tomadoEm.getTime() > EXECUTANDO_PRESO_MIN * 60_000;
       if (preso) {
         const resPreso: ResultadoChatAcao = { classe: "desconhecido" };
-        await tx
+        const [marcado] = await tx
           .update(chatAcoes)
           .set({ situacao: "falhou", resultado: resPreso })
-          .where(and(eq(chatAcoes.id, atual.id), eq(chatAcoes.situacao, "executando"), eq(chatAcoes.tomadoEm, atual.tomadoEm!)));
-        const onde = servicoDaAcao(atual.tipo) === "trello" ? "no Trello" : "no Drive";
-        return { ok: false, erro: `Não sei se esta ação foi concluída. Confira ${onde} antes de pedir de novo.` };
+          .where(and(eq(chatAcoes.id, atual.id), eq(chatAcoes.situacao, "executando"), eq(chatAcoes.tomadoEm, atual.tomadoEm!)))
+          .returning({ id: chatAcoes.id });
+        if (marcado) {
+          const alvoPreso = nomesDoAlvo((atual.alvo ?? {}) as Record<string, unknown>);
+          await registrarAuditoria(tx, {
+            usuarioId: usuario.id,
+            tabela: "chat_acoes",
+            registroId: atual.id,
+            acao: "criar",
+            depois: {
+              tipo: atual.tipo,
+              viagem: alvoPreso.viagem ?? null,
+              alvo: alvoPreso,
+              resultado: resPreso,
+            },
+          });
+        }
+        return { ok: false, erro: msgDesconhecido(servicoDaAcao(atual.tipo)) };
       }
       return { ok: false, erro: "Esta ação está em execução." };
     });
@@ -79,12 +99,14 @@ export async function confirmarAcaoChat(
     const alvoNomes = nomesDoAlvo((acao.alvo ?? {}) as Record<string, unknown>);
     let situacaoFinal: "feita" | "falhou" = "feita";
     let resultado: ResultadoChatAcao = { link: null };
+    let anexoConsumidoId: string | undefined;
     let erroTexto: string | null = null;
 
     // Chamada externa SEMPRE fora de `db.transaction`.
     try {
       const r = await executarAcao(acao, buscarDoChat(), usuario.nome);
       resultado = { link: r.link };
+      anexoConsumidoId = r.anexoConsumidoId;
     } catch (e) {
       situacaoFinal = "falhou";
       if (e instanceof ErroIntegracao) {
@@ -100,7 +122,7 @@ export async function confirmarAcaoChat(
       }
     }
 
-    await db.transaction(async (tx) => {
+    const fechou = await db.transaction(async (tx) => {
       const [fechada] = await tx
         .update(chatAcoes)
         .set({ situacao: situacaoFinal, resultado })
@@ -112,7 +134,7 @@ export async function confirmarAcaoChat(
           ),
         )
         .returning({ id: chatAcoes.id });
-      if (!fechada) return;
+      if (!fechada) return false;
       await registrarAuditoria(tx, {
         usuarioId: usuario.id,
         tabela: "chat_acoes",
@@ -125,13 +147,21 @@ export async function confirmarAcaoChat(
           resultado,
         },
       });
+      return true;
     });
+
+    // Se o fencing perdeu (ex.: outra confirmação já encerrou como `desconhecido` após 2 min), nunca devolve `ok: true`
+    // sem resultado gravado e auditoria.
+    if (!fechou) {
+      return { ok: false, erro: msgDesconhecido(servico) };
+    }
 
     if (situacaoFinal === "feita") {
       return {
         ok: true,
         texto: resumoDaAcao(acao.tipo, alvoNomes),
         link: "link" in resultado ? resultado.link : null,
+        ...(anexoConsumidoId ? { anexoConsumidoId } : {}),
       };
     }
     return { ok: false, erro: erroTexto ?? ERRO_DO_SERVICO[servico].servidor };

@@ -1,7 +1,6 @@
 import "server-only";
 import { z } from "zod";
 import { protegerTexto } from "@/domain/ia-privacidade";
-import { TIMEOUT_MS } from "@/domain/integracoes";
 import { configDrive } from "@/server/integracoes/config";
 import { clienteDrive, LIMITE_UPLOAD_BYTES, MIME_PASTA, type ItemDrive } from "@/server/integracoes/drive";
 import { ErroIntegracao } from "@/server/integracoes/http";
@@ -16,8 +15,10 @@ import type { ContextoFerramenta, ResultadoExecucaoFerramenta } from "./ferramen
 
 const MAX_LISTAGEM = 100;
 const MAX_BUSCA = 20;
+const MAX_PAGINAS_BUSCA = 10;
 const MAX_TEXTO_ARQUIVO = 20_000;
 const CODIGO_VIAGEM_RE = /^ECL-\d+-\d+$/i;
+const MSG_TEMPO_FIM = "O tempo da resposta está no fim. Tente uma pergunta mais específica.";
 
 const MIME_EXPORT: Record<string, "text/plain" | "text/csv"> = {
   "application/vnd.google-apps.document": "text/plain",
@@ -145,11 +146,6 @@ export function ehLeituraDrive(nome: string): nome is keyof typeof ENTRADAS {
   return nome in ENTRADAS;
 }
 
-function timeoutDe(prazoAte: number): number | null {
-  const restante = prazoAte - Date.now();
-  return restante < 1000 ? null : Math.min(TIMEOUT_MS, restante);
-}
-
 function msgIlegivel(link: string | null): string {
   return link ? `Este arquivo não tem texto que eu consiga ler; o link é ${link}` : "Este arquivo não tem texto que eu consiga ler.";
 }
@@ -163,11 +159,10 @@ export async function executarLeituraDrive(
   if (!cfg) return { conteudo: `Ferramenta ${nome} não está disponível.`, erro: true };
   const v = ENTRADAS[nome].safeParse(entrada);
   if (!v.success) return { conteudo: `Entrada inválida para ${nome}.`, erro: true };
-  const timeoutMs = timeoutDe(ctx.prazoAte);
-  if (timeoutMs === null) return { conteudo: "O tempo da resposta está no fim. Tente uma pergunta mais específica.", erro: true };
+  if (ctx.prazoAte - Date.now() < 1000) return { conteudo: MSG_TEMPO_FIM, erro: true };
 
   const prot = (s: string) => protegerTexto(s, ctx.conhecidos);
-  const drive = clienteDrive(cfg, ctx.buscar, { timeoutMs });
+  const drive = clienteDrive(cfg, ctx.buscar, { prazoAte: ctx.prazoAte });
 
   try {
     if (nome === "drive_listar") {
@@ -216,22 +211,30 @@ export async function executarLeituraDrive(
 
     if (nome === "drive_buscar") {
       const { texto } = v.data as { texto: string };
-      const brutos = await drive.buscar(texto);
-      const cache = new Map<string, ItemDrive | null>(brutos.map((i) => [i.id, i]));
+      const cache = new Map<string, ItemDrive | null>();
+      const paginasVistas = new Set<string>();
       const dentro: { id: string; nome: string; mime: string; modificado: string | null; link: string | null; caminho: string[] }[] = [];
-      for (const item of brutos) {
-        if (item.mime === MIME_PASTA) continue;
-        const caminho = await caminhoAteARaiz(drive, item.id, cfg.pastaRaizId, cache);
-        if (caminho === null) continue;
-        dentro.push({
-          id: item.id,
-          nome: prot(item.nome),
-          mime: item.mime,
-          modificado: item.modificado,
-          link: item.link,
-          caminho: caminho.map(prot),
-        });
-        if (dentro.length >= MAX_BUSCA) break;
+      let pagina: string | null = null;
+      for (let p = 0; p < MAX_PAGINAS_BUSCA && dentro.length < MAX_BUSCA; p++) {
+        const { itens, proximaPagina } = await drive.buscarPagina(texto, pagina);
+        for (const i of itens) cache.set(i.id, i);
+        for (const item of itens) {
+          if (item.mime === MIME_PASTA) continue;
+          const caminho = await caminhoAteARaiz(drive, item.id, cfg.pastaRaizId, cache);
+          if (caminho === null) continue;
+          dentro.push({
+            id: item.id,
+            nome: prot(item.nome),
+            mime: item.mime,
+            modificado: item.modificado,
+            link: item.link,
+            caminho: caminho.map(prot),
+          });
+          if (dentro.length >= MAX_BUSCA) break;
+        }
+        if (!proximaPagina || paginasVistas.has(proximaPagina)) break;
+        paginasVistas.add(proximaPagina);
+        pagina = proximaPagina;
       }
       return {
         conteudo: JSON.stringify({ total: dentro.length, arquivos: dentro }),
@@ -295,7 +298,10 @@ export async function executarLeituraDrive(
       erro: false,
     };
   } catch (e) {
-    if (e instanceof ErroIntegracao) return { conteudo: ERRO_DO_SERVICO.drive[e.classe], erro: true };
+    if (e instanceof ErroIntegracao) {
+      if (e.classe === "rede" && Date.now() >= ctx.prazoAte - 50) return { conteudo: MSG_TEMPO_FIM, erro: true };
+      return { conteudo: ERRO_DO_SERVICO.drive[e.classe], erro: true };
+    }
     console.error("Erro na ferramenta do Drive", { ferramenta: nome, code: (e as { code?: string } | null)?.code });
     return { conteudo: ERRO_DO_SERVICO.drive.servidor, erro: true };
   }

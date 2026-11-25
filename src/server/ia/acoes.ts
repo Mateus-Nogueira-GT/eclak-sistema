@@ -15,7 +15,7 @@ import {
 } from "@/domain/chat-acoes";
 import { dataEmCuiaba } from "@/domain/clientes";
 import { protegerTexto } from "@/domain/ia-privacidade";
-import { linkHttps, TIMEOUT_MS } from "@/domain/integracoes";
+import { linkHttps } from "@/domain/integracoes";
 import { PERFIS_VALORES, type Perfil } from "@/domain/perfis";
 import { ehUuid } from "@/server/acesso";
 import { db } from "@/server/db/client";
@@ -38,6 +38,7 @@ export const PERFIS_ACAO_CHAT: readonly Perfil[] = [...PERFIS_VALORES];
 export const MSG_PROPOSTA_REGISTRADA = "Proposta registrada. Nada foi executado: a pessoa precisa confirmar na tela.";
 
 const CODIGO_VIAGEM_RE = /^ECL-\d+-\d+$/i;
+const MSG_TEMPO_FIM = "O tempo da resposta está no fim. Tente uma pergunta mais específica.";
 
 export function ehTipoAcaoChat(nome: string): nome is TipoAcaoChat {
   return (TIPOS_ACAO_CHAT as readonly string[]).includes(nome);
@@ -45,11 +46,6 @@ export function ehTipoAcaoChat(nome: string): nome is TipoAcaoChat {
 
 function formatarDataBr(iso: string): string {
   return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`;
-}
-
-function timeoutDe(prazoAte: number): number | null {
-  const restante = prazoAte - Date.now();
-  return restante < 1000 ? null : Math.min(TIMEOUT_MS, restante);
 }
 
 function ehPastaDoSistema(refs: RefsDaViagem, itemId: string): boolean {
@@ -121,8 +117,7 @@ export async function proporAcao(
   const v = ENTRADAS_ACAO[tipo].safeParse(entrada);
   if (!v.success) return { erro: `Entrada inválida para ${tipo}.` };
 
-  const timeoutMs = timeoutDe(ctx.prazoAte);
-  if (timeoutMs === null) return { erro: "O tempo da resposta está no fim. Tente uma pergunta mais específica." };
+  if (ctx.prazoAte - Date.now() < 1000) return { erro: MSG_TEMPO_FIM };
 
   const prot = (s: string) => protegerTexto(s, ctx.conhecidos);
   const ehTrello = tipo.startsWith("trello_");
@@ -135,7 +130,7 @@ export async function proporAcao(
     if (ehTrello) {
       const cfg = configTrello();
       if (!cfg) return { erro: "O Trello não está configurado." };
-      const trello = clienteTrello(cfg, ctx.buscar, { timeoutMs });
+      const trello = clienteTrello(cfg, ctx.buscar, { prazoAte: ctx.prazoAte });
 
       const resolverCartao = async (
         cartaoInput: string,
@@ -249,7 +244,7 @@ export async function proporAcao(
     } else {
       const cfg = configDrive();
       if (!cfg) return { erro: "O Google Drive não está configurado." };
-      const drive = clienteDrive(cfg, ctx.buscar, { timeoutMs });
+      const drive = clienteDrive(cfg, ctx.buscar, { prazoAte: ctx.prazoAte });
       const cache = new Map<string, ItemDrive | null>();
 
       if (tipo === "drive_enviar_arquivo") {
@@ -373,6 +368,7 @@ export async function proporAcao(
     };
   } catch (e) {
     if (e instanceof ErroIntegracao) {
+      if (e.classe === "rede" && Date.now() >= ctx.prazoAte - 50) return { erro: MSG_TEMPO_FIM };
       return { erro: ERRO_DO_SERVICO[ehTrello ? "trello" : "drive"][e.classe] };
     }
     console.error("Erro ao propor ação no chat", { tipo, code: (e as { code?: string } | null)?.code });
@@ -426,7 +422,7 @@ export async function executarAcao(
   acao: ChatAcao,
   buscar: Buscar,
   usuarioNome?: string,
-): Promise<{ link: string | null }> {
+): Promise<{ link: string | null; anexoConsumidoId?: string }> {
   const alvo = (acao.alvo ?? {}) as Record<string, unknown>;
   const dados = (acao.dados ?? {}) as Record<string, unknown>;
 
@@ -477,6 +473,10 @@ export async function executarAcao(
       }
       await trello.adicionarItem(checklistId, typeof dados.nome === "string" ? dados.nome : "");
     } else if (acao.tipo === "trello_mover_cartao") {
+      const deListaId = strCampo(alvo, "deListaId");
+      if (!deListaId || card.listaId !== deListaId) {
+        throw new ErroAlcance("O cartão mudou de lista desde a proposta. Peça de novo para confirmar a nova movimentação.");
+      }
       const listaId = strCampo(dados, "listaId") ?? strCampo(alvo, "listaId");
       const listas = await trello.listas();
       if (!listaId || !listas.some((l) => l.id === listaId)) {
@@ -529,14 +529,19 @@ export async function executarAcao(
 
   if (acao.tipo === "drive_mover") {
     const arquivoId = strCampo(dados, "arquivoId") ?? strCampo(alvo, "arquivoId");
+    const deIdEsperado = strCampo(dados, "deId") ?? strCampo(alvo, "deId");
     const paraId = strCampo(dados, "paraId") ?? strCampo(alvo, "paraId");
-    if (!arquivoId || !paraId || ehPastaDoSistema(refs, arquivoId)) {
+    if (!arquivoId || !deIdEsperado || !paraId || ehPastaDoSistema(refs, arquivoId)) {
       throw new ErroAlcance("Este item não pode ser movido.");
     }
     const item = await drive.obter(arquivoId);
     cache.set(arquivoId, item);
     if (!item || !(await descendeDe(drive, item.id, refs.pastaId, cache))) {
       throw new ErroAlcance("O arquivo não foi encontrado na pasta da viagem.");
+    }
+    const deIdAtual = item.pais[0];
+    if (!deIdAtual || deIdAtual !== deIdEsperado) {
+      throw new ErroAlcance("O item mudou de pasta desde a proposta. Peça de novo para confirmar a nova movimentação.");
     }
     if (!(await descendeDe(drive, paraId, refs.pastaId, cache))) {
       throw new ErroAlcance("A pasta de destino não pertence mais a esta viagem.");
@@ -546,9 +551,7 @@ export async function executarAcao(
     if (item.mime === MIME_PASTA && (await descendeDe(drive, destino.id, item.id, cache))) {
       throw new ErroAlcance("Não é possível mover uma pasta para dentro dela mesma.");
     }
-    const deId = item.pais[0];
-    if (!deId) throw new ErroAlcance("Não foi possível identificar a pasta atual do item.");
-    await drive.mover(item.id, deId, destino.id);
+    await drive.mover(item.id, deIdEsperado, destino.id);
     return { link: linkHttps(item.link) };
   }
 
@@ -564,30 +567,54 @@ export async function executarAcao(
     const pasta = cache.get(pastaId) ?? (await drive.obter(pastaId));
     if (!pasta || pasta.mime !== MIME_PASTA) throw new ErroAlcance("A pasta de destino não foi encontrada.");
 
+    // Reserva atômica do anexo antes do upload: impede que duas propostas em paralelo enviem o mesmo arquivo.
+    const reserva = new Date();
     const [anexo] = await db
-      .select()
-      .from(chatAnexos)
+      .update(chatAnexos)
+      .set({ usadoEm: reserva })
       .where(
         and(
           eq(chatAnexos.id, anexoId),
           eq(chatAnexos.usuarioId, acao.usuarioId),
           isNull(chatAnexos.usadoEm),
-          gt(chatAnexos.expiraEm, new Date()),
+          gt(chatAnexos.expiraEm, reserva),
         ),
       )
-      .limit(1);
+      .returning();
     if (!anexo) throw new ErroAlcance("O arquivo anexado expirou ou já foi usado.");
 
-    const bytes = await baixarObjeto(anexo.caminho);
-    if (!bytes) throw new ErroAlcance("Não foi possível ler o arquivo anexado.");
+    let enviado: { id: string; link: string | null };
+    try {
+      const bytes = await baixarObjeto(anexo.caminho);
+      if (!bytes) throw new ErroAlcance("Não foi possível ler o arquivo anexado.");
 
-    const nome = strCampo(dados, "nome") ?? anexo.nome;
-    // Se falhar aqui, o anexo continua no bucket e sem `usado_em` até vencer, para a pessoa pedir de novo (spec §7).
-    const enviado = await drive.enviarArquivo(pastaId, nome, anexo.mime, bytes);
+      const nome = strCampo(dados, "nome") ?? anexo.nome;
+      enviado = await drive.enviarArquivo(pastaId, nome, anexo.mime, bytes);
+    } catch (e) {
+      // Se falhar antes de concluir o upload, libera a reserva (fencing por `reserva`) para a pessoa pedir de novo (spec §7).
+      try {
+        await db
+          .update(chatAnexos)
+          .set({ usadoEm: null })
+          .where(and(eq(chatAnexos.id, anexo.id), eq(chatAnexos.usadoEm, reserva)));
+      } catch (errRollback) {
+        const c = errRollback as { code?: string; cause?: { code?: string } } | null;
+        console.error("Falha ao liberar reserva de anexo do chat", { code: c?.cause?.code ?? c?.code });
+      }
+      throw e;
+    }
 
-    await db.update(chatAnexos).set({ usadoEm: new Date() }).where(eq(chatAnexos.id, anexo.id));
-    await removerObjeto(anexo.caminho);
-    return { link: linkHttps(enviado.link) };
+    const removido = await removerObjeto(anexo.caminho);
+    if (!removido.ok) {
+      // Mantém a linha com o caminho preservado e já elegível para nova tentativa no próximo cron de limpeza.
+      try {
+        await db.update(chatAnexos).set({ expiraEm: new Date() }).where(eq(chatAnexos.id, anexo.id));
+      } catch (errExp) {
+        const c = errExp as { code?: string; cause?: { code?: string } } | null;
+        console.error("Falha ao agendar nova tentativa de remoção do anexo", { code: c?.cause?.code ?? c?.code });
+      }
+    }
+    return { link: linkHttps(enviado.link), anexoConsumidoId: anexo.id };
   }
 
   throw new ErroAlcance("Ação desconhecida.");

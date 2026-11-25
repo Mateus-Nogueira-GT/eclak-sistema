@@ -37,9 +37,12 @@ let codigo: string;
 let escritas: ChamadaEscrita[];
 let estadoFalso: {
   cartaoOutroQuadro?: boolean;
+  listaAtualCartao?: string;
+  paiAtualArquivo?: string;
   arquivoSumiu?: boolean;
   statusEscrita?: number;
   atrasoEscritaMs?: number;
+  esperarEscrita?: () => Promise<void>;
 };
 
 function servicosFalsos(): typeof fetch {
@@ -48,6 +51,7 @@ function servicosFalsos(): typeof fetch {
     "pasta-v1": { id: "pasta-v1", name: "ECL-0001_SOUZA", mimeType: "application/vnd.google-apps.folder", parents: ["raiz"] },
     "pub-1": { id: "pub-1", name: "Público", mimeType: "application/vnd.google-apps.folder", parents: ["pasta-v1"] },
     "int-1": { id: "int-1", name: "Uso interno", mimeType: "application/vnd.google-apps.folder", parents: ["pasta-v1"] },
+    "sub-outra": { id: "sub-outra", name: "Outra pasta", mimeType: "application/vnd.google-apps.folder", parents: ["pasta-v1"] },
     "arq-1": {
       id: "arq-1",
       name: "voucher.pdf",
@@ -63,6 +67,7 @@ function servicosFalsos(): typeof fetch {
     if (u.href === GOOGLE_TOKEN_URL) return Response.json({ access_token: "tok", expires_in: 3600 });
 
     if (metodo !== "GET") {
+      if (estadoFalso.esperarEscrita) await estadoFalso.esperarEscrita();
       if (estadoFalso.atrasoEscritaMs) await new Promise((r) => setTimeout(r, estadoFalso.atrasoEscritaMs));
       const corpo = typeof init?.body === "string" && init.body ? (JSON.parse(init.body) as Record<string, unknown>) : null;
       escritas.push({ metodo, caminho: u.pathname, params: Object.fromEntries(u.searchParams), corpo });
@@ -79,6 +84,7 @@ function servicosFalsos(): typeof fetch {
       return Response.json([
         { id: "lista-op", name: "Operações" },
         { id: "lista-em", name: "Emissão" },
+        { id: "lista-c", name: "Revisão" },
       ]);
     }
     if (u.pathname === "/1/cards/card-v1") {
@@ -87,7 +93,7 @@ function servicosFalsos(): typeof fetch {
         idBoard: estadoFalso.cartaoOutroQuadro ? "b-outro" : "b1",
         name: `${codigo} · SOUZA`,
         desc: "Viagem",
-        idList: "lista-op",
+        idList: estadoFalso.listaAtualCartao ?? "lista-op",
         due: null,
         dueComplete: false,
         shortUrl: "https://trello.com/c/card-v1",
@@ -99,6 +105,9 @@ function servicosFalsos(): typeof fetch {
     if (mFile) {
       const id = decodeURIComponent(mFile[1]);
       if (id === "arq-1" && estadoFalso.arquivoSumiu) return new Response(null, { status: 404 });
+      if (id === "arq-1" && estadoFalso.paiAtualArquivo) {
+        return Response.json({ ...arvore[id], parents: [estadoFalso.paiAtualArquivo] });
+      }
       return arvore[id] ? Response.json(arvore[id]) : new Response(null, { status: 404 });
     }
     return new Response(null, { status: 404 });
@@ -344,5 +353,80 @@ describe("ciclo de vida, concorrência e reconferência na execução", () => {
     expect(linha.situacao).toBe("falhou");
     expect(linha.resultado).toEqual({ classe: "desconhecido" });
     expect(escritas).toEqual([]);
+  });
+
+  it("recusa movimentação no Trello e no Drive se a origem mudou antes da confirmação (A -> B virou C -> B)", async () => {
+    const pTrello = await comSessao(f.u.id, () =>
+      proporAcao(ctxDo(f.u), "trello_mover_cartao", { cartao: codigo, lista: "lista-em" }),
+    );
+    if (!("proposta" in pTrello)) throw new Error(pTrello.erro);
+    estadoFalso.listaAtualCartao = "lista-c";
+    const rTrello = await comSessao(f.u.id, () => confirmarAcaoChat(pTrello.proposta.id));
+    expect(rTrello).toEqual({
+      ok: false,
+      erro: "O cartão mudou de lista desde a proposta. Peça de novo para confirmar a nova movimentação.",
+    });
+    expect((await db.select().from(chatAcoes).where(eq(chatAcoes.id, pTrello.proposta.id)))[0].situacao).toBe("falhou");
+    estadoFalso.listaAtualCartao = undefined;
+
+    const pDrive = await comSessao(f.u.id, () =>
+      proporAcao(ctxDo(f.u), "drive_mover", { arquivo: "arq-1", destino: "pub-1" }),
+    );
+    if (!("proposta" in pDrive)) throw new Error(pDrive.erro);
+    estadoFalso.paiAtualArquivo = "sub-outra";
+    const rDrive = await comSessao(f.u.id, () => confirmarAcaoChat(pDrive.proposta.id));
+    expect(rDrive).toEqual({
+      ok: false,
+      erro: "O item mudou de pasta desde a proposta. Peça de novo para confirmar a nova movimentação.",
+    });
+    expect((await db.select().from(chatAcoes).where(eq(chatAcoes.id, pDrive.proposta.id)))[0].situacao).toBe("falhou");
+    expect(escritas).toEqual([]);
+  });
+
+  it("execução lenta que perde fencing para desconhecido nunca devolve ok: true sem gravar resultado e auditoria", async () => {
+    const p = await comSessao(f.u.id, () => proporAcao(ctxDo(f.u), "trello_comentar", { cartao: codigo, texto: "Lento" }));
+    if (!("proposta" in p)) throw new Error(p.erro);
+
+    let chegouNaEscrita!: () => void;
+    let liberarEscrita!: () => void;
+    const escritaIniciada = new Promise<void>((resolve) => {
+      chegouNaEscrita = resolve;
+    });
+    const podeConcluir = new Promise<void>((resolve) => {
+      liberarEscrita = resolve;
+    });
+    estadoFalso.esperarEscrita = async () => {
+      chegouNaEscrita();
+      await podeConcluir;
+    };
+
+    const primeiraPromessa = comSessao(f.u.id, () => confirmarAcaoChat(p.proposta.id));
+    await escritaIniciada;
+
+    // Simula que a primeira execução ficou presa por > 2 min e uma segunda confirmação a encerra como desconhecido.
+    await db
+      .update(chatAcoes)
+      .set({ tomadoEm: new Date(Date.now() - 3 * 60_000) })
+      .where(eq(chatAcoes.id, p.proposta.id));
+    const segunda = await comSessao(f.u.id, () => confirmarAcaoChat(p.proposta.id));
+    expect(segunda).toEqual({
+      ok: false,
+      erro: "Não sei se esta ação foi concluída. Confira no Trello antes de pedir de novo.",
+    });
+
+    // Agora a primeira execução termina o HTTP 200: como perdeu o fencing, NÃO pode responder ok: true.
+    liberarEscrita();
+    const primeira = await primeiraPromessa;
+    expect(primeira).toEqual({
+      ok: false,
+      erro: "Não sei se esta ação foi concluída. Confira no Trello antes de pedir de novo.",
+    });
+
+    const [linha] = await db.select().from(chatAcoes).where(eq(chatAcoes.id, p.proposta.id));
+    expect(linha.situacao).toBe("falhou");
+    expect(linha.resultado).toEqual({ classe: "desconhecido" });
+    const auds = await db.select().from(auditoria).where(eq(auditoria.registroId, p.proposta.id));
+    expect(auds).toHaveLength(1);
+    expect((auds[0].depois as { resultado?: unknown }).resultado).toEqual({ classe: "desconhecido" });
   });
 });
