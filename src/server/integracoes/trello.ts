@@ -9,11 +9,43 @@ import { integracaoEnvios } from "@/server/db/schema";
 import { configTrello, type ConfigTrello } from "./config";
 // Só tipos: `fila.ts` importa o processador daqui (sem ciclo de valores).
 import type { DepsProcessador, EnvioTomado, Processador } from "./fila";
-import { chamar, ErroIntegracao, EsperaIntegracao, type Buscar } from "./http";
+import { chamar, ErroIntegracao, EsperaIntegracao, urlDeTeste, type Buscar } from "./http";
 
 // Trello: cliente REST (chave e token só no cabeçalho Authorization, nunca na URL) e o processador da fila.
 
 export const TRELLO_API = "https://api.trello.com/1";
+const MAX_COMENTARIOS = 20;
+
+export function baseTrello(env: Record<string, string | undefined> = process.env): string {
+  return urlDeTeste(env.TRELLO_API_URL, TRELLO_API);
+}
+
+const quadros = new Map<string, string>();
+
+/** Só testes: esquece os ids de quadro guardados em memória. */
+export function esquecerQuadrosTrello(): void {
+  if (process.env.NODE_ENV === "production") throw new Error("Só em testes");
+  quadros.clear();
+}
+
+export type CartaoTrello = {
+  id: string;
+  nome: string;
+  listaId: string;
+  prazo: string | null;
+  concluido: boolean;
+  link: string | null;
+};
+
+export type CartaoDetalhe = CartaoTrello & {
+  descricao: string;
+  checklists: {
+    id: string;
+    nome: string;
+    itens: { id: string; nome: string; feito: boolean }[];
+  }[];
+  comentarios: { autor: string; data: string; texto: string }[];
+};
 
 /** Cabeçalho documentado pela Atlassian para a API REST do Trello. */
 export function autorizacaoTrello(cfg: ConfigTrello): string {
@@ -24,18 +56,40 @@ type Json = Record<string, unknown>;
 
 const texto = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 
-export function clienteTrello(cfg: ConfigTrello, buscar: Buscar) {
+export function clienteTrello(cfg: ConfigTrello, buscar: Buscar, opcoes: { timeoutMs?: number } = {}) {
   const autorizacao = autorizacaoTrello(cfg);
+  const api = baseTrello();
 
-  async function postar(caminho: string, corpo: Record<string, string>): Promise<{ json: Json; status: number }> {
-    const r = await chamar(buscar, `${TRELLO_API}${caminho}`, {
+  async function ler(caminho: string): Promise<{ json: unknown; status: number }> {
+    const r = await chamar(buscar, `${api}${caminho}`, {
+      method: "GET",
+      headers: { Authorization: autorizacao, Accept: "application/json" },
+      timeoutMs: opcoes.timeoutMs,
+    });
+    if (!r.ok) throw new ErroIntegracao(r.classe, r.status);
+    return { json: r.json, status: r.status };
+  }
+
+  async function postar(caminho: string, corpo: Record<string, unknown>): Promise<{ json: Json; status: number }> {
+    const r = await chamar(buscar, `${api}${caminho}`, {
       method: "POST",
       headers: { Authorization: autorizacao, Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(corpo),
+      timeoutMs: opcoes.timeoutMs,
     });
     if (!r.ok) throw new ErroIntegracao(r.classe, r.status);
     if (typeof r.json !== "object" || r.json === null) throw new ErroIntegracao("servidor", r.status);
     return { json: r.json as Json, status: r.status };
+  }
+
+  async function alterar(caminho: string, corpo: Record<string, unknown>): Promise<void> {
+    const r = await chamar(buscar, `${api}${caminho}`, {
+      method: "PUT",
+      headers: { Authorization: autorizacao, Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify(corpo),
+      timeoutMs: opcoes.timeoutMs,
+    });
+    if (!r.ok) throw new ErroIntegracao(r.classe, r.status);
   }
 
   /** Resposta 2xx sem o `id` do que foi criado: conta como erro do serviço (tenta de novo). */
@@ -45,11 +99,158 @@ export function clienteTrello(cfg: ConfigTrello, buscar: Buscar) {
     return id;
   }
 
+  async function quadroId(): Promise<string> {
+    const chave = `${api}|${cfg.listaId}`;
+    const guardado = quadros.get(chave);
+    if (guardado) return guardado;
+    const r = await ler(`/lists/${encodeURIComponent(cfg.listaId)}?fields=idBoard`);
+    const idBoard = typeof r.json === "object" && r.json !== null ? texto((r.json as Json).idBoard) : null;
+    if (!idBoard) throw new ErroIntegracao("servidor", r.status);
+    quadros.set(chave, idBoard);
+    return idBoard;
+  }
+
+  async function criarCartaoEm(listaId: string, c: { nome: string; descricao: string }): Promise<{ id: string; url: string | null }> {
+    const r = await postar("/cards", { idList: listaId, name: c.nome, desc: c.descricao });
+    return { id: idDe(r), url: texto(r.json.shortUrl) ?? texto(r.json.url) };
+  }
+
   return {
+    quadroId,
+
+    async listas(): Promise<{ id: string; nome: string }[]> {
+      const board = await quadroId();
+      const r = await ler(`/boards/${encodeURIComponent(board)}/lists?filter=open&fields=name`);
+      if (!Array.isArray(r.json)) throw new ErroIntegracao("servidor", r.status);
+      const saida: { id: string; nome: string }[] = [];
+      for (const item of r.json) {
+        if (typeof item !== "object" || item === null) continue;
+        const j = item as Json;
+        const id = texto(j.id);
+        if (!id) continue;
+        saida.push({ id, nome: texto(j.name) ?? "" });
+      }
+      return saida;
+    },
+
+    async cartoes(): Promise<CartaoTrello[]> {
+      const board = await quadroId();
+      const r = await ler(`/boards/${encodeURIComponent(board)}/cards/open?fields=name,idList,due,dueComplete,shortUrl`);
+      if (!Array.isArray(r.json)) throw new ErroIntegracao("servidor", r.status);
+      const saida: CartaoTrello[] = [];
+      for (const item of r.json) {
+        if (typeof item !== "object" || item === null) continue;
+        const j = item as Json;
+        const id = texto(j.id);
+        if (!id) continue;
+        saida.push({
+          id,
+          nome: texto(j.name) ?? "",
+          listaId: texto(j.idList) ?? "",
+          prazo: texto(j.due),
+          concluido: j.dueComplete === true,
+          link: texto(j.shortUrl) ?? texto(j.url),
+        });
+      }
+      return saida;
+    },
+
+    async cartao(id: string): Promise<CartaoDetalhe | null> {
+      const board = await quadroId();
+      const r = await chamar(
+        buscar,
+        `${api}/cards/${encodeURIComponent(id)}?fields=name,desc,idList,idBoard,due,dueComplete,shortUrl&checklists=all&checklist_fields=name&actions=commentCard&actions_limit=${MAX_COMENTARIOS}&action_fields=data,date,memberCreator`,
+        {
+          method: "GET",
+          headers: { Authorization: autorizacao, Accept: "application/json" },
+          timeoutMs: opcoes.timeoutMs,
+        },
+      );
+      if (!r.ok) {
+        if (r.status === 404) return null;
+        throw new ErroIntegracao(r.classe, r.status);
+      }
+      if (typeof r.json !== "object" || r.json === null) throw new ErroIntegracao("servidor", r.status);
+      const j = r.json as Json;
+      if (texto(j.idBoard) !== board) return null;
+      const cid = texto(j.id);
+      if (!cid) throw new ErroIntegracao("servidor", r.status);
+
+      const checklists: CartaoDetalhe["checklists"] = [];
+      if (Array.isArray(j.checklists)) {
+        for (const chk of j.checklists) {
+          if (typeof chk !== "object" || chk === null) continue;
+          const k = chk as Json;
+          const kid = texto(k.id);
+          if (!kid) continue;
+          const itens: { id: string; nome: string; feito: boolean }[] = [];
+          if (Array.isArray(k.checkItems)) {
+            for (const it of k.checkItems) {
+              if (typeof it !== "object" || it === null) continue;
+              const x = it as Json;
+              const xid = texto(x.id);
+              if (!xid) continue;
+              itens.push({ id: xid, nome: texto(x.name) ?? "", feito: x.state === "complete" });
+            }
+          }
+          checklists.push({ id: kid, nome: texto(k.name) ?? "", itens });
+        }
+      }
+
+      const comentarios: CartaoDetalhe["comentarios"] = [];
+      if (Array.isArray(j.actions)) {
+        for (const acao of j.actions) {
+          if (comentarios.length >= MAX_COMENTARIOS) break;
+          if (typeof acao !== "object" || acao === null) continue;
+          const a = acao as Json;
+          if (a.type !== undefined && a.type !== "commentCard") continue;
+          const data = typeof a.data === "object" && a.data !== null ? (a.data as Json) : null;
+          const criador = typeof a.memberCreator === "object" && a.memberCreator !== null ? (a.memberCreator as Json) : null;
+          const msg = texto(data?.text);
+          if (msg === null) continue;
+          comentarios.push({
+            autor: texto(criador?.fullName) ?? texto(criador?.username) ?? "",
+            data: texto(a.date) ?? "",
+            texto: msg,
+          });
+        }
+      }
+
+      return {
+        id: cid,
+        nome: texto(j.name) ?? "",
+        listaId: texto(j.idList) ?? "",
+        prazo: texto(j.due),
+        concluido: j.dueComplete === true,
+        link: texto(j.shortUrl) ?? texto(j.url),
+        descricao: typeof j.desc === "string" ? j.desc : "",
+        checklists,
+        comentarios,
+      };
+    },
+
+    async comentar(cartaoId: string, comentario: string): Promise<void> {
+      await postar(`/cards/${encodeURIComponent(cartaoId)}/actions/comments`, { text: comentario });
+    },
+
+    async marcarItem(cartaoId: string, itemId: string, feito: boolean): Promise<void> {
+      await alterar(`/cards/${encodeURIComponent(cartaoId)}/checkItem/${encodeURIComponent(itemId)}`, {
+        state: feito ? "complete" : "incomplete",
+      });
+    },
+
+    async atualizarCartao(cartaoId: string, m: { idList?: string; due?: string | null }): Promise<void> {
+      const corpo: Record<string, unknown> = {};
+      if (m.idList !== undefined) corpo.idList = m.idList;
+      if (m.due !== undefined) corpo.due = m.due;
+      await alterar(`/cards/${encodeURIComponent(cartaoId)}`, corpo);
+    },
+
+    criarCartaoEm,
+
     /** Cartão na lista configurada; `url` é o link curto (ou o longo, se o curto não vier). */
     async criarCartao(c: { nome: string; descricao: string }): Promise<{ id: string; url: string | null }> {
-      const r = await postar("/cards", { idList: cfg.listaId, name: c.nome, desc: c.descricao });
-      return { id: idDe(r), url: texto(r.json.shortUrl) ?? texto(r.json.url) };
+      return criarCartaoEm(cfg.listaId, c);
     },
 
     async criarChecklist(cartaoId: string, nome: string): Promise<{ id: string }> {
@@ -62,9 +263,10 @@ export function clienteTrello(cfg: ConfigTrello, buscar: Buscar) {
 
     /** Testar conexão: lê a lista configurada. Nunca lança. */
     async testar(): Promise<{ ok: true; lista: string } | { ok: false; classe: ClasseErro }> {
-      const r = await chamar(buscar, `${TRELLO_API}/lists/${encodeURIComponent(cfg.listaId)}`, {
+      const r = await chamar(buscar, `${api}/lists/${encodeURIComponent(cfg.listaId)}`, {
         method: "GET",
         headers: { Authorization: autorizacao, Accept: "application/json" },
+        timeoutMs: opcoes.timeoutMs,
       });
       if (!r.ok) return { ok: false, classe: r.classe };
       const nome = texto((r.json as Json | null)?.name);
