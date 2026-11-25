@@ -59,10 +59,14 @@ describe("lancamentoSchema", () => {
   it("valor zero", () => {
     expect(erro(lancamentoSchema.safeParse({ ...lanc, valor: "0,00" }))).toContain("valor: Informe um valor maior que zero");
   });
-  it("parcelado: 2 a 60", () => {
+  it("parcelado: 2 a 60 e valor mínimo de R$ 0,01 por parcela", () => {
     expect(lancamentoSchema.safeParse({ ...lanc, repeticao: { tipo: "parcelado", parcelas: 60 } }).success).toBe(true);
     expect(lancamentoSchema.safeParse({ ...lanc, repeticao: { tipo: "parcelado", parcelas: 61 } }).success).toBe(false);
     expect(lancamentoSchema.safeParse({ ...lanc, repeticao: { tipo: "parcelado", parcelas: 1 } }).success).toBe(false);
+    expect(erro(lancamentoSchema.safeParse({ ...lanc, valor: "0,05", repeticao: { tipo: "parcelado", parcelas: 6 } }))).toContain(
+      "valor: O valor total precisa ser de pelo menos R$ 0,01 por parcela",
+    );
+    expect(lancamentoSchema.safeParse({ ...lanc, valor: "0,06", repeticao: { tipo: "parcelado", parcelas: 6 } }).success).toBe(true);
   });
   it("recorrente", () => {
     expect(

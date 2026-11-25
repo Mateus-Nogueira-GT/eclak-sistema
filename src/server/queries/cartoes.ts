@@ -5,7 +5,7 @@ import type { Centro, StatusLancamento } from "@/domain/financeiro";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { cartoesCorporativos, contasBancarias, contasPagar, faturasCartao, fornecedores, lancamentos, pagamentosFornecedor, viagens } from "@/server/db/schema";
+import { cartoesCorporativos, clientes, contasBancarias, contasPagar, faturasCartao, fornecedores, lancamentos, pagamentosFornecedor, viagens } from "@/server/db/schema";
 
 export type CartaoOpcao = { id: string; nome: string; final: string };
 
@@ -100,6 +100,7 @@ export async function listarCartoes(): Promise<CartaoItem[]> {
               data: lancamentos.vencimento,
               descricao: lancamentos.descricao,
               fornecedor: fornecedores.nome,
+              cliente: clientes.grupo,
               pessoaTexto: lancamentos.pessoaTexto,
               valor: lancamentos.valor,
               status: lancamentos.status,
@@ -107,6 +108,7 @@ export async function listarCartoes(): Promise<CartaoItem[]> {
             })
             .from(lancamentos)
             .leftJoin(fornecedores, eq(fornecedores.id, lancamentos.fornecedorId))
+            .leftJoin(clientes, eq(clientes.id, lancamentos.clienteId))
             .where(and(inArray(lancamentos.faturaCartaoId, ids), ne(lancamentos.status, "cancelado")))
             .orderBy(asc(lancamentos.vencimento), asc(lancamentos.criadoEm)),
           db
@@ -142,7 +144,7 @@ export async function listarCartoes(): Promise<CartaoItem[]> {
       id: m.id,
       data: m.data,
       descricao: m.descricao,
-      pessoa: m.fornecedor ?? m.pessoaTexto,
+      pessoa: m.fornecedor ?? m.cliente ?? m.pessoaTexto,
       valor: m.valor,
       viagemId: null,
       viagemDestino: null,

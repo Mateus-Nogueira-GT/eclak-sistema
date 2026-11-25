@@ -111,9 +111,18 @@ export function provedorClaude(cfg: ConfigIA, opcoes: { fetch?: Buscar; timeoutM
         throw erro;
       }
       const u = r.usage;
+      // Com server-side fallback, blocos anteriores ao último marcador `fallback` pertencem à tentativa descartada.
+      let corte = -1;
+      for (let i = r.content.length - 1; i >= 0; i--) {
+        if ((r.content[i] as { type?: string }).type === "fallback") {
+          corte = i;
+          break;
+        }
+      }
+      const ativos = corte >= 0 ? r.content.slice(corte + 1) : r.content;
       return {
         parada: r.stop_reason,
-        texto: r.stop_reason === "refusal" ? "" : r.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(""),
+        texto: r.stop_reason === "refusal" ? "" : ativos.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(""),
         conteudo: r.content,
         modelo: r.model,
         tokensEntrada: u.input_tokens + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),

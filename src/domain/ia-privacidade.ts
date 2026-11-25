@@ -28,10 +28,10 @@ const PADROES: [RegExp, string][] = [
   // Passaporte: 2 letras maiúsculas, espaço ou hífen opcional e 6 ou 7 dígitos, como palavra inteira (voo "AZ675"
   // tem 3 dígitos; "ECL-0147" tem 3 letras).
   [/(?<![A-Za-z0-9])[A-Z]{2}[ -]?\d{6,7}(?![A-Za-z0-9])/g, MARCADORES.passaporte],
-  // Telefone com DDD (e +55 opcional): (66) 99999-1234, 66 99999-1234, +55 66 99999-1234, 6634211234. Datas
-  // (barra), valores (vírgula) e horários (dois-pontos) não casam: o separador é só espaço, ponto ou hífen; e não
-  // começa logo depois de "14-" ou "07." (pedaço de uma data seguida de um número).
-  [/(?<![\d+])(?<!\d[.\-/])(?:\+?55[ .-]?)?(?:\(\d{2}\) ?|\d{2}[ .-]?)9?\d{4}[ .-]?\d{4}(?!\d)/g, MARCADORES.telefone],
+  // Telefone com DDD (e +55 opcional): (66) 99999-1234, (66) 9 9999-1234, 66 99999-1234, +55 66 99999-1234,
+  // 6634211234. Datas (barra), valores (vírgula) e horários (dois-pontos) não casam: o separador é só espaço, ponto
+  // ou hífen; e não começa logo depois de "14-" ou "07." (pedaço de uma data seguida de um número).
+  [/(?<![\d+])(?<!\d[.\-/])(?:\+?55[ .-]?)?(?:\(\d{2}\) ?|\d{2}[ .-]?)(?:9[ .-]?)?\d{4}[ .-]?\d{4}(?!\d)/g, MARCADORES.telefone],
 ];
 
 /** Documento conhecido com menos caracteres (letras e dígitos) que isto não é trocado (trocaria pedaços de palavras). */

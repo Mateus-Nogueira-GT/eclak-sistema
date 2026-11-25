@@ -266,7 +266,11 @@ export async function executarFerramenta(nome: string, entrada: unknown, usuario
           : n === "minhas_tarefas"
             ? await minhasTarefas()
             : await dailiesDaSemana();
-    return { conteudo: protegerTexto(JSON.stringify(saida)), erro: false };
+    // Protege cada string antes da serialização: evita que escapes JSON (\n, \t) quebrem o lookbehind de passaporte.
+    return {
+      conteudo: JSON.stringify(saida, (_k, val) => (typeof val === "string" ? protegerTexto(val) : val)),
+      erro: false,
+    };
   } catch (e) {
     if (e instanceof ErroFerramenta) return { conteudo: protegerTexto(e.message), erro: true };
     if (e instanceof ErroAcesso) return { conteudo: "Sem permissão para esta consulta.", erro: true };

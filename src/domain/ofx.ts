@@ -54,9 +54,9 @@ export function valorOfxEmCentavos(s: string): bigint | null {
   return m[1] === "-" ? -centavos : centavos;
 }
 
-/** `AAAAMMDD[HHMMSS[.XXX]][[-3:BRT]]` → `AAAA-MM-DD` como escrita; `null` se não for data válida. */
+/** `AAAAMMDD[HHMM[SS[.XXX]]][[-3:BRT]]` → `AAAA-MM-DD` como escrita; `null` se não for data válida. */
 export function dataOfx(s: string): string | null {
-  const m = /^(\d{4})(\d{2})(\d{2})(?:\d{6}(?:\.\d+)?)?(?:\[[^\]]*\])?$/.exec(s.trim());
+  const m = /^(\d{4})(\d{2})(\d{2})(?:\d{4}(?:\d{2}(?:\.\d+)?)?)?(?:\[[^\]]*\])?$/.exec(s.trim());
   if (!m) return null;
   const [ano, mes, dia] = [Number(m[1]), Number(m[2]), Number(m[3])];
   if (mes < 1 || mes > 12 || dia < 1) return null;

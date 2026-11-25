@@ -39,19 +39,24 @@ const ehLimiteDoDrive = (m: Motivo403) => (m.reason !== null && MOTIVOS_LIMITE.h
 
 export type ArquivoDrive = { id: string; nome: string; mime: string; link: string | null };
 
+const MAX_PAGINAS_LISTAGEM = 50;
+
 export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
   async function autorizacao(): Promise<string> {
     return `Bearer ${await tokenGoogle(cfg, buscar)}`;
   }
 
-  async function pedir(url: string, init: RequestInit): Promise<{ json: Json; status: number }> {
+  async function pedir(url: string, init: RequestInit, jaRenovou = false): Promise<{ json: Json; status: number }> {
     const r = await chamar(buscar, url, {
       ...init,
       headers: { ...(init.headers as Record<string, string>), Authorization: await autorizacao(), Accept: "application/json" },
       limite403: ehLimiteDoDrive,
     });
     if (!r.ok) {
-      if (r.status === 401) descartarTokenGoogle(cfg.email);
+      if (r.status === 401) {
+        descartarTokenGoogle(cfg.email);
+        if (!jaRenovou) return pedir(url, init, true);
+      }
       throw new ErroIntegracao(r.classe, r.status);
     }
     if (typeof r.json !== "object" || r.json === null) throw new ErroIntegracao("servidor", r.status);
@@ -98,11 +103,12 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
       return { id, link: linkDe(r.json, id, false) };
     },
 
-    /** Arquivos da pasta (fora da lixeira), todas as páginas. */
+    /** Arquivos da pasta (fora da lixeira), até `MAX_PAGINAS_LISTAGEM` páginas. */
     async listarArquivos(pastaId: string): Promise<ArquivoDrive[]> {
       const todos: ArquivoDrive[] = [];
+      const vistos = new Set<string>();
       let pagina: string | null = null;
-      do {
+      for (let i = 0; i < MAX_PAGINAS_LISTAGEM; i++) {
         const q = new URLSearchParams({
           q: `${literalQ(pastaId)} in parents and trashed = false`,
           supportsAllDrives: "true",
@@ -117,8 +123,11 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
           if (!id) continue;
           todos.push({ id, nome: texto(f.name) ?? "", mime: texto(f.mimeType) ?? "", link: texto(f.webViewLink) });
         }
-        pagina = texto(r.json.nextPageToken);
-      } while (pagina);
+        const proxima = texto(r.json.nextPageToken);
+        if (!proxima || vistos.has(proxima)) break;
+        vistos.add(proxima);
+        pagina = proxima;
+      }
       return todos;
     },
 

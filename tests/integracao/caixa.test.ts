@@ -255,7 +255,7 @@ describe("fluxo de caixa", () => {
     const custo = BigInt((await comSessao(fin, () => regrasVigentes())).valores.custoFixoMensal);
     expect(custo > 0n).toBe(true);
     const r = await comSessao(fin, () => obterFluxoDeCaixa({}));
-    expect(r.reserva).toEqual({ meta: 6n * custo, temos: 1000000n, falta: 6n * custo - 1000000n, atingidaEm: null });
+    expect(r.reserva).toEqual({ meta: 6n * custo, temos: 1000000n, falta: 6n * custo - 1000000n, atingidaEm: null, meses: 6 });
   });
 
   it("consultor e operacional: obterFluxoDeCaixa e saldosDasContas → Sem permissão", async () => {

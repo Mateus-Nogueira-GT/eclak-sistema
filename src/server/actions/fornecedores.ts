@@ -11,6 +11,13 @@ import { fornecedores } from "@/server/db/schema";
 type Falha = { ok: false; erro: string; campos?: Record<string, string> };
 const NAO_ENCONTRADO: Falha = { ok: false, erro: "Fornecedor não encontrado" };
 
+/** Erro de banco inesperado: loga só o código (sem parâmetros) e relança genérico. */
+function erroDeBanco(mensagem: string, e: unknown): Error {
+  const x = e as { code?: string; cause?: { code?: string } } | null;
+  console.error(mensagem, { code: x?.cause?.code ?? x?.code });
+  return new Error(mensagem);
+}
+
 function dadosDe(f: typeof fornecedores.$inferSelect) {
   const omitidos = new Set(["id", "criadoEm", "atualizadoEm", "excluidoEm"]);
   return Object.fromEntries(Object.entries(f).filter(([k]) => !omitidos.has(k)));
@@ -35,39 +42,44 @@ async function salvar(
   }
   if (id !== undefined && !ehUuid(id)) return NAO_ENCONTRADO;
 
-  const r = await db.transaction(async (tx) => {
-    if (id === undefined) {
-      const [novo] = await tx.insert(fornecedores).values(p.data).returning();
+  let r: string | null;
+  try {
+    r = await db.transaction(async (tx) => {
+      if (id === undefined) {
+        const [novo] = await tx.insert(fornecedores).values(p.data).returning();
+        await registrarAuditoria(tx, {
+          usuarioId,
+          tabela: "fornecedores",
+          registroId: novo.id,
+          acao: "criar",
+          depois: dadosDe(novo),
+        });
+        return novo.id;
+      }
+      const [antes] = await tx
+        .select()
+        .from(fornecedores)
+        .where(and(eq(fornecedores.id, id), isNull(fornecedores.excluidoEm)))
+        .for("update");
+      if (!antes) return null;
+      const [depois] = await tx
+        .update(fornecedores)
+        .set({ ...p.data, atualizadoEm: new Date() })
+        .where(eq(fornecedores.id, id))
+        .returning();
       await registrarAuditoria(tx, {
         usuarioId,
         tabela: "fornecedores",
-        registroId: novo.id,
-        acao: "criar",
-        depois: dadosDe(novo),
+        registroId: id,
+        acao: "alterar",
+        antes: dadosDe(antes),
+        depois: dadosDe(depois),
       });
-      return novo.id;
-    }
-    const [antes] = await tx
-      .select()
-      .from(fornecedores)
-      .where(and(eq(fornecedores.id, id), isNull(fornecedores.excluidoEm)))
-      .for("update");
-    if (!antes) return null;
-    const [depois] = await tx
-      .update(fornecedores)
-      .set({ ...p.data, atualizadoEm: new Date() })
-      .where(eq(fornecedores.id, id))
-      .returning();
-    await registrarAuditoria(tx, {
-      usuarioId,
-      tabela: "fornecedores",
-      registroId: id,
-      acao: "alterar",
-      antes: dadosDe(antes),
-      depois: dadosDe(depois),
+      return id;
     });
-    return id;
-  });
+  } catch (e) {
+    throw erroDeBanco("Erro ao salvar o fornecedor", e);
+  }
   if (r === null) return NAO_ENCONTRADO;
 
   revalidatePath("/fornecedores");
@@ -82,25 +94,30 @@ export async function excluirFornecedor(id: string): Promise<{ ok: true } | Falh
 async function excluir(usuarioId: string, id: string): Promise<{ ok: true } | Falha> {
   if (!ehUuid(id)) return NAO_ENCONTRADO;
 
-  const ok = await db.transaction(async (tx) => {
-    const [antes] = await tx
-      .select()
-      .from(fornecedores)
-      .where(and(eq(fornecedores.id, id), isNull(fornecedores.excluidoEm)))
-      .for("update");
-    if (!antes) return false;
-    const agora = new Date();
-    await tx.update(fornecedores).set({ excluidoEm: agora, atualizadoEm: agora }).where(eq(fornecedores.id, id));
-    await registrarAuditoria(tx, {
-      usuarioId,
-      tabela: "fornecedores",
-      registroId: id,
-      acao: "excluir",
-      antes: dadosDe(antes),
-      depois: { excluidoEm: agora },
+  let ok: boolean;
+  try {
+    ok = await db.transaction(async (tx) => {
+      const [antes] = await tx
+        .select()
+        .from(fornecedores)
+        .where(and(eq(fornecedores.id, id), isNull(fornecedores.excluidoEm)))
+        .for("update");
+      if (!antes) return false;
+      const agora = new Date();
+      await tx.update(fornecedores).set({ excluidoEm: agora, atualizadoEm: agora }).where(eq(fornecedores.id, id));
+      await registrarAuditoria(tx, {
+        usuarioId,
+        tabela: "fornecedores",
+        registroId: id,
+        acao: "excluir",
+        antes: dadosDe(antes),
+        depois: { excluidoEm: agora },
+      });
+      return true;
     });
-    return true;
-  });
+  } catch (e) {
+    throw erroDeBanco("Erro ao excluir o fornecedor", e);
+  }
   if (!ok) return NAO_ENCONTRADO;
   revalidatePath("/fornecedores");
   return { ok: true };

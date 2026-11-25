@@ -43,12 +43,14 @@ export function Painel({
   removidos,
   fornecedores,
   extras,
+  podeFecharVenda,
 }: {
   ficha: FichaPrecificacao;
   pessoas: PessoaOpcao[];
   removidos: { id: string; nome: string }[];
   fornecedores: FornecedorOpcao[];
   extras: Extras | null;
+  podeFecharVenda: boolean;
 }) {
   const est = estrategicoOk(ficha);
   const erroEst = ficha.estrategico && "erro" in ficha.estrategico ? ficha.estrategico.erro : null;
@@ -208,7 +210,7 @@ export function Painel({
           {!aguardando && (
             <Botao onClick={() => setEnviando((x) => !x)} aria-expanded={enviando}><Send size={15} /> Enviar para aprovação</Botao>
           )}
-          {ficha.status === "aprovado" && (
+          {ficha.status === "aprovado" && podeFecharVenda && (
             <Link href={`/vendas?viagem=${ficha.id}`} className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[5px] border border-[#C9CDD1] bg-white px-3.5 py-2 text-[14px] font-semibold text-texto hover:border-verde hover:text-verde">
               Registrar resposta do cliente
             </Link>

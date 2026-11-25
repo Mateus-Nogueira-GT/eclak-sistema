@@ -100,6 +100,9 @@ describe("protegerTexto", () => {
 
   it("telefones com DDD viram [TELEFONE]", () => {
     expect(protegerTexto("Tel (66) 99999-1234.")).toBe("Tel [TELEFONE].");
+    expect(protegerTexto("Tel (66) 9 9999-1234.")).toBe("Tel [TELEFONE].");
+    expect(protegerTexto("Tel +55 (66) 9 9999-1234")).toBe("Tel [TELEFONE]");
+    expect(protegerTexto("Tel 66 9 9999-1234")).toBe("Tel [TELEFONE]");
     expect(protegerTexto("Tel 66 99999-1234")).toBe("Tel [TELEFONE]");
     expect(protegerTexto("Tel +55 66 99999-1234")).toBe("Tel [TELEFONE]");
     expect(protegerTexto("Tel +55 (66) 3421-1234")).toBe("Tel [TELEFONE]");

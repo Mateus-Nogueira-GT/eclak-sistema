@@ -251,6 +251,10 @@ export async function desfazerImportacao(extratoId: string) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
     if (typeof extratoId !== "string" || !ehUuid(extratoId)) return EXTRATO_NAO_ENCONTRADO;
     const r = await transacao("Falha ao desfazer a importação", async (tx): Promise<Ok | Falha> => {
+      // Mesma ordem de trava de `importarExtrato` (conta -> extrato -> transações): evita corrida com importação sobreposta.
+      const [ref] = await tx.select({ contaBancariaId: extratos.contaBancariaId }).from(extratos).where(eq(extratos.id, extratoId));
+      if (!ref) return EXTRATO_NAO_ENCONTRADO;
+      await tx.select({ id: contasBancarias.id }).from(contasBancarias).where(eq(contasBancarias.id, ref.contaBancariaId)).for("no key update");
       const [e] = await tx.select().from(extratos).where(eq(extratos.id, extratoId)).for("update");
       if (!e) return EXTRATO_NAO_ENCONTRADO;
       const ts = await tx.select().from(extratoTransacoes).where(eq(extratoTransacoes.extratoId, e.id)).orderBy(asc(extratoTransacoes.id)).for("update");

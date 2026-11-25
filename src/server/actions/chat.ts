@@ -114,6 +114,7 @@ export async function conversar(mensagens: { de: "eu" | "ia"; texto: string }[])
     let saida = 0;
     let modelo = provedor.modelo;
     let houveResposta = false;
+    let textoAcumulado = "";
 
     const fim = async (r: { ok: true; texto: string } | Falha) => {
       if (houveResposta) await gravarUso(usuario.id, modelo, entrada, saida);
@@ -144,20 +145,41 @@ export async function conversar(mensagens: { de: "eu" | "ia"; texto: string }[])
 
       if (r.parada === "refusal") return fim(SEM_RESPOSTA);
       if (r.parada === "pause_turn") {
-        conversa.push({ role: "assistant", content: r.conteudo });
+        textoAcumulado += r.texto;
+        const ultima = conversa[conversa.length - 1];
+        if (ultima?.role === "assistant" && Array.isArray(ultima.content)) {
+          ultima.content = [...ultima.content, ...r.conteudo];
+        } else {
+          conversa.push({ role: "assistant", content: r.conteudo });
+        }
         continue;
       }
       if (r.parada !== "tool_use") {
-        const texto = r.texto.trim();
-        if (r.parada === "max_tokens" || texto === "") return fim(SEM_RESPOSTA);
+        const texto = (textoAcumulado + r.texto).trim();
+        if (r.parada === "max_tokens" || r.parada === "model_context_window_exceeded" || texto === "") return fim(SEM_RESPOSTA);
         return fim({ ok: true, texto });
       }
+      textoAcumulado = "";
       // Última volta pedindo ferramenta: não roda (não haveria volta para usar o resultado).
       if (volta === MAX_VOLTAS - 1) break;
       // O conteúdo vai de volta exatamente como veio (pensamento incluído); os resultados, todos numa mensagem só.
-      conversa.push({ role: "assistant", content: r.conteudo });
+      const ultima = conversa[conversa.length - 1];
+      if (ultima?.role === "assistant" && Array.isArray(ultima.content)) {
+        ultima.content = [...ultima.content, ...r.conteudo];
+      } else {
+        conversa.push({ role: "assistant", content: r.conteudo });
+      }
+      // Só executa tool_use após o último bloco `fallback`, se o servidor tiver feito fallback.
+      let corte = -1;
+      for (let i = r.conteudo.length - 1; i >= 0; i--) {
+        if ((r.conteudo[i] as { type?: string }).type === "fallback") {
+          corte = i;
+          break;
+        }
+      }
+      const blocosAtivos = corte >= 0 ? r.conteudo.slice(corte + 1) : r.conteudo;
       const resultados = [];
-      for (const b of r.conteudo) {
+      for (const b of blocosAtivos) {
         if (b.type !== "tool_use") continue;
         const x = await executarFerramenta(b.name, b.input, usuario);
         resultados.push({ type: "tool_result" as const, tool_use_id: b.id, content: x.conteudo, ...(x.erro ? { is_error: true } : {}) });

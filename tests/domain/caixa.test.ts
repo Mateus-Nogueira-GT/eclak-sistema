@@ -74,7 +74,9 @@ describe("reserva", () => {
   it("atingida em / falta", () => {
     const meses = projetarMeses(10000000n, [{ data: "2026-12-10", valor: 3000000n, lado: "receber", vencida: false, tipo: "clientes" }], "2026-11-23");
     const s = situacaoReserva(10000000n, 2072593n, meses);
-    expect(s).toEqual({ meta: 12435558n, temos: 10000000n, falta: 2435558n, atingidaEm: "dez/2026" });
+    expect(s).toEqual({ meta: 12435558n, temos: 10000000n, falta: 2435558n, atingidaEm: "dez/2026", meses: 6 });
+    const s3 = situacaoReserva(5000000n, 2000000n, projetarMeses(5000000n, [{ data: "2026-12-10", valor: 1500000n, lado: "receber", vencida: false, tipo: "clientes" }], "2026-11-23", 3), 3);
+    expect(s3).toEqual({ meta: 6000000n, temos: 5000000n, falta: 1000000n, atingidaEm: "dez/2026", meses: 3 });
   });
   it("nunca atingida", () => {
     const meses = projetarMeses(0n, [], "2026-11-23");

@@ -23,7 +23,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<B
         right={<BotaoLink href="/fornecedores/novo">Novo fornecedor</BotaoLink>}
       />
       <Card className="pb-2">
-        <Filtros busca={busca} tipo={tipo ?? ""} />
+        <Filtros key={`${busca}|${tipo ?? ""}`} busca={busca} tipo={tipo ?? ""} />
         {lista.length === 0 ? (
           <p className="px-6 pb-5 pt-1 text-[14px] text-cinza">Nenhum fornecedor encontrado.</p>
         ) : (

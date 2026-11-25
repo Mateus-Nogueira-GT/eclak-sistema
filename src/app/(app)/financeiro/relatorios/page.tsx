@@ -65,7 +65,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<R
         </nav>
 
         <div>
-          <form method="get" className="mb-4 flex flex-wrap items-end gap-3">
+          <form key={`${rel}|${periodo.de}|${periodo.ate}|${contaId ?? ""}|${consultorId ?? ""}`} method="get" className="mb-4 flex flex-wrap items-end gap-3">
             <input type="hidden" name="rel" value={rel} />
             {consultorId && <input type="hidden" name="consultor" value={consultorId} />}
             <label className="text-[13px] text-cinza">

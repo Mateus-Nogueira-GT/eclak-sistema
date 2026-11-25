@@ -92,7 +92,7 @@ const msgErroCalculo = "Não foi possível calcular com os Parâmetros vigentes.
 
 function BotaoMini({ children, onClick, variante = "secundario" }: { children: ReactNode; onClick: () => void; variante?: "secundario" | "fantasma" }) {
   return (
-    <Botao variante={variante} className="!px-2.5 !py-1 !text-[12.5px]" onClick={onClick}>
+    <Botao type="button" variante={variante} className="!px-2.5 !py-1 !text-[12.5px]" onClick={onClick}>
       {children}
     </Botao>
   );

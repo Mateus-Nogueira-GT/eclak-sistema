@@ -81,9 +81,9 @@ export function textoDoDaily(e: {
 
 export type Indicador = { nome: string; ok: boolean; dica: string };
 
-const GERUNDISMO = /\b(vamos|vai|vou|estaremos|estarei|estar)\s+(estar\s+)?\w+ndo\b/i;
+const GERUNDISMO = /\b(vamos|vai|vou|estaremos|estarei|estar)\s+(estar\s+)?[\p{L}]+ndo\b/iu;
 const TROCA_NO_TOPO =
-  /Check-out:[^\n]*\n\s*Check-in:[^\n]*\n\s*https?:\/\/\S*(maps\.google|goo\.gl\/maps|maps\.app\.goo\.gl)/i;
+  /Check-out:[^\n]*\n\s*Check-in:[^\n]*\n\s*https?:\/\/\S*(maps\.google|google\.com(?:\.[a-z]{2})?\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)/i;
 const CONTATOS = /\(\d{2}\)\s?\d|\+\d{2}\s?\d|guia:|motorista:|apoio local/i;
 const ITEM_COM_HORA = /^\*\d{1,2}h\d{0,2}\*:/;
 const PARECE_HORA = /^\*?\d{1,2}h\d{0,2}\*?/;

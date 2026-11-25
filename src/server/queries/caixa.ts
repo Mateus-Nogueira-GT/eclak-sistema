@@ -61,27 +61,28 @@ export type FluxoDeCaixa = {
 export async function obterFluxoDeCaixa(filtro: FiltroCaixa): Promise<FluxoDeCaixa> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
   const hoje = hojeEmCuiaba();
-  // Último dia que a projeção mostra (fim do 12º mês, depois das 8 semanas).
-  const horizonte = projetarMeses(0n, [], hoje).at(-1)!.fim;
+  const [contas, regras] = await Promise.all([saldosAtivas(), regrasVigentes()]);
+  const horizonteMeses = regras.valores.horizonteProjecaoMeses;
+  const reservaMeses = regras.valores.reservaCaixaMeses;
+  // Último dia que a projeção mostra (fim do horizonte configurado ou das 8 semanas, o que for maior).
+  const fimMeses = projetarMeses(0n, [], hoje, horizonteMeses).at(-1)!.fim;
+  const fimSemanas = projetarSemanas(0n, [], hoje).at(-1)!.fim;
+  const horizonte = fimMeses >= fimSemanas ? fimMeses : fimSemanas;
 
-  const [contas, linhas, regras] = await Promise.all([
-    saldosAtivas(),
-    db
-      .select({
-        data: lf.dataCaixa,
-        lado: lf.lado,
-        origem: lf.origem,
-        sistema: categoriasFinanceiras.sistema,
-        centro: lf.centro,
-        viagemId: lf.viagemId,
-        valor: sql<string>`sum(${lf.valorCaixaPrevisto})::bigint`.mapWith((v: string) => BigInt(v)),
-      })
-      .from(lf)
-      .innerJoin(categoriasFinanceiras, eq(categoriasFinanceiras.id, lf.categoriaId))
-      .where(and(eq(lf.statusBase, "em_aberto"), eq(lf.transitaCaixa, true), lte(lf.dataCaixa, horizonte)))
-      .groupBy(lf.dataCaixa, lf.lado, lf.origem, categoriasFinanceiras.sistema, lf.centro, lf.viagemId),
-    regrasVigentes(),
-  ]);
+  const linhas = await db
+    .select({
+      data: lf.dataCaixa,
+      lado: lf.lado,
+      origem: lf.origem,
+      sistema: categoriasFinanceiras.sistema,
+      centro: lf.centro,
+      viagemId: lf.viagemId,
+      valor: sql<string>`sum(${lf.valorCaixaPrevisto})::bigint`.mapWith((v: string) => BigInt(v)),
+    })
+    .from(lf)
+    .innerJoin(categoriasFinanceiras, eq(categoriasFinanceiras.id, lf.categoriaId))
+    .where(and(eq(lf.statusBase, "em_aberto"), eq(lf.transitaCaixa, true), lte(lf.dataCaixa, horizonte)))
+    .groupBy(lf.dataCaixa, lf.lado, lf.origem, categoriasFinanceiras.sistema, lf.centro, lf.viagemId);
 
   const todos = linhas.map((l) => ({
     centro: l.centro,
@@ -103,14 +104,15 @@ export async function obterFluxoDeCaixa(filtro: FiltroCaixa): Promise<FluxoDeCai
     saldoAtual,
     todos.map((l) => l.mov),
     hoje,
+    horizonteMeses,
   );
   return {
     hoje,
     saldoAtual,
     contas,
     semanas: projetarSemanas(saldoAtual, filtrados, hoje),
-    meses: projetarMeses(saldoAtual, filtrados, hoje),
-    reserva: situacaoReserva(saldoAtual, custoFixoMensal, mesesSemFiltro),
+    meses: projetarMeses(saldoAtual, filtrados, hoje, horizonteMeses),
+    reserva: situacaoReserva(saldoAtual, custoFixoMensal, mesesSemFiltro, reservaMeses),
   };
 }
 

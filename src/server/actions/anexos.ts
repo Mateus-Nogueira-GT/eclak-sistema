@@ -7,7 +7,7 @@ import { DONOS_ANEXO, MSG_TAMANHO_ANEXO, MSG_TIPO_ANEXO, TAMANHO_MAXIMO_ANEXO, t
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { comPerfil, ehUuid } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
-import { db } from "@/server/db/client";
+import { db, type Transacao } from "@/server/db/client";
 import { anexos, comissoes, faturasCartao, lancamentos, notasFiscais, pagamentosFornecedor, parcelasReceber } from "@/server/db/schema";
 import { linkAssinado, removerObjeto, subirObjeto } from "@/server/storage";
 
@@ -32,20 +32,20 @@ const ehDono = (t: unknown): t is DonoAnexo => typeof t === "string" && (DONOS_A
 /**
  * O dono existe? Um caso por tabela.
  */
-async function donoExiste(tipo: DonoAnexo, id: string): Promise<boolean> {
+async function donoExiste(tipo: DonoAnexo, id: string, origem: typeof db | Transacao = db): Promise<boolean> {
   switch (tipo) {
     case "manual":
-      return (await db.select({ id: lancamentos.id }).from(lancamentos).where(eq(lancamentos.id, id))).length > 0;
+      return (await origem.select({ id: lancamentos.id }).from(lancamentos).where(eq(lancamentos.id, id))).length > 0;
     case "parcela":
-      return (await db.select({ id: parcelasReceber.id }).from(parcelasReceber).where(eq(parcelasReceber.id, id))).length > 0;
+      return (await origem.select({ id: parcelasReceber.id }).from(parcelasReceber).where(eq(parcelasReceber.id, id))).length > 0;
     case "pagamento":
-      return (await db.select({ id: pagamentosFornecedor.id }).from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, id))).length > 0;
+      return (await origem.select({ id: pagamentosFornecedor.id }).from(pagamentosFornecedor).where(eq(pagamentosFornecedor.id, id))).length > 0;
     case "comissao":
-      return (await db.select({ id: comissoes.id }).from(comissoes).where(eq(comissoes.id, id))).length > 0;
+      return (await origem.select({ id: comissoes.id }).from(comissoes).where(eq(comissoes.id, id))).length > 0;
     case "nota_fiscal":
-      return (await db.select({ id: notasFiscais.id }).from(notasFiscais).where(eq(notasFiscais.id, id))).length > 0;
+      return (await origem.select({ id: notasFiscais.id }).from(notasFiscais).where(eq(notasFiscais.id, id))).length > 0;
     case "fatura_cartao":
-      return (await db.select({ id: faturasCartao.id }).from(faturasCartao).where(eq(faturasCartao.id, id))).length > 0;
+      return (await origem.select({ id: faturasCartao.id }).from(faturasCartao).where(eq(faturasCartao.id, id))).length > 0;
     default:
       return false;
   }
@@ -68,8 +68,9 @@ export async function enviarAnexo(formData: FormData) {
     const donoTipo = formData.get("donoTipo");
     const donoId = formData.get("donoId");
     if (!ehDono(donoTipo) || typeof donoId !== "string" || !ehUuid(donoId)) return DONO_NAO_ENCONTRADO;
-    if (!(await donoExiste(donoTipo, donoId)))
-      return donoTipo === "nota_fiscal" ? NOTA_NAO_ENCONTRADA : donoTipo === "fatura_cartao" ? FATURA_CARTAO_NAO_ENCONTRADA : DONO_NAO_ENCONTRADO;
+    const falhaDono = () =>
+      donoTipo === "nota_fiscal" ? NOTA_NAO_ENCONTRADA : donoTipo === "fatura_cartao" ? FATURA_CARTAO_NAO_ENCONTRADA : DONO_NAO_ENCONTRADO;
+    if (!(await donoExiste(donoTipo, donoId))) return falhaDono();
 
     const arquivo = formData.get("arquivo");
     if (!(arquivo instanceof File) || arquivo.size === 0) return falha(MSG_TIPO_ANEXO);
@@ -86,9 +87,10 @@ export async function enviarAnexo(formData: FormData) {
     const subiu = await subirObjeto(caminho, bytes, mime);
     if (!subiu.ok) return FALHA_ENVIO;
 
-    let id: string;
+    let id: string | null;
     try {
       id = await db.transaction(async (tx) => {
+        if (!(await donoExiste(donoTipo, donoId, tx))) return null;
         const valores = { donoTipo, donoId, caminho, nome, mime, tamanho: bytes.length, enviadoPor: u.id };
         const [novo] = await tx.insert(anexos).values(valores).returning({ id: anexos.id });
         await registrarAuditoria(tx, { usuarioId: u.id, tabela: "anexos", registroId: novo.id, acao: "criar", depois: valores });
@@ -98,6 +100,10 @@ export async function enviarAnexo(formData: FormData) {
       // A linha não foi gravada: o objeto não fica órfão no bucket.
       await removerObjeto(caminho);
       throw erroDeBanco("Falha ao gravar o anexo", e);
+    }
+    if (!id) {
+      await removerObjeto(caminho);
+      return falhaDono();
     }
     revalidar();
     return { ok: true, id };

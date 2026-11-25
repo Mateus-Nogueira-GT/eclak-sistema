@@ -151,14 +151,16 @@ export function situacaoReserva(
   saldoAtual: bigint,
   custoFixoMensal: bigint,
   projecaoMensal: PeriodoCaixa[],
-): { meta: bigint; temos: bigint; falta: bigint; atingidaEm: string | null } {
-  const meta = metaReserva(custoFixoMensal);
+  meses = 6,
+): { meta: bigint; temos: bigint; falta: bigint; atingidaEm: string | null; meses: number } {
+  const meta = metaReserva(custoFixoMensal, meses);
   const atingido = projecaoMensal.find((p) => p.saldoFinal >= meta);
   return {
     meta,
     temos: saldoAtual,
     falta: saldoAtual >= meta ? 0n : meta - saldoAtual,
     atingidaEm: atingido ? atingido.rotulo : null,
+    meses,
   };
 }
 
