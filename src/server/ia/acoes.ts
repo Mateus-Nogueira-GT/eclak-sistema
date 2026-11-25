@@ -6,6 +6,7 @@ import {
   linhasDaAcao,
   MAX_PROPOSTAS_POR_PERGUNTA,
   nomeNoDrive,
+  prazoParaUtc,
   TIPOS_ACAO_CHAT,
   tituloDaAcao,
   VALIDADE_PROPOSTA_MIN,
@@ -14,16 +15,16 @@ import {
 } from "@/domain/chat-acoes";
 import { dataEmCuiaba } from "@/domain/clientes";
 import { protegerTexto } from "@/domain/ia-privacidade";
-import { TIMEOUT_MS } from "@/domain/integracoes";
+import { linkHttps, TIMEOUT_MS } from "@/domain/integracoes";
 import { PERFIS_VALORES, type Perfil } from "@/domain/perfis";
 import { ehUuid } from "@/server/acesso";
 import { db } from "@/server/db/client";
-import { chatAcoes, chatAnexos } from "@/server/db/schema";
+import { chatAcoes, chatAnexos, usuarios, type ChatAcao } from "@/server/db/schema";
 import { configDrive, configTrello } from "@/server/integracoes/config";
 import { clienteDrive, MIME_PASTA, type ClienteDrive, type ItemDrive } from "@/server/integracoes/drive";
-import { ErroIntegracao } from "@/server/integracoes/http";
+import { ErroIntegracao, type Buscar } from "@/server/integracoes/http";
 import { clienteTrello, type CartaoDetalhe } from "@/server/integracoes/trello";
-import { descendeDe, refsDaViagem, viagemDoCartao, viagemDoItem, type RefsDaViagem } from "./alcance";
+import { descendeDe, refsDaViagem, refsDaViagemPorId, viagemDoCartao, viagemDoItem, type RefsDaViagem } from "./alcance";
 import { ERRO_DO_SERVICO } from "./erros-servico";
 import type { ContextoFerramenta } from "./ferramentas";
 
@@ -376,4 +377,179 @@ export async function proporAcao(
     console.error("Erro ao propor ação no chat", { tipo, code: (e as { code?: string } | null)?.code });
     return { erro: ERRO_DO_SERVICO[ehTrello ? "trello" : "drive"].servidor };
   }
+}
+
+/** Falha de alcance, alvo ausente ou integração desligada ao reconferir na execução (R-A2). */
+export class ErroAlcance extends Error {
+  constructor(mensagem: string) {
+    super(mensagem);
+    this.name = "ErroAlcance";
+  }
+}
+
+const strCampo = (obj: Record<string, unknown>, k: string): string | null => {
+  const v = obj[k];
+  return typeof v === "string" && v !== "" ? v : null;
+};
+
+const CHAVES_ALVO_AUDITORIA = [
+  "cartao",
+  "checklist",
+  "item",
+  "de",
+  "para",
+  "lista",
+  "viagem",
+  "pasta",
+  "dentroDe",
+  "arquivo",
+  "tamanho",
+  "prazoAtual",
+] as const;
+
+/** Extrai só os nomes seguros do alvo para auditoria e montagem do resumo (nunca texto livre de dados). */
+export function nomesDoAlvo(alvo: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of CHAVES_ALVO_AUDITORIA) {
+    const v = alvo[k];
+    if (typeof v === "string") out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Executa uma proposta já tomada (`executando`) fora de transação. Reconfere integração ligada e alcance (R-A2)
+ * antes de qualquer escrita externa. Lança `ErroAlcance` ou `ErroIntegracao`.
+ */
+export async function executarAcao(
+  acao: ChatAcao,
+  buscar: Buscar,
+  usuarioNome?: string,
+): Promise<{ link: string | null }> {
+  const alvo = (acao.alvo ?? {}) as Record<string, unknown>;
+  const dados = (acao.dados ?? {}) as Record<string, unknown>;
+
+  if (acao.tipo.startsWith("trello_")) {
+    const cfg = configTrello();
+    if (!cfg) throw new ErroAlcance("O Trello não está configurado.");
+    const trello = clienteTrello(cfg, buscar);
+
+    if (acao.tipo === "trello_criar_cartao") {
+      const listaId = strCampo(alvo, "listaId");
+      const listas = await trello.listas();
+      if (!listaId || !listas.some((l) => l.id === listaId)) {
+        throw new ErroAlcance("A lista de destino não existe mais no quadro.");
+      }
+      const criado = await trello.criarCartaoEm(listaId, {
+        nome: typeof dados.nome === "string" ? dados.nome : "",
+        descricao: typeof dados.descricao === "string" ? dados.descricao : "",
+      });
+      return { link: linkHttps(criado.url) };
+    }
+
+    const refs = acao.viagemId ? await refsDaViagemPorId(acao.viagemId) : null;
+    const cartaoId = strCampo(alvo, "cartaoId");
+    if (!refs || !refs.cartaoId || !cartaoId || refs.cartaoId !== cartaoId) {
+      throw new ErroAlcance("A viagem ou o cartão não está mais disponível.");
+    }
+    const card = await trello.cartao(cartaoId);
+    if (!card) throw new ErroAlcance("O cartão não foi encontrado no quadro configurado.");
+
+    if (acao.tipo === "trello_comentar") {
+      let nome = usuarioNome;
+      if (!nome) {
+        const [u] = await db.select({ nome: usuarios.nome }).from(usuarios).where(eq(usuarios.id, acao.usuarioId)).limit(1);
+        nome = u?.nome ?? "Equipe";
+      }
+      const texto = typeof dados.texto === "string" ? dados.texto : "";
+      await trello.comentar(cartaoId, `[${nome}, pelo sistema] ${texto}`);
+    } else if (acao.tipo === "trello_marcar_item") {
+      const itemId = strCampo(alvo, "itemId");
+      if (!itemId || !card.checklists.some((k) => k.itens.some((it) => it.id === itemId))) {
+        throw new ErroAlcance("O item do checklist não está mais neste cartão.");
+      }
+      await trello.marcarItem(cartaoId, itemId, Boolean(dados.feito));
+    } else if (acao.tipo === "trello_adicionar_item") {
+      const checklistId = strCampo(alvo, "checklistId");
+      if (!checklistId || !card.checklists.some((k) => k.id === checklistId)) {
+        throw new ErroAlcance("O checklist não está mais neste cartão.");
+      }
+      await trello.adicionarItem(checklistId, typeof dados.nome === "string" ? dados.nome : "");
+    } else if (acao.tipo === "trello_mover_cartao") {
+      const listaId = strCampo(dados, "listaId") ?? strCampo(alvo, "listaId");
+      const listas = await trello.listas();
+      if (!listaId || !listas.some((l) => l.id === listaId)) {
+        throw new ErroAlcance("A lista de destino não existe mais no quadro.");
+      }
+      await trello.atualizarCartao(cartaoId, { idList: listaId });
+    } else if (acao.tipo === "trello_definir_prazo") {
+      const prazo = typeof dados.prazo === "string" ? dados.prazo : "";
+      await trello.atualizarCartao(cartaoId, { due: prazo ? prazoParaUtc(prazo) : null });
+    }
+
+    return { link: linkHttps(card.link) };
+  }
+
+  // Drive
+  const cfg = configDrive();
+  if (!cfg) throw new ErroAlcance("O Google Drive não está configurado.");
+  const drive = clienteDrive(cfg, buscar);
+  const cache = new Map<string, ItemDrive | null>();
+
+  const refs = acao.viagemId ? await refsDaViagemPorId(acao.viagemId) : null;
+  if (!refs?.pastaId || !(await descendeDe(drive, refs.pastaId, cfg.pastaRaizId, cache))) {
+    throw new ErroAlcance("A viagem ou a pasta não está mais disponível no Drive.");
+  }
+
+  if (acao.tipo === "drive_criar_pasta") {
+    const paiId = strCampo(dados, "paiId") ?? strCampo(alvo, "dentroDeId");
+    if (!paiId || !(await descendeDe(drive, paiId, refs.pastaId, cache))) {
+      throw new ErroAlcance("A pasta de destino não pertence mais a esta viagem.");
+    }
+    const pai = cache.get(paiId) ?? (await drive.obter(paiId));
+    if (!pai || pai.mime !== MIME_PASTA) throw new ErroAlcance("A pasta de destino não foi encontrada.");
+    const criada = await drive.criarPasta(typeof dados.nome === "string" ? dados.nome : "", paiId);
+    return { link: linkHttps(criada.link) };
+  }
+
+  if (acao.tipo === "drive_renomear") {
+    const arquivoId = strCampo(dados, "arquivoId") ?? strCampo(alvo, "arquivoId");
+    if (!arquivoId || ehPastaDoSistema(refs, arquivoId)) {
+      throw new ErroAlcance("Este item não pode ser renomeado.");
+    }
+    const item = await drive.obter(arquivoId);
+    cache.set(arquivoId, item);
+    if (!item || !(await descendeDe(drive, item.id, refs.pastaId, cache))) {
+      throw new ErroAlcance("O arquivo não foi encontrado na pasta da viagem.");
+    }
+    await drive.renomear(item.id, typeof dados.nome === "string" ? dados.nome : "");
+    return { link: linkHttps(item.link) };
+  }
+
+  if (acao.tipo === "drive_mover") {
+    const arquivoId = strCampo(dados, "arquivoId") ?? strCampo(alvo, "arquivoId");
+    const paraId = strCampo(dados, "paraId") ?? strCampo(alvo, "paraId");
+    if (!arquivoId || !paraId || ehPastaDoSistema(refs, arquivoId)) {
+      throw new ErroAlcance("Este item não pode ser movido.");
+    }
+    const item = await drive.obter(arquivoId);
+    cache.set(arquivoId, item);
+    if (!item || !(await descendeDe(drive, item.id, refs.pastaId, cache))) {
+      throw new ErroAlcance("O arquivo não foi encontrado na pasta da viagem.");
+    }
+    if (!(await descendeDe(drive, paraId, refs.pastaId, cache))) {
+      throw new ErroAlcance("A pasta de destino não pertence mais a esta viagem.");
+    }
+    const destino = cache.get(paraId) ?? (await drive.obter(paraId));
+    if (!destino || destino.mime !== MIME_PASTA) throw new ErroAlcance("A pasta de destino não foi encontrada.");
+    if (item.mime === MIME_PASTA && (await descendeDe(drive, destino.id, item.id, cache))) {
+      throw new ErroAlcance("Não é possível mover uma pasta para dentro dela mesma.");
+    }
+    const deId = item.pais[0];
+    if (!deId) throw new ErroAlcance("Não foi possível identificar a pasta atual do item.");
+    await drive.mover(item.id, deId, destino.id);
+    return { link: linkHttps(item.link) };
+  }
+
+  throw new ErroAlcance("Envio de anexo não disponível.");
 }
