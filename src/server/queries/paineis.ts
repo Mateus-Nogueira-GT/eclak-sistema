@@ -1,14 +1,14 @@
 import "server-only";
-import { and, asc, between, count, eq, inArray, isNull, lt, lte, min, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, between, eq, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import type { PeriodoCaixa } from "@/domain/caixa";
 import { hojeEmCuiaba } from "@/domain/clientes";
-import { DIAS_AVISO } from "@/domain/conciliacao";
-import { formatarPercentual, formatarReais } from "@/domain/dinheiro";
+import { formatarPercentual } from "@/domain/dinheiro";
 import { rotuloSituacao, type Lado, type Origem } from "@/domain/financeiro";
 import {
   diferencaPp,
   intervaloAnterior,
   intervaloDoPeriodo,
+  avisoDoPainel,
   margemPonderada,
   montarDre,
   ordenarAvisos,
@@ -23,8 +23,9 @@ import {
   type TotalConciliacaoRel,
 } from "@/domain/paineis";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
-import { somarDias, statusDaViagem } from "@/domain/venda";
+import { statusDaViagem } from "@/domain/venda";
 import { formatarCodigoViagem } from "@/domain/viagens";
+import { avisosDeGestao, avisosFinanceiros } from "@/server/avisos";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
 import {
@@ -37,7 +38,7 @@ import {
   versoesPrecificacao,
   viagens,
 } from "@/server/db/schema";
-import { obterConciliacao, pendentesParaAviso, SITUACOES_CONCILIACAO } from "@/server/queries/conciliacao";
+import { obterConciliacao, SITUACOES_CONCILIACAO } from "@/server/queries/conciliacao";
 import { obterFluxoDeCaixa, saldoAtualSql, type FluxoDeCaixa } from "@/server/queries/caixa";
 import { situacaoSql } from "@/server/queries/financeiro";
 import { regrasVigentes } from "@/server/queries/regras";
@@ -47,7 +48,6 @@ const MAX_AVISOS = 8;
 /** Avisos de margem uma viagem por linha; as demais viram uma linha "e mais N viagens". */
 const MAX_AVISOS_MARGEM = 3;
 const MAX_PERDAS = 6;
-const DIAS_A_PAGAR = 7;
 
 export type LinhaVendida = {
   viagemId: string;
@@ -173,32 +173,22 @@ async function vendidoNoIntervalo(i: Intervalo): Promise<bigint> {
   return (await linhasVendidas(aceiteNo(i))).reduce((s, l) => s + l.vendido, 0n);
 }
 
-type Agregado = { quantidade: number; total: bigint; desde: string | null };
-
-/** Linhas em aberto da view que atendem `filtro`: quantidade, total previsto e o vencimento mais antigo. */
-async function emAberto(filtro: SQL | undefined): Promise<Agregado> {
-  const [t] = await db
-    .select({ quantidade: count(), total: bigintSql(sql`sum(${lf.valorPrevisto})`), desde: min(lf.vencimento) })
-    .from(lf)
-    .where(and(eq(lf.statusBase, "em_aberto"), filtro));
-  return t ?? { quantidade: 0, total: 0n, desde: null };
-}
-
-async function pedidosAguardando(): Promise<number> {
-  const [t] = await db
-    .select({ quantidade: count() })
-    .from(versoesPrecificacao)
-    .innerJoin(viagens, eq(viagens.id, versoesPrecificacao.viagemId))
-    .where(and(isNull(viagens.excluidoEm), eq(versoesPrecificacao.status, "aguardando")));
-  return t?.quantidade ?? 0;
-}
-
-const lista = (params: Record<string, string>) => `/financeiro/lancamentos?${new URLSearchParams(params).toString()}`;
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 
-/** `agregado`: a linha resume várias (o link abre uma lista, não um item). */
-function aviso(tipo: Aviso["tipo"], titulo: string, detalhe: string, href: string, agregado = false): Aviso {
-  return { tipo, titulo, detalhe, href, responsavel: RESPONSAVEL_AVISO[tipo], agregado };
+/** Viagens vendidas e não conciliadas (pela situação da viagem), com as margens. Sem checagem de acesso. */
+export async function viagensNaoConciliadas(hoje: string): Promise<ViagemVendidaDoPainel[]> {
+  const linhas = await linhasVendidas(isNull(viagens.conciliadaEm));
+  return naoConciliadasDe(linhas, await margensVendidas(linhas.map((l) => l.viagemId)), hoje);
+}
+
+function naoConciliadasDe(linhas: LinhaVendida[], margens: Map<string, MargensVendida>, hoje: string): ViagemVendidaDoPainel[] {
+  return comMargens(
+    linhas.filter(
+      (l) =>
+        statusDaViagem({ status: "vendida", inicio: l.inicio, fim: l.fim, conciliadaEm: l.conciliadaEm?.toISOString() ?? null, hoje }) !== "conciliada",
+    ),
+    margens,
+  );
 }
 
 /**
@@ -207,25 +197,17 @@ function aviso(tipo: Aviso["tipo"], titulo: string, detalhe: string, href: strin
  * conciliadas que mais perderam margem.
  */
 export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGeral> {
-  const usuario = await exigirPerfil("diretor", "fin_estrategico");
+  await exigirPerfil("diretor", "fin_estrategico");
   const hoje = hojeEmCuiaba();
   const intervalo = intervaloDoPeriodo(periodo, hoje);
-  const ontem = somarDias(hoje, -1);
-  const limitePagar = somarDias(hoje, DIAS_A_PAGAR);
-
-  const [linhas, vendidoAnterior, caixa, fluxo, regras, parcelas, comissoesVencidas, aPagar, categoriaVendas, aguardando, semPar] = await Promise.all([
+  const [linhas, vendidoAnterior, caixa, fluxo, regras, financeiros] = await Promise.all([
     // Do período (vendido, margens) e as não conciliadas (avisos de margem, perdas), numa leitura.
     linhasVendidas(or(aceiteNo(intervalo), isNull(viagens.conciliadaEm))),
     vendidoNoIntervalo(intervaloAnterior(periodo, intervalo)),
     caixaDoIntervalo(intervalo),
     obterFluxoDeCaixa({}),
     regrasVigentes(),
-    emAberto(and(eq(lf.origem, "parcela"), lt(lf.vencimento, hoje))),
-    emAberto(and(eq(lf.origem, "comissao"), lt(lf.vencimento, hoje))),
-    emAberto(and(eq(lf.lado, "pagar"), eq(lf.transitaCaixa, true), inArray(lf.origem, ["pagamento", "manual", "fatura_cartao"]), lte(lf.vencimento, limitePagar))),
-    db.select({ id: categoriasFinanceiras.id }).from(categoriasFinanceiras).where(eq(categoriasFinanceiras.sistema, "vendas_viagem")),
-    usuario.perfil === "diretor" ? pedidosAguardando() : Promise.resolve(0),
-    pendentesParaAviso(hoje),
+    avisosFinanceiros(),
   ]);
 
   const margens = await margensVendidas(linhas.map((l) => l.viagemId));
@@ -233,13 +215,7 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
     linhas.filter((l) => l.aceiteEm >= intervalo.de && l.aceiteEm <= intervalo.ate),
     margens,
   );
-  const naoConciliadas = comMargens(
-    linhas.filter(
-      (l) =>
-        statusDaViagem({ status: "vendida", inicio: l.inicio, fim: l.fim, conciliadaEm: l.conciliadaEm?.toISOString() ?? null, hoje }) !== "conciliada",
-    ),
-    margens,
-  );
+  const naoConciliadas = naoConciliadasDe(linhas, margens, hoje);
 
   const vendido = doPeriodo.reduce((s, v) => s + v.vendido, 0n);
   // Mesmo conjunto (as viagens com margem real calculada) para a real e a planejada.
@@ -248,26 +224,30 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
   const margemPlanejadaPct = margemPonderada(comReal.map(({ v }) => ({ final: v.margens.planejada.final, receita: v.preco })));
 
   const referencia = regras.valores.margemReferenciaPct;
-  const avisos: Aviso[] = [];
-  // Caixa: uma linha só, com quantas semanas ficam negativas, a primeira e a de menor saldo.
-  const negativas = fluxo.semanas.filter((s) => s.saldoFinal < 0n);
-  if (negativas.length > 0) {
-    const menor = negativas.reduce((m, s) => (s.saldoFinal < m.saldoFinal ? s : m));
-    avisos.push(
-      aviso(
-        "caixa",
-        `Caixa negativo em ${negativas.length} das próximas ${fluxo.semanas.length} semanas, a partir da semana de ${negativas[0].rotulo}`,
-        `Menor saldo projetado: ${formatarReais(menor.saldoFinal)}, na semana de ${menor.rotulo}`,
-        "/financeiro/caixa",
-      ),
-    );
+  const gestao = await avisosDeGestao({ fluxo, naoConciliadas, referencia });
+  // Margem: até 3 por viagem (a menor margem real primeiro) e um resumo do resto.
+  const margem = gestao.filter((a) => a.tipo === "margem");
+  const avisos: Aviso[] = [
+    ...gestao.filter((a) => a.tipo !== "margem").map(avisoDoPainel),
+    ...margem.slice(0, MAX_AVISOS_MARGEM).map(avisoDoPainel),
+    ...financeiros.map(avisoDoPainel),
+  ];
+  if (margem.length > MAX_AVISOS_MARGEM) {
+    avisos.push({
+      tipo: "margem",
+      titulo: `e mais ${plural(margem.length - MAX_AVISOS_MARGEM, "viagem", "viagens")} abaixo da margem de referência`,
+      detalhe: `Margem real abaixo de ${formatarPercentual(referencia)}; veja a margem por viagem nos relatórios`,
+      href: "/financeiro/relatorios?rel=margens",
+      responsavel: RESPONSAVEL_AVISO.margem,
+      agregado: true,
+    });
   }
+  const ordenados = ordenarAvisos(avisos);
+
   const perdas: PerdaDeMargem[] = [];
-  const abaixo: { v: ViagemVendidaDoPainel; realPct: string }[] = [];
   for (const v of naoConciliadas) {
     const real = v.margens.real;
     if ("erro" in real) continue;
-    if (pctAbaixoDe(real.finalPct, referencia)) abaixo.push({ v, realPct: real.finalPct });
     const planejadaPct = v.margens.planejada.finalPct;
     if (pctAbaixoDe(real.finalPct, planejadaPct)) {
       perdas.push({
@@ -282,83 +262,6 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
       });
     }
   }
-  // Margem: a maior distância da referência (a menor margem real) primeiro; até 3 por viagem e um resumo do resto.
-  abaixo.sort((a, b) => (pctAbaixoDe(a.realPct, b.realPct) ? -1 : pctAbaixoDe(b.realPct, a.realPct) ? 1 : a.v.codigo.localeCompare(b.v.codigo, "pt-BR")));
-  for (const { v, realPct } of abaixo.slice(0, MAX_AVISOS_MARGEM)) {
-    avisos.push(
-      aviso(
-        "margem",
-        `${v.codigo} abaixo da margem de referência`,
-        `${v.cliente}: margem real de ${formatarPercentual(realPct)}, referência de ${formatarPercentual(referencia)}`,
-        `/viagens/${v.viagemId}`,
-      ),
-    );
-  }
-  if (abaixo.length > MAX_AVISOS_MARGEM) {
-    avisos.push(
-      aviso(
-        "margem",
-        `e mais ${plural(abaixo.length - MAX_AVISOS_MARGEM, "viagem", "viagens")} abaixo da margem de referência`,
-        `Margem real abaixo de ${formatarPercentual(referencia)}; veja a margem por viagem nos relatórios`,
-        "/financeiro/relatorios?rel=margens",
-        true,
-      ),
-    );
-  }
-  if (parcelas.quantidade > 0 && parcelas.desde) {
-    const filtro: Record<string, string> = { lado: "receber", base: "vencimento", situacao: "vencida", origem: "viagem" };
-    if (categoriaVendas[0]) filtro.categoriaId = categoriaVendas[0].id;
-    avisos.push(
-      aviso(
-        "parcela",
-        plural(parcelas.quantidade, "parcela de cliente vencida", "parcelas de cliente vencidas"),
-        `${formatarReais(parcelas.total)} em aberto`,
-        lista({ ...filtro, de: parcelas.desde, ate: ontem }),
-        true,
-      ),
-    );
-  }
-  if (comissoesVencidas.quantidade > 0 && comissoesVencidas.desde) {
-    avisos.push(
-      aviso(
-        "comissao",
-        plural(comissoesVencidas.quantidade, "comissão de fornecedor vencida", "comissões de fornecedor vencidas"),
-        `${formatarReais(comissoesVencidas.total)} a receber`,
-        lista({ lado: "receber", base: "vencimento", situacao: "vencida", origem: "viagem", de: comissoesVencidas.desde, ate: ontem }),
-        true,
-      ),
-    );
-  }
-  if (aPagar.quantidade > 0 && aPagar.desde) {
-    avisos.push(
-      aviso(
-        "pagar",
-        plural(aPagar.quantidade, "conta a pagar vencida ou vencendo em 7 dias", "contas a pagar vencidas ou vencendo em 7 dias"),
-        `${formatarReais(aPagar.total)} em aberto`,
-        lista({ lado: "pagar", base: "vencimento", situacao: "em_aberto", de: aPagar.desde, ate: limitePagar }),
-        true,
-      ),
-    );
-  }
-  if (semPar.qtd > 0) {
-    // Abre a conta com a pendência mais antiga, do dia dela até hoje: a lista não cai vazia.
-    const primeira = semPar.contas[0];
-    const href = `/financeiro/conciliacao?${new URLSearchParams({ conta: primeira.contaId, de: primeira.maisAntiga, ate: hoje, situacao: "nao_conciliado" }).toString()}`;
-    avisos.push(
-      aviso(
-        "conciliacao",
-        `${plural(semPar.qtd, "transação", "transações")} do extrato sem par no sistema`,
-        `${formatarReais(semPar.valor)} em transações sem par com mais de ${DIAS_AVISO} dias${semPar.contas.length > 1 ? `, em ${semPar.contas.length} contas` : ""}`,
-        href,
-        true,
-      ),
-    );
-  }
-  if (aguardando > 0) {
-    avisos.push(aviso("aprovacao", plural(aguardando, "pedido aguardando aprovação", "pedidos aguardando aprovação"), "Decidir em Aprovações", "/aprovacoes", true));
-  }
-  const ordenados = ordenarAvisos(avisos);
-
   perdas.sort((a, b) => Number(a.diferencaPp) - Number(b.diferencaPp) || a.codigo.localeCompare(b.codigo, "pt-BR"));
 
   return {
@@ -379,7 +282,7 @@ export async function obterVisaoGeral(periodo: PeriodoPainel): Promise<VisaoGera
     avisosOcultos: ordenados.slice(MAX_AVISOS),
     perdas: perdas.slice(0, MAX_PERDAS),
     margemReferenciaPct: referencia,
-    viagensAbaixoReferencia: abaixo.length,
+    viagensAbaixoReferencia: margem.length,
   };
 }
 
