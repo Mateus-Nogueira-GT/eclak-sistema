@@ -18,6 +18,12 @@ import { vendida, type Fixture } from "../helpers/venda";
 beforeEach(() => {
   vi.stubEnv("ANTHROPIC_API_KEY", "");
   vi.stubEnv("IA_MODELO", "");
+  vi.stubEnv("TRELLO_API_KEY", "");
+  vi.stubEnv("TRELLO_TOKEN", "");
+  vi.stubEnv("TRELLO_LISTA_ID", "");
+  vi.stubEnv("GOOGLE_SA_EMAIL", "");
+  vi.stubEnv("GOOGLE_SA_CHAVE", "");
+  vi.stubEnv("GOOGLE_DRIVE_PASTA_RAIZ_ID", "");
 });
 afterEach(() => {
   definirProvedorIAParaTestes(null);
@@ -190,14 +196,14 @@ describe("conversar: o laço", () => {
     expect(FERRAMENTAS_CHAT).toHaveLength(4);
   });
 
-  it("para em 6 voltas com mensagem; o uso soma as 6", async () => {
+  it("para em 8 voltas com mensagem; o uso soma as 8", async () => {
     const pedidos = provedorFalso([pedeFerramenta(1, usoDe("t", "minhas_tarefas", {}))]);
     const r = await comSessao(f.u.id, () => conversar(pergunta("Loop")));
     expect(r).toEqual({ ok: false, erro: "Não consegui terminar a resposta com as consultas permitidas. Tente uma pergunta mais específica." });
-    expect(pedidos).toHaveLength(6);
+    expect(pedidos).toHaveLength(8);
     const usos = await db.select().from(iaUsos);
     expect(usos).toHaveLength(1);
-    expect(usos[0]).toMatchObject({ recurso: "chat", tokensEntrada: 600, tokensSaida: 60 });
+    expect(usos[0]).toMatchObject({ recurso: "chat", tokensEntrada: 800, tokensSaida: 80 });
   });
 
   it("recusa: mensagem e uso gravado", async () => {

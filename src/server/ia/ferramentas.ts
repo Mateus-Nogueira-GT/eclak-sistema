@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import type { Proposta } from "@/domain/chat-acoes";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { formatarPercentual, formatarReais } from "@/domain/dinheiro";
 import { protegerTexto } from "@/domain/ia-privacidade";
@@ -9,30 +10,49 @@ import { ROTULO_CATEGORIA, ROTULO_SITUACAO_TAREFA } from "@/domain/tarefas";
 import { somarDias } from "@/domain/venda";
 import { ROTULOS_STATUS_ORCAMENTO } from "@/domain/viagens";
 import { ErroAcesso, type UsuarioAtual } from "@/server/auth";
+import { configDrive, configTrello } from "@/server/integracoes/config";
+import type { Buscar } from "@/server/integracoes/http";
 import type { FerramentaIA } from "@/server/integracoes/ia";
 import { cabecalhoDaViagem, listarDailies, listarTarefas, tarefasDaViagem } from "@/server/queries/operacao";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { listarOrcamentos, obterPrecificacao, type OrcamentoLista } from "@/server/queries/viagens";
+import { ehLeituraDrive, executarLeituraDrive, FERRAMENTAS_LEITURA_DRIVE } from "./ferramentas-drive";
+import { ehLeituraTrello, executarLeituraTrello, FERRAMENTAS_LEITURA_TRELLO } from "./ferramentas-trello";
 
-// Ferramentas do chat, SÓ DE LEITURA. Cada uma chama as queries existentes (que fazem `exigirPerfil` com a sessão de
-// quem pergunta); nada aqui lê o banco direto. A saída é montada campo a campo (nunca o objeto da query inteiro): sem
-// ids, sem CPF, passaporte, nascimento, telefone, documento da fatura, observações nem texto do daily. Sai texto
-// livre curto que a equipe digita: o item e o "o que fazer" das tarefas (`tarefas.item`, `tarefas.fazer`) e o nome
-// do serviço dos itens da viagem (`servico`); por isso o JSON inteiro passa por `protegerTexto` antes de sair (CPF,
-// passaporte, telefone etc. digitados ali viram marcadores; rede de segurança, não o controle). A camada estratégica
-// (custo, preço do pacote, margem, pagamentos a fornecedores) só entra quando `veCamadaEstrategica(perfil)`, e sempre
-// a partir do campo `estrategico` que a própria query já restringe.
+// Ferramentas do chat: as 4 do sistema (sempre só de leitura, R-C6) + leitura do Trello (se configTrello) + leitura
+// do Drive (se configDrive), seguindo R-A1. Cada ferramenta do sistema chama as queries existentes (com `exigirPerfil`);
+// as do Trello e do Drive conferem o alcance (R-A2) e aplicam `protegerTexto` campo a campo (R-A3, R-A4).
 
 const MAX_VIAGENS = 20;
 const MAX_TAREFAS = 30;
 const MAX_DAILIES = 40;
 
-/**
- * Schemas no subconjunto aceito pelo modo estrito: só `type`, `properties`, `required` e `additionalProperties`. As
- * ferramentas sem parâmetro não levam `strict: true`: não há entrada a garantir (o Zod confere o objeto vazio) e um
- * schema sem propriedades no modo estrito é o caso mais provável de o serviço recusar a lista inteira (400 em toda
- * pergunta). Ficam `properties: {}` e `additionalProperties: false`.
- */
+export type ContextoFerramenta = {
+  usuario: UsuarioAtual;
+  conhecidos: { nascimentos: string[]; documentos: string[] };
+  buscar: Buscar;
+  prazoAte: number;
+  propostasNaPergunta?: number;
+};
+
+export type ResultadoExecucaoFerramenta = {
+  conteudo: string;
+  erro: boolean;
+  proposta?: Proposta;
+};
+
+let buscarSubstituto: Buscar | null = null;
+
+/** Só em testes: substitui o `fetch` usado pelas ferramentas do chat (Trello e Drive). */
+export function definirBuscarDoChatParaTestes(b: Buscar | null): void {
+  if (process.env.NODE_ENV === "production") throw new Error("Só em testes");
+  buscarSubstituto = b;
+}
+
+export function buscarDoChat(): Buscar {
+  return buscarSubstituto ?? fetch;
+}
+
 export const FERRAMENTAS_CHAT: FerramentaIA[] = [
   {
     name: "buscar_viagens",
@@ -71,6 +91,14 @@ export const FERRAMENTAS_CHAT: FerramentaIA[] = [
     input_schema: { type: "object", properties: {}, additionalProperties: false },
   },
 ];
+
+/** Lista de ferramentas enviadas ao modelo na pergunta atual (R-A1: Trello e Drive só entram se configurados). */
+export function ferramentasDoChat(): FerramentaIA[] {
+  const lista: FerramentaIA[] = [...FERRAMENTAS_CHAT];
+  if (configTrello()) lista.push(...FERRAMENTAS_LEITURA_TRELLO);
+  if (configDrive()) lista.push(...FERRAMENTAS_LEITURA_DRIVE);
+  return lista;
+}
 
 /** Erro com mensagem para o modelo (vira `tool_result` com `is_error`). */
 class ErroFerramenta extends Error {}
@@ -252,27 +280,34 @@ async function dailiesDaSemana() {
  * Roda uma ferramenta pedida pelo modelo com a sessão de quem pergunta. Nunca lança: erro vira `{ erro: true }` com
  * uma mensagem curta em pt-BR (o modelo segue a conversa).
  */
-export async function executarFerramenta(nome: string, entrada: unknown, usuario: UsuarioAtual): Promise<{ conteudo: string; erro: boolean }> {
-  if (!(nome in ENTRADAS)) return { conteudo: `Ferramenta ${nome} não existe. O chat só lê: viagens, tarefas e dailies.`, erro: true };
+export async function executarFerramenta(
+  nome: string,
+  entrada: unknown,
+  ctx: ContextoFerramenta,
+): Promise<ResultadoExecucaoFerramenta> {
+  if (ehLeituraTrello(nome)) return executarLeituraTrello(nome, entrada, ctx);
+  if (ehLeituraDrive(nome)) return executarLeituraDrive(nome, entrada, ctx);
+  if (!(nome in ENTRADAS)) return { conteudo: `Ferramenta ${nome} não existe.`, erro: true };
+
   const n = nome as Nome;
   const v = ENTRADAS[n].safeParse(entrada);
   if (!v.success) return { conteudo: `Entrada inválida para ${nome}.`, erro: true };
   try {
     const saida =
       n === "buscar_viagens"
-        ? await buscarViagens(usuario, v.data as { busca: string })
+        ? await buscarViagens(ctx.usuario, v.data as { busca: string })
         : n === "resumo_da_viagem"
-          ? await resumoDaViagem(usuario, v.data as { codigo: string })
+          ? await resumoDaViagem(ctx.usuario, v.data as { codigo: string })
           : n === "minhas_tarefas"
             ? await minhasTarefas()
             : await dailiesDaSemana();
-    // Protege cada string antes da serialização: evita que escapes JSON (\n, \t) quebrem o lookbehind de passaporte.
+    // Protege cada string antes da serialização (as ferramentas do sistema não têm `id` nem `link`).
     return {
-      conteudo: JSON.stringify(saida, (_k, val) => (typeof val === "string" ? protegerTexto(val) : val)),
+      conteudo: JSON.stringify(saida, (_k, val) => (typeof val === "string" ? protegerTexto(val, ctx.conhecidos) : val)),
       erro: false,
     };
   } catch (e) {
-    if (e instanceof ErroFerramenta) return { conteudo: protegerTexto(e.message), erro: true };
+    if (e instanceof ErroFerramenta) return { conteudo: protegerTexto(e.message, ctx.conhecidos), erro: true };
     if (e instanceof ErroAcesso) return { conteudo: "Sem permissão para esta consulta.", erro: true };
     console.error("Erro na ferramenta do chat", { ferramenta: nome, code: (e as { code?: string } | null)?.code });
     return { conteudo: "Não foi possível consultar agora.", erro: true };
