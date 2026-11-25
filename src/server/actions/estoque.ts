@@ -8,6 +8,7 @@ import type { Centro } from "@/domain/financeiro";
 import { aposEntrada, aposSaida, CATEGORIA_DO_USO, desfazerEntrada, type Saldo, type TipoMovimento } from "@/domain/estoque";
 import { ajusteSchema, entradaSchema, produtoSchema, saidaSchema } from "@/domain/estoque-entrada";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
+import { MSG_DESFACA_FATURA_CARTAO } from "@/domain/venda-entrada";
 import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
@@ -34,8 +35,8 @@ function falhaDeValidacao(erro: ZodError): Falha {
   return { ok: false, erro: erro.issues[0].message, campos: errosDeCampo(erro) };
 }
 
-/** Transação com `Desfazer`; nome repetido entre os ativos (23505) vira a falha do campo; outro erro loga só o código. */
-async function transacao(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok | Falha>): Promise<Ok | Falha> {
+/** Transação com `Desfazer`; `unico` traduz a violação de unicidade (23505), se houver; outro erro loga só o código. */
+async function transacao(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok | Falha>, unico?: Falha): Promise<Ok | Falha> {
   try {
     const r = await db.transaction(fn);
     if (r.ok) revalidatePath("/financeiro", "layout");
@@ -44,7 +45,7 @@ async function transacao(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok
     if (x instanceof Desfazer) return x.falha;
     const e = x as { code?: string; cause?: { code?: string } } | null;
     const codigo = e?.cause?.code ?? e?.code;
-    if (codigo === "23505") return PRODUTO_REPETIDO;
+    if (unico && codigo === "23505") return unico;
     console.error(mensagemErro, { code: codigo });
     throw new Error(mensagemErro);
   }
@@ -136,7 +137,7 @@ export async function salvarProduto(dados: unknown, id?: string) {
         const [novo] = await tx.insert(produtosEstoque).values(v).returning();
         await registrarAuditoria(tx, { usuarioId: u.id, tabela: "produtos_estoque", registroId: novo.id, acao: "criar", depois: novo });
         return { ok: true, id: novo.id };
-      });
+      }, PRODUTO_REPETIDO);
     }
     if (!ehUuid(id)) return PRODUTO_NAO_ENCONTRADO;
     return transacao("Falha ao editar o produto", async (tx) => {
@@ -148,7 +149,7 @@ export async function salvarProduto(dados: unknown, id?: string) {
       await tx.update(produtosEstoque).set(depois).where(eq(produtosEstoque.id, id));
       await auditarAlteracao(tx, u.id, "produtos_estoque", id, atual, depois);
       return { ok: true, id };
-    });
+    }, PRODUTO_REPETIDO);
   });
 }
 
@@ -257,6 +258,9 @@ export async function desfazerEntradaDeEstoque(movimentoId: string) {
       if (!novo) throw new Desfazer(falha(MSG_FACA_AJUSTE));
       // A conta primeiro: a recusa do núcleo volta antes de qualquer escrita.
       if (mov.lancamentoId) {
+        // Compra no cartão já paga pela fatura: volta só desfazendo a baixa da fatura.
+        const [conta] = await tx.select({ status: lancamentos.status, faturaCartaoId: lancamentos.faturaCartaoId }).from(lancamentos).where(eq(lancamentos.id, mov.lancamentoId));
+        if (conta?.status === "baixado" && conta.faturaCartaoId) throw new Desfazer(falha(MSG_DESFACA_FATURA_CARTAO));
         const r = await cancelarLancamentoNa(tx, u.id, mov.lancamentoId, "Entrada de estoque desfeita");
         if (!r.ok) throw new Desfazer(r);
       }

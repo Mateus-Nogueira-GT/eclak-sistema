@@ -290,6 +290,18 @@ describe("estoque: actions e queries", () => {
       expect(await desfazer(m2)).toEqual({ ok: false, erro: MSG_DESFACA_FATURA });
       expect(await foto(p)).toEqual(antes);
     });
+
+    it("no cartão com a fatura paga pela lista: recusada pedindo para desfazer a baixa da fatura; nada muda", async () => {
+      const k = await novoCartao();
+      const p = await novoProduto();
+      const m = await entrada(p, { forma: "Cartão de crédito", cartaoId: k, vencimento: "2026-09-10", quantidade: 2 });
+      const conta = await lancamento((await movimento(m)).lancamentoId!);
+      expect(await comSessao(c.fin, () => baixarLinha("fatura_cartao", conta.faturaCartaoId!, { data: HOJE, contaBancariaId: c.conta }))).toEqual({ ok: true });
+      expect((await lancamento(conta.id)).status).toBe("baixado");
+      const antes = await foto(p);
+      expect(await desfazer(m)).toEqual({ ok: false, erro: MSG_DESFACA_FATURA });
+      expect(await foto(p)).toEqual(antes);
+    });
   });
 
   describe("saída e ajuste", () => {
