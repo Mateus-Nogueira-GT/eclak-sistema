@@ -1,3 +1,5 @@
+import { dataEmCuiaba } from "@/domain/clientes";
+
 export const FORMAS_DEVOLUCAO = ["pix", "transferencia", "abatimento", "credito"] as const;
 export type FormaDevolucao = (typeof FORMAS_DEVOLUCAO)[number];
 
@@ -38,4 +40,20 @@ export function situacaoDoReembolso(c: { canceladoEm: string | null; fornecedor:
   if (!fornecedorAberto) return "Reembolsar o cliente";
   if (!c.fornecedor.pedidoEm) return "Pedir ao fornecedor";
   return clienteAberto ? "Aguardando fornecedor e cliente" : "Aguardando o fornecedor";
+}
+
+/** As datas de um caso que mexem na margem real: o caso e as baixas (AAAA-MM-DD) das contas ligadas não canceladas. */
+export type DatasDoCaso = { criadoEm: Date; atualizadoEm: Date; canceladoEm: Date | null; baixas: string[] };
+
+/**
+ * A margem real da viagem conciliada mudou por reembolso depois da conciliação: algum caso foi criado, atualizado ou
+ * cancelado depois de `conciliadaEm`, ou uma conta ligada a ele foi baixada a partir do dia da conciliação (em Cuiabá;
+ * a baixa só tem a data). Não conciliada: nunca.
+ */
+export function margemAlteradaDepoisDaConciliacao(conciliadaEm: Date | null, casos: DatasDoCaso[]): boolean {
+  if (!conciliadaEm) return false;
+  const dia = dataEmCuiaba(conciliadaEm);
+  return casos.some(
+    (c) => c.criadoEm > conciliadaEm || c.atualizadoEm > conciliadaEm || (c.canceladoEm !== null && c.canceladoEm > conciliadaEm) || c.baixas.some((b) => b >= dia),
+  );
 }

@@ -3,6 +3,7 @@ import { ShieldAlert } from "lucide-react";
 import { alertasDoCliente, hojeEmCuiaba } from "@/domain/clientes";
 import { margemDaAprovacao, FORMA_REFERENCIA, FORMAS_SIMULADOR, resultadoDoPreco } from "@/domain/precificacao";
 import { podeAcessar, veCamadaEstrategica } from "@/domain/perfis";
+import { margemAlteradaDepoisDaConciliacao } from "@/domain/reembolsos";
 import { exigirPerfil } from "@/server/auth";
 import { caixaDaViagem, produtosParaCaixa } from "@/server/queries/caixa-experiencia";
 import { obterCliente } from "@/server/queries/clientes";
@@ -66,10 +67,10 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
       const conciliada = vendida.conciliadaEm !== null;
       const caixa = await caixaDaViagem(id);
       const produtos = conciliada ? [] : await produtosParaCaixa(caixa?.filial ?? vendida.filial);
-      // Reembolsos: só Diretor e financeiros. Caso registrado depois da conciliação muda a margem real da conciliada.
+      // Reembolsos: só Diretor e financeiros. Caso criado, alterado ou cancelado (ou conta dele baixada) depois da
+      // conciliação muda a margem real da conciliada.
       const reembolsos = estrategico ? await reembolsosDaViagem(id) : [];
-      const margemAlteradaPorReembolso =
-        conciliada && reembolsos.some((r) => !r.canceladoEm && vendida.conciliadaEm !== null && r.criadoEm > vendida.conciliadaEm);
+      const margemAlteradaPorReembolso = margemAlteradaDepoisDaConciliacao(vendida.conciliadaEm, reembolsos);
       return (
         <div className="mx-auto max-w-[1240px]">
           <BlocoEmbarque avisos={avisos} />

@@ -77,6 +77,9 @@ export const estoqueMovimentos = pgTable(
     usuarioId: uuid("usuario_id")
       .notNull()
       .references(() => usuarios.id, { onDelete: "restrict" }),
+    /** Ordem de gravação (identidade, lida sob a trava do saldo): decide o último movimento do par produto/filial. */
+    seq: bigint("seq", { mode: "number" }).notNull().generatedAlwaysAsIdentity(),
+    /** Só para exibição: a ordem é `seq`. */
     criadoEm: timestamp("criado_em", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -93,7 +96,7 @@ export const estoqueMovimentos = pgTable(
       "estoque_movimentos_motivo",
       sql`${t.tipo} NOT IN ('saida', 'ajuste') OR (${t.motivo} IS NOT NULL AND char_length(${t.motivo}) BETWEEN 5 AND 200)`,
     ),
-    index("estoque_movimentos_produto_filial_idx").on(t.produtoId, t.filial, t.criadoEm),
+    index("estoque_movimentos_produto_filial_idx").on(t.produtoId, t.filial, t.seq),
     index("estoque_movimentos_caixa_idx").on(t.caixaId),
   ],
 );

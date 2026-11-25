@@ -53,9 +53,9 @@ export async function gravarSaldo(tx: Transacao, usuarioId: string, s: SaldoLinh
 }
 
 /**
- * Grava o movimento (só inserção) com `custo_medio_antes` = o custo médio do saldo travado. `criado_em` vem de
- * `clock_timestamp()`, lido já com a trava do saldo: a ordem dos movimentos do par é a ordem das travas (o `now()`
- * padrão é o início da transação e poderia inverter duas transações concorrentes).
+ * Grava o movimento (só inserção) com `custo_medio_antes` = o custo médio do saldo travado. A ordem dos movimentos do
+ * par é `seq` (identidade, tirada já com a trava do saldo: a ordem das travas). `criado_em` (`clock_timestamp()`) é só
+ * para exibição: um passo do relógio do Postgres pode invertê-lo.
  */
 export async function gravarMovimento(
   tx: Transacao,

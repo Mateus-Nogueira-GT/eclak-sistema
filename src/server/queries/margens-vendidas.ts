@@ -32,7 +32,12 @@ export type LinhaVendida = {
 
 export type ViagemVendidaDoPainel = LinhaVendida & { margens: MargensVendida };
 
-/** Viagens vendidas (não excluídas), com a venda e a versão vendida, que atendem `filtro`. Sem margens e sem checagem de acesso. */
+/**
+ * Viagens vendidas (não excluídas), com a venda e a versão vendida, que atendem `filtro`. Sem margens. Uso interno,
+ * **sem checagem de acesso**: quem chama já conferiu o perfil (`viagensNaoConciliadas` aqui; em `paineis.ts`,
+ * `obterVisaoGeral`, direto e por `vendidoNoIntervalo`, e, por `viagensVendidasNoIntervalo`, `relatorioDre`,
+ * `relatorioMargens` e `relatorioConsultores`). Exportada porque `paineis.ts` a usa.
+ */
 export async function linhasVendidas(filtro: SQL | undefined): Promise<LinhaVendida[]> {
   const linhas = await db
     .select({

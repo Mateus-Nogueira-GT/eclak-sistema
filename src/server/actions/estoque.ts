@@ -19,7 +19,8 @@ import { cancelarLancamentoNa, criarLancamentosNa, Desfazer, falha, type Falha, 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
 //
 // Estoque por filial (fatia 5b, spec §4 e §14): produtos, entradas (com a conta a pagar pelo núcleo de lançamentos),
-// desfazer entrada, saídas e ajustes. Só Diretor e financeiros. Travas na ordem produto (`for share` nas
+// desfazer entrada, saídas e ajustes. Só Diretor e financeiros. Entrada (e a caixa) só com produto ativo; saída e
+// ajuste aceitam produto desativado, para esvaziar o saldo que volta depois de desativado (caixa cancelada). Travas na ordem produto (`for share` nas
 // movimentações, `for update` no cadastro) → saldo (`for update`). Movimento nunca é alterado nem apagado; toda
 // escrita audita na mesma transação.
 
@@ -50,10 +51,16 @@ async function transacao(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok
   }
 }
 
-/** Produto ativo, travado `for share` (desativar, que trava `for update`, espera as movimentações em curso). */
-async function produtoAtivo(tx: Transacao, id: string): Promise<Produto> {
+/** Produto (ativo ou não), travado `for share` (desativar, que trava `for update`, espera as movimentações em curso). */
+async function produtoTravado(tx: Transacao, id: string): Promise<Produto> {
   const [p] = await tx.select().from(produtosEstoque).where(eq(produtosEstoque.id, id)).for("share");
   if (!p) throw new Desfazer(PRODUTO_NAO_ENCONTRADO);
+  return p;
+}
+
+/** Produto ativo, travado como em `produtoTravado`: só a entrada exige. */
+async function produtoAtivo(tx: Transacao, id: string): Promise<Produto> {
+  const p = await produtoTravado(tx, id);
   if (!p.ativo) throw new Desfazer(falha("Produto desativado"));
   return p;
 }
@@ -170,7 +177,7 @@ export async function registrarEntrada(dados: unknown) {
 }
 
 /**
- * Desfaz a entrada que é o último movimento do par produto/filial (decidido com o saldo travado): cancela a conta
+ * Desfaz a entrada que é o último movimento do par produto/filial (o maior `seq`, lido com o saldo travado): cancela a conta
  * (compra no cartão sai da fatura; recusada com a conta baixada ou a fatura paga), grava um ajuste negativo ao custo
  * da entrada e volta o saldo ao `custo_medio_antes` dela.
  */
@@ -188,7 +195,7 @@ export async function desfazerEntradaDeEstoque(movimentoId: string) {
         .select({ id: estoqueMovimentos.id })
         .from(estoqueMovimentos)
         .where(and(eq(estoqueMovimentos.produtoId, mov.produtoId), eq(estoqueMovimentos.filial, mov.filial)))
-        .orderBy(desc(estoqueMovimentos.criadoEm), desc(estoqueMovimentos.id))
+        .orderBy(desc(estoqueMovimentos.seq))
         .limit(1);
       if (ultimo.id !== mov.id) throw new Desfazer(falha(MSG_FACA_AJUSTE));
       const novo = desfazerEntrada(saldoDe(s), mov.quantidade, mov.custoMedioAntes);
@@ -213,14 +220,14 @@ export async function desfazerEntradaDeEstoque(movimentoId: string) {
   });
 }
 
-/** Saída manual (uso interno, brinde avulso, perda) ao custo médio; não gera lançamento. */
+/** Saída manual (uso interno, brinde avulso, perda) ao custo médio; não gera lançamento. Aceita produto desativado. */
 export async function registrarSaida(dados: unknown) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
     const p = saidaSchema.safeParse(dados);
     if (!p.success) return falhaDeValidacao(p.error);
     const v = p.data;
     return transacao("Falha ao registrar a saída", async (tx) => {
-      await produtoAtivo(tx, v.produtoId);
+      await produtoTravado(tx, v.produtoId);
       const s = await travarSaldo(tx, u.id, v.produtoId, v.filial);
       const novo = aposSaida(saldoDe(s), v.quantidade);
       if (!novo) throw new Desfazer(semSaldo(s));
@@ -235,7 +242,7 @@ export async function registrarSaida(dados: unknown) {
  * Contagem: a quantidade nova da filial; o movimento guarda a diferença ao custo médio; não gera lançamento. Ajuste
  * positivo numa filial com saldo 0 entra ao custo médio da outra filial (se > 0; senão a 0): passar itens de uma
  * filial para a outra por dois ajustes não zera o custo. A outra filial só é lida (sem trava: dois ajustes cruzados
- * não se esperam).
+ * não se esperam). Aceita produto desativado.
  */
 export async function ajustarEstoque(dados: unknown) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
@@ -243,7 +250,7 @@ export async function ajustarEstoque(dados: unknown) {
     if (!p.success) return falhaDeValidacao(p.error);
     const v = p.data;
     return transacao("Falha ao ajustar o estoque", async (tx) => {
-      await produtoAtivo(tx, v.produtoId);
+      await produtoTravado(tx, v.produtoId);
       const s = await travarSaldo(tx, u.id, v.produtoId, v.filial);
       const diferenca = v.quantidadeNova - s.quantidade;
       if (diferenca === 0) throw new Desfazer(falha("A quantidade da filial já é essa", "quantidadeNova"));

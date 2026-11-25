@@ -213,6 +213,7 @@ async function main() {
   const admin = createClient(NEXT_PUBLIC_SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+  let erroOriginal: unknown;
   try {
     let usuariosNovos = 0;
     for (const u of USUARIOS) {
@@ -266,11 +267,25 @@ async function main() {
     const b = await semear5b(sql);
     console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s), ${vendasNovas} viagem(ns) vendida(s), ${fin.lancamentos} lançamento(s), ${fin.faturas} fatura(s), ${fin.cartoes} cartão(ões) com ${fin.compras} compra(s), ${fin.notas} nota(s) fiscal(is), ${op.tarefas} tarefa(s), ${op.roteiros} roteiro(s) e ${op.dailies} daily(ies), ${conciliadas} transação(ões) de extrato, ${b.produtos} produto(s) de estoque, ${b.entradas} entrada(s) de estoque, ${b.caixas} caixa(s) de experiência, ${b.reembolsos} reembolso(s) e ${b.comunicados} comunicado(s) criados.`);
     console.log(`Logins: ${USUARIOS.map((u) => u.email).join(", ")} (senha ${SENHA})`);
+  } catch (e) {
+    erroOriginal = e;
+    throw e;
   } finally {
-    await sql.end();
-    // O cliente do app (núcleo usado pela fatura e pela 5b), carregado só aqui no fim se ainda não foi.
-    const { sql: appSql } = await import("../src/server/db/client");
-    await appSql.end();
+    // Fecha as duas conexões sem esconder o erro original: com ele, a falha ao fechar só é registrada; sem ele, a
+    // primeira falha ao fechar é o erro do seed. O cliente do app (núcleo usado pela fatura e pela 5b) é carregado só
+    // aqui no fim se ainda não foi.
+    const falhas: unknown[] = [];
+    for (const fechar of [() => sql.end(), async () => (await import("../src/server/db/client")).sql.end()]) {
+      try {
+        await fechar();
+      } catch (e) {
+        falhas.push(e);
+      }
+    }
+    if (falhas.length > 0) {
+      if (erroOriginal === undefined) throw falhas[0];
+      for (const f of falhas) console.error("Falha ao fechar a conexão (o erro do seed segue abaixo):", f instanceof Error ? f.message : f);
+    }
   }
 }
 

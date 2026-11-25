@@ -414,6 +414,20 @@
       "when": 1795642795985,
       "tag": "0058_avisos_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795647111998,
+      "tag": "0059_categorias_sistema_ativas",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795647123125,
+      "tag": "0060_estoque_movimentos_seq",
+      "breakpoints": true
     }
   ]
 }

@@ -85,13 +85,13 @@ async function transacao(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok
   }
 }
 
-/** A viagem do caso (sem trava: o caso não altera a viagem), com o código e o centro da filial. */
+/** A viagem do caso, não excluída (sem trava: o caso não altera a viagem), com o código e o centro da filial. */
 async function viagemDoCaso(tx: Transacao, viagemId: string): Promise<ViagemDoCaso | null> {
   const [v] = await tx
     .select({ id: viagens.id, status: viagens.status, filial: viagens.filial, clienteId: viagens.clienteId, seq: viagens.seq, codigoCliente: clientes.codigo })
     .from(viagens)
     .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
-    .where(eq(viagens.id, viagemId));
+    .where(and(eq(viagens.id, viagemId), isNull(viagens.excluidoEm)));
   return v ? { id: v.id, status: v.status, centro: centroDaFilial(v.filial), clienteId: v.clienteId, codigo: formatarCodigoViagem(v.codigoCliente, v.seq) } : null;
 }
 

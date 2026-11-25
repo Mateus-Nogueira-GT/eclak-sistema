@@ -99,7 +99,7 @@ export async function produtosParaCaixa(filial: Centro): Promise<ProdutoParaCaix
   });
 }
 
-/** Viagens vendidas e não conciliadas com embarque de hoje até daqui a 60 dias (as mais próximas primeiro), com a situação da caixa. */
+/** Viagens vendidas, não excluídas e não conciliadas com embarque de hoje até daqui a 60 dias (as mais próximas primeiro), com a situação da caixa. */
 export async function caixasProximas(): Promise<CaixaProxima[]> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
   const hoje = hojeEmCuiaba();
@@ -107,7 +107,7 @@ export async function caixasProximas(): Promise<CaixaProxima[]> {
     .select({ id: viagens.id, seq: viagens.seq, codigoCliente: clientes.codigo, cliente: clientes.grupo, inicio: viagens.inicio, filial: viagens.filial })
     .from(viagens)
     .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
-    .where(and(eq(viagens.status, "vendida"), isNull(viagens.conciliadaEm), gte(viagens.inicio, hoje), lte(viagens.inicio, somarDias(hoje, DIAS_PROXIMAS))))
+    .where(and(eq(viagens.status, "vendida"), isNull(viagens.excluidoEm), isNull(viagens.conciliadaEm), gte(viagens.inicio, hoje), lte(viagens.inicio, somarDias(hoje, DIAS_PROXIMAS))))
     .orderBy(asc(viagens.inicio), asc(viagens.id));
   const caixas =
     vs.length === 0

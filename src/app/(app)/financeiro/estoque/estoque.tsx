@@ -73,8 +73,8 @@ type Aberto =
 
 /**
  * Estoque por filial: cartões (valor em estoque e produtos abaixo do mínimo, sempre das duas filiais), filtros na URL,
- * a tabela dos produtos e, por produto, Entrada, Saída, Ajustar, Histórico e Editar. `historicoDe` (`?historico=`)
- * abre os movimentos do produto.
+ * a tabela dos produtos e, por produto, Entrada, Saída, Ajustar, Histórico e Editar (desativado: só Histórico, e
+ * Saída e Ajustar enquanto tiver saldo). `historicoDe` (`?historico=`) abre os movimentos do produto.
  */
 export function Estoque({
   filtro,
@@ -164,9 +164,10 @@ export function Estoque({
               </span>,
               <b key="v" className="whitespace-nowrap font-semibold">{reais(p.valor)}</b>,
               <span key="a" className="flex min-w-[180px] flex-wrap justify-end gap-x-4 gap-y-1">
-                {p.ativo && (
+                {p.ativo && <button className={link} onClick={() => setAberto({ tipo: "entrada", produto: p })}>Entrada</button>}
+                {/* Desativado com saldo (devolvido por uma caixa cancelada): saída e ajuste esvaziam. */}
+                {(p.ativo || p.mt.quantidade > 0 || p.rs.quantidade > 0) && (
                   <>
-                    <button className={link} onClick={() => setAberto({ tipo: "entrada", produto: p })}>Entrada</button>
                     <button className={link} onClick={() => setAberto({ tipo: "saida", produto: p })}>Saída</button>
                     <button className={link} onClick={() => setAberto({ tipo: "ajuste", produto: p })}>Ajustar</button>
                   </>

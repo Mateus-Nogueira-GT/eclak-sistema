@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
@@ -122,5 +123,20 @@ describe("esquema do estoque e da caixa de experiência", () => {
       expect(r).toMatchObject({ ok: false, erro: expect.stringContaining("não pode ser desativada") });
       expect((await db.select().from(categoriasFinanceiras).where(eq(categoriasFinanceiras.id, cat.id)))[0].ativa).toBe(true);
     }
+  });
+
+  it("0059: reativa as quatro categorias de sistema da 5b que estavam desativadas; as outras ficam como estão", async () => {
+    const quatro = ["reembolso_cliente", "reembolso_fornecedor", "caixa_experiencia", "papelaria"];
+    const [comum] = await sql<{ id: string }[]>`select id from categorias_financeiras where sistema is null limit 1`;
+    await sql`update categorias_financeiras set ativa = false where sistema in ${sql(quatro)} or id = ${comum.id}`;
+    const instrucoes = readFileSync("drizzle/0059_categorias_sistema_ativas.sql", "utf8")
+      .split("--> statement-breakpoint")
+      .map((i) => i.replace(/^\s*--.*$/gm, "").trim())
+      .filter(Boolean);
+    expect(instrucoes).toHaveLength(1);
+    for (const i of instrucoes) await sql.unsafe(i);
+    const linhas = await sql<{ sistema: string; ativa: boolean }[]>`select sistema, ativa from categorias_financeiras where sistema in ${sql(quatro)} order by sistema`;
+    expect(linhas).toEqual([...quatro].sort().map((sistema) => ({ sistema, ativa: true })));
+    expect((await sql`select ativa from categorias_financeiras where id = ${comum.id}`)[0].ativa).toBe(false);
   });
 });

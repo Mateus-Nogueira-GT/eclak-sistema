@@ -3,6 +3,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { hojeEmCuiaba } from "@/domain/clientes";
+import { margemAlteradaDepoisDaConciliacao } from "@/domain/reembolsos";
 import { centroDaFilial, type CategoriaSistema } from "@/domain/financeiro";
 import { intervaloDeMeses } from "@/domain/paineis";
 import { MSG_NAO_VENDIDA } from "@/domain/venda-entrada";
@@ -325,6 +326,43 @@ describe("reembolsos", () => {
     await db.update(viagens).set({ status: "vendida", conciliadaEm: new Date() }).where(eq(viagens.id, x.viagemId));
     const id = await registrar();
     expect((await comSessao(x.fin.id, () => fornecedorPagou(id, baixa("385,00")))).ok).toBe(true);
+  });
+
+  it("viagem excluída: registrar, editar e cancelar o caso são recusados como viagem não encontrada", async () => {
+    const id = await registrar();
+    await db.update(viagens).set({ excluidoEm: new Date() }).where(eq(viagens.id, x.viagemId));
+    const nao = { ok: false, erro: "Viagem não encontrada" };
+    expect(await comSessao(x.fin.id, () => registrarReembolso(entrada()))).toEqual(nao);
+    expect(await comSessao(x.fin.id, () => editarReembolso(id, entrada({ ocorrido: "O hotel cancelou duas diárias." })))).toEqual(nao);
+    expect(await comSessao(x.fin.id, () => cancelarReembolso(id, "Viagem excluída"))).toEqual(nao);
+  });
+
+  it("I3: margem alterada depois da conciliação pelas datas do caso e pela baixa de conta ligada (pela lista única)", async () => {
+    const id = await registrar();
+    const alterada = async () => {
+      const [v] = await db.select({ conciliadaEm: viagens.conciliadaEm }).from(viagens).where(eq(viagens.id, x.viagemId));
+      return margemAlteradaDepoisDaConciliacao(v.conciliadaEm, await comSessao(x.fin.id, () => reembolsosDaViagem(x.viagemId)));
+    };
+    // Caso registrado há duas horas e viagem conciliada há uma: nada mudou depois.
+    const agora = Date.now();
+    await db.update(reembolsos).set({ criadoEm: new Date(agora - 7_200_000), atualizadoEm: new Date(agora - 7_200_000) }).where(eq(reembolsos.id, id));
+    const conciliadaEm = new Date(agora - 3_600_000);
+    await db.update(viagens).set({ conciliadaEm }).where(eq(viagens.id, x.viagemId));
+    expect(await alterada()).toBe(false);
+    expect((await caso(id)).atualizadoEm).toBeInstanceOf(Date);
+
+    // A baixa pela lista única não toca o caso: acende pela data da baixa.
+    const pagar = (await contaDoLado(id, "pagar"))!;
+    expect((await comSessao(x.fin.id, () => baixarLinha("manual", pagar.id, baixa("411,45")))).ok).toBe(true);
+    expect((await linhaDoCaso(id)).atualizadoEm.getTime()).toBeLessThan(conciliadaEm.getTime());
+    expect((await caso(id)).baixas).toEqual([HOJE]);
+    expect(await alterada()).toBe(true);
+
+    // Desfeita a baixa, apaga; cancelar o caso acende de novo.
+    expect((await comSessao(x.fin.id, () => desfazerBaixaLinha("manual", pagar.id))).ok).toBe(true);
+    expect(await alterada()).toBe(false);
+    expect((await comSessao(x.fin.id, () => cancelarReembolso(id, "Cliente desistiu do reembolso"))).ok).toBe(true);
+    expect(await alterada()).toBe(true);
   });
 
   it("margem real: 411,45 devolvido − 385,00 cobrado → final cai 26,45; depois das baixas, os valores efetivos", async () => {

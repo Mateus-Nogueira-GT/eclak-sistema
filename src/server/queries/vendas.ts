@@ -630,7 +630,11 @@ async function ajustesDasViagens(executor: typeof db | Transacao, viagemIds: str
   return porViagem;
 }
 
-/** Ajustes da margem de uma viagem (`ajustesDasViagens`). Uso interno, **sem checagem de acesso**. */
+/**
+ * Ajustes da margem de uma viagem (`ajustesDasViagens`). Uso interno, **sem checagem de acesso**: quem chama já
+ * conferiu o perfil. Único chamador: `obterViagemVendida` (só com `veCamadaEstrategica` do usuário de `exigirPerfil`).
+ * Exportada só para os testes de integração (margem-ajustes e reembolsos).
+ */
 export async function ajustesDaViagem(executor: typeof db | Transacao, viagemId: string): Promise<AjustesMargem> {
   return (await ajustesDasViagens(executor, [viagemId])).get(viagemId)!;
 }

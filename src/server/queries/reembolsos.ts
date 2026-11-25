@@ -56,6 +56,9 @@ export type ReembolsoCaso = {
   canceladoEm: Date | null;
   motivoCancelamento: string | null;
   criadoEm: Date;
+  atualizadoEm: Date;
+  /** Datas das baixas das contas ligadas não canceladas (para `margemAlteradaDepoisDaConciliacao`). */
+  baixas: string[];
 };
 
 export type ResumoReembolsos = { abertos: number; aReceber: bigint; aDevolver: bigint };
@@ -127,6 +130,8 @@ async function casos(filtro: SQL | undefined, ordem: SQL[]): Promise<ReembolsoCa
       canceladoEm: r.canceladoEm,
       motivoCancelamento: r.motivoCancelamento,
       criadoEm: r.criadoEm,
+      atualizadoEm: r.atualizadoEm,
+      baixas: [baixada(receber)?.baixadoEm, baixada(pagar)?.baixadoEm].filter((d): d is string => !!d),
     };
   });
 }

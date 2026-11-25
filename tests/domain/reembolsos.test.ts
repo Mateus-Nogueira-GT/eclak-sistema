@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FORMAS_DEVOLUCAO, geraContaAPagar, ROTULO_FORMA_DEVOLUCAO, situacaoDoReembolso, type LadoCliente, type LadoFornecedor } from "@/domain/reembolsos";
+import { FORMAS_DEVOLUCAO, geraContaAPagar, margemAlteradaDepoisDaConciliacao, ROTULO_FORMA_DEVOLUCAO, situacaoDoReembolso, type LadoCliente, type LadoFornecedor } from "@/domain/reembolsos";
 import { reembolsoSchema } from "@/domain/reembolsos-entrada";
 
 const forn = (o: Partial<LadoFornecedor> = {}): LadoFornecedor => ({ valor: 10000n, pedidoEm: null, recebidoEm: null, ...o });
@@ -93,5 +93,41 @@ describe("reembolsoSchema", () => {
     expect(erro({ contaPagarId: "nao-uuid" })).not.toBeNull();
     expect(erro({ contaPagarId: "22222222-2222-4222-8222-222222222222" })).toBeNull();
     expect(erro({ contaPagarId: "" })).toBeNull();
+  });
+});
+
+describe("margemAlteradaDepoisDaConciliacao", () => {
+  // Conciliada às 23:30 de 20/11 em Cuiabá (UTC−4): 21/11 03:30Z.
+  const conciliada = new Date("2026-11-21T03:30:00Z");
+  const antes = new Date("2026-11-21T03:00:00Z");
+  const depois = new Date("2026-11-21T04:00:00Z");
+  const caso = (o: Partial<{ criadoEm: Date; atualizadoEm: Date; canceladoEm: Date | null; baixas: string[] }> = {}) => ({
+    criadoEm: antes,
+    atualizadoEm: antes,
+    canceladoEm: null,
+    baixas: [],
+    ...o,
+  });
+  const alterada = (...casos: ReturnType<typeof caso>[]) => margemAlteradaDepoisDaConciliacao(conciliada, casos);
+
+  it("não conciliada ou sem casos: não acende", () => {
+    expect(margemAlteradaDepoisDaConciliacao(null, [caso({ criadoEm: depois, atualizadoEm: depois })])).toBe(false);
+    expect(alterada()).toBe(false);
+  });
+
+  it("tudo antes da conciliação: não acende (também o caso cancelado antes)", () => {
+    expect(alterada(caso({ baixas: ["2026-11-19"] }), caso({ canceladoEm: antes }))).toBe(false);
+  });
+
+  it("caso criado, atualizado ou cancelado depois: acende", () => {
+    expect(alterada(caso({ criadoEm: depois, atualizadoEm: depois }))).toBe(true);
+    expect(alterada(caso({ atualizadoEm: depois }))).toBe(true);
+    expect(alterada(caso({ canceladoEm: depois }))).toBe(true);
+  });
+
+  it("conta baixada a partir do dia da conciliação em Cuiabá: acende; no dia anterior, não", () => {
+    expect(alterada(caso({ baixas: ["2026-11-20"] }))).toBe(true);
+    expect(alterada(caso({ baixas: ["2026-11-21"] }))).toBe(true);
+    expect(alterada(caso({ baixas: ["2026-11-19"] }))).toBe(false);
   });
 });

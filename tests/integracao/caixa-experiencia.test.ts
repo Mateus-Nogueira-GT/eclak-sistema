@@ -7,7 +7,7 @@ import { hojeEmCuiaba } from "@/domain/clientes";
 import { MSG_CONCILIADA, MSG_NAO_VENDIDA } from "@/domain/venda-entrada";
 import type { MargemReal } from "@/domain/venda";
 import { cancelarCaixa, confirmarCaixa, salvarCaixa } from "@/server/actions/caixa-experiencia";
-import { registrarEntrada, salvarProduto } from "@/server/actions/estoque";
+import { ajustarEstoque, desativarProduto, registrarEntrada, registrarSaida, salvarProduto } from "@/server/actions/estoque";
 import { conciliar } from "@/server/actions/financeiro-viagem";
 import { ErroAcesso } from "@/server/auth";
 import { db } from "@/server/db/client";
@@ -237,8 +237,10 @@ describe("caixa de experiência", () => {
     expect((await auditoriaDe("caixas_experiencia", caixa.id)).at(-1)).toMatchObject({ acao: "alterar", depois: { situacao: "cancelada" } });
 
     ok(await comSessao(x.u.id, () => salvarCaixa(x.viagemId, [{ produtoId: p1, quantidade: 1 }])));
+    // Sem depender da ordem de `criado_em` (o relógio do banco pode voltar entre as duas): a cancelada pelo id já lido.
     const caixas = await caixasDa(x.viagemId);
-    expect(caixas.map((c) => c.situacao)).toEqual(["cancelada", "rascunho"]);
+    expect(caixas.map((c) => c.situacao).sort()).toEqual(["cancelada", "rascunho"]);
+    expect(caixas.find((c) => c.id === caixa.id)?.situacao).toBe("cancelada");
     ok(await comSessao(x.u.id, () => confirmarCaixa(x.viagemId)));
     expect(await saldo(p1)).toMatchObject({ quantidade: 11, custoMedio: 3900n });
   });
@@ -348,5 +350,39 @@ describe("caixa de experiência", () => {
     // Conciliada sai da lista.
     await db.update(viagens).set({ conciliadaEm: new Date() }).where(eq(viagens.id, x.viagemId));
     expect(await comSessao(x.fin.id, () => caixasProximas())).toEqual([]);
+  });
+
+  it("caixasProximas: viagem excluída sai da lista", async () => {
+    await db.update(viagens).set({ inicio: dias(HOJE, 10), fim: dias(HOJE, 20) }).where(eq(viagens.id, x.viagemId));
+    expect((await comSessao(x.fin.id, () => caixasProximas())).map((c) => c.viagemId)).toEqual([x.viagemId]);
+    await db.update(viagens).set({ excluidoEm: new Date() }).where(eq(viagens.id, x.viagemId));
+    expect(await comSessao(x.fin.id, () => caixasProximas())).toEqual([]);
+  });
+
+  it("I1: produto desativado com saldo devolvido pela caixa cancelada aceita saída e ajuste; entrada e caixa continuam recusadas", async () => {
+    const p1 = await produto(x.fin.id, "Caderno de viagem");
+    await entrada(x.fin.id, p1, 2, "38,00");
+    ok(await comSessao(x.u.id, () => salvarCaixa(x.viagemId, [{ produtoId: p1, quantidade: 2 }])));
+    ok(await comSessao(x.u.id, () => confirmarCaixa(x.viagemId)));
+    expect(await saldo(p1)).toMatchObject({ quantidade: 0 });
+    ok(await comSessao(x.fin.id, () => desativarProduto(p1)));
+    ok(await comSessao(x.u.id, () => cancelarCaixa(x.viagemId, "Cliente desistiu da caixa")));
+    expect(await saldo(p1)).toMatchObject({ quantidade: 2, custoMedio: 3800n });
+
+    // Saída e ajuste esvaziam o produto desativado.
+    ok(await comSessao(x.fin.id, () => registrarSaida({ produtoId: p1, filial: "RS", quantidade: 1, motivo: "Brinde avulso" })));
+    expect(await saldo(p1)).toMatchObject({ quantidade: 1, custoMedio: 3800n });
+    ok(await comSessao(x.fin.id, () => ajustarEstoque({ produtoId: p1, filial: "RS", quantidadeNova: 0, motivo: "Contagem do mês" })));
+    expect(await saldo(p1)).toMatchObject({ quantidade: 0, custoMedio: 0n });
+
+    // Entrada e caixa só com produto ativo.
+    const antes = await foto();
+    expect(
+      await comSessao(x.fin.id, () =>
+        registrarEntrada({ produtoId: p1, filial: "RS", quantidade: 1, valorUnitario: "38,00", fornecedorId: "", fornecedorTexto: "Loja", vencimento: "2027-01-31", forma: "PIX", cartaoId: "" }),
+      ),
+    ).toEqual({ ok: false, erro: "Produto desativado" });
+    expect((await comSessao(x.u.id, () => salvarCaixa(x.viagemId, [{ produtoId: p1, quantidade: 1 }]))).ok).toBe(false);
+    expect(await foto()).toEqual(antes);
   });
 });

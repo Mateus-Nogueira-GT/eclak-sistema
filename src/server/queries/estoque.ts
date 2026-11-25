@@ -94,7 +94,8 @@ export type MovimentoLinha = {
 export async function historicoDoProduto(produtoId: string): Promise<MovimentoLinha[]> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
   if (!ehUuid(produtoId)) return [];
-  const ordem = [desc(estoqueMovimentos.criadoEm), desc(estoqueMovimentos.id)];
+  // Pela ordem de gravação (`seq`), a mesma com que a action decide o último movimento.
+  const ordem = [desc(estoqueMovimentos.seq)];
   const linhas = await db
     .select({
       id: estoqueMovimentos.id,

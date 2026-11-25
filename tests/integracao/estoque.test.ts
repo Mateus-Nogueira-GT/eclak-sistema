@@ -67,7 +67,7 @@ const desfazer = (movimentoId: string) => comSessao(c.fin, () => desfazerEntrada
 const saldo = async (produtoId: string, filial: "MT" | "RS" = "MT") =>
   (await db.select().from(estoqueSaldos).where(and(eq(estoqueSaldos.produtoId, produtoId), eq(estoqueSaldos.filial, filial))))[0];
 const movimento = async (movId: string) => (await db.select().from(estoqueMovimentos).where(eq(estoqueMovimentos.id, movId)))[0];
-const movimentos = (produtoId: string) => db.select().from(estoqueMovimentos).where(eq(estoqueMovimentos.produtoId, produtoId)).orderBy(asc(estoqueMovimentos.criadoEm));
+const movimentos = (produtoId: string) => db.select().from(estoqueMovimentos).where(eq(estoqueMovimentos.produtoId, produtoId)).orderBy(asc(estoqueMovimentos.seq));
 const lancamento = async (lid: string) => (await db.select().from(lancamentos).where(eq(lancamentos.id, lid)))[0];
 const auditoriaDe = (tabela: string, registroId: string) =>
   db.select().from(auditoria).where(and(eq(auditoria.tabela, tabela), eq(auditoria.registroId, registroId))).orderBy(asc(auditoria.id));
@@ -115,7 +115,7 @@ describe("estoque: actions e queries", () => {
       });
     });
 
-    it("desativarProduto: recusado com saldo em qualquer filial; com saldo 0 desativa e audita; depois não aceita movimento", async () => {
+    it("desativarProduto: recusado com saldo em qualquer filial; com saldo 0 desativa e audita; depois não aceita entrada", async () => {
       const p = await novoProduto();
       await entrada(p, { filial: "RS", quantidade: 2 });
       const antes = await foto(p);
@@ -240,6 +240,22 @@ describe("estoque: actions e queries", () => {
       // Desfeita: o último movimento é o ajuste; nem ela nem a anterior se desfazem mais.
       expect(await desfazer(m2)).toEqual({ ok: false, erro: MSG_AJUSTE });
       expect(await desfazer(m1)).toEqual({ ok: false, erro: MSG_AJUSTE });
+    });
+
+    it("o último movimento é decidido por `seq`, não pelo relógio: `criado_em` fora de ordem não muda o que se desfaz", async () => {
+      const p = await novoProduto();
+      const m1 = await entrada(p);
+      const m2 = await entrada(p, { quantidade: 5, valorUnitario: "44,00" });
+      expect((await movimento(m2)).seq).toBeGreaterThan((await movimento(m1)).seq);
+      // O relógio do banco voltou entre as duas: a segunda ficou com `criado_em` uma hora antes da primeira.
+      await sql`update estoque_movimentos set criado_em = criado_em - interval '2 hours' where id = ${m2}`;
+      const h = await comSessao(c.fin, () => historicoDoProduto(p));
+      expect(h.map((x) => [x.id, x.desfazivel])).toEqual([
+        [m2, true],
+        [m1, false],
+      ]);
+      expect(await desfazer(m1)).toEqual({ ok: false, erro: MSG_AJUSTE });
+      expect(await desfazer(m2)).toEqual({ ok: true, id: m2 });
     });
 
     it("única entrada desfeita zera saldo e custo médio; depois de uma saída é recusada", async () => {
