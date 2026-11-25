@@ -3,12 +3,12 @@ import { and, count, eq, isNull } from "drizzle-orm";
 import { PASSO_AVISO, type AvisoCentral } from "@/domain/avisos";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { formatarPercentual, formatarReais } from "@/domain/dinheiro";
-import { pctAbaixoDe } from "@/domain/paineis";
+import { pctAbaixoDe, RESPONSAVEL_AVISO } from "@/domain/paineis";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
 import { versoesPrecificacao, viagens } from "@/server/db/schema";
 import { obterFluxoDeCaixa, type FluxoDeCaixa } from "@/server/queries/caixa";
-import { viagensNaoConciliadas, type ViagemVendidaDoPainel } from "@/server/queries/paineis";
+import { viagensNaoConciliadas, type ViagemVendidaDoPainel } from "@/server/queries/margens-vendidas";
 import { regrasVigentes } from "@/server/queries/regras";
 import { avisoAgregado, plural } from "./financeiros";
 
@@ -58,7 +58,7 @@ export async function avisosDeGestao(dados?: DadosGestao): Promise<AvisoCentral[
       titulo: `Caixa negativo em ${negativas.length} das próximas ${d.fluxo.semanas.length} semanas, a partir da semana de ${negativas[0].rotulo}`,
       detalhe: `Menor saldo projetado: ${formatarReais(menor.saldoFinal)}, na semana de ${menor.rotulo}`,
       passo: PASSO_AVISO.caixa,
-      setor: "Gestão",
+      setor: RESPONSAVEL_AVISO.caixa,
       href: "/financeiro/caixa",
       dispensavel: false,
     });
@@ -79,7 +79,7 @@ export async function avisosDeGestao(dados?: DadosGestao): Promise<AvisoCentral[
       titulo: `${v.codigo} abaixo da margem de referência`,
       detalhe: `${v.cliente}: margem real de ${formatarPercentual(realPct)}, referência de ${formatarPercentual(d.referencia)}`,
       passo: PASSO_AVISO.margem,
-      setor: "Gestão",
+      setor: RESPONSAVEL_AVISO.margem,
       href: `/viagens/${v.viagemId}`,
       dispensavel: true,
     });

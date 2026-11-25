@@ -11,6 +11,7 @@ import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
 import { categoriasFinanceiras, lancamentosFinanceiros as lf } from "@/server/db/schema";
 import { pendentesParaAviso } from "@/server/queries/conciliacao";
+import { bigintSql } from "@/server/queries/margens-vendidas";
 
 const DIAS_A_PAGAR = 7;
 
@@ -21,7 +22,7 @@ async function emAberto(filtro: SQL | undefined): Promise<Agregado> {
   const [t] = await db
     .select({
       quantidade: count(),
-      total: sql<string>`coalesce(sum(${lf.valorPrevisto}), 0)::bigint`.mapWith((v: string) => BigInt(v)),
+      total: bigintSql(sql`sum(${lf.valorPrevisto})`),
       desde: min(lf.vencimento),
     })
     .from(lf)

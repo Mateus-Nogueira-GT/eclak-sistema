@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, between, eq, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, between, eq, isNull, ne, or, sql } from "drizzle-orm";
 import type { PeriodoCaixa } from "@/domain/caixa";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { formatarPercentual } from "@/domain/dinheiro";
@@ -23,92 +23,37 @@ import {
   type TotalConciliacaoRel,
 } from "@/domain/paineis";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
-import { statusDaViagem } from "@/domain/venda";
-import { formatarCodigoViagem } from "@/domain/viagens";
 import { avisosDeGestao, avisosFinanceiros } from "@/server/avisos";
+import { plural } from "@/server/avisos/financeiros";
 import { exigirPerfil } from "@/server/auth";
 import { db } from "@/server/db/client";
 import {
   categoriasFinanceiras,
-  clientes,
   contasBancarias,
   lancamentosFinanceiros as lf,
   usuarios,
   vendas,
-  versoesPrecificacao,
   viagens,
 } from "@/server/db/schema";
 import { obterConciliacao, SITUACOES_CONCILIACAO } from "@/server/queries/conciliacao";
 import { obterFluxoDeCaixa, saldoAtualSql, type FluxoDeCaixa } from "@/server/queries/caixa";
 import { situacaoSql } from "@/server/queries/financeiro";
 import { regrasVigentes } from "@/server/queries/regras";
-import { margensVendidas, type MargensVendida } from "@/server/queries/vendas";
+import { bigintSql, comMargens, linhasVendidas, naoConciliadasDe, type ViagemVendidaDoPainel } from "@/server/queries/margens-vendidas";
+import { margensVendidas } from "@/server/queries/vendas";
 
 const MAX_AVISOS = 8;
 /** Avisos de margem uma viagem por linha; as demais viram uma linha "e mais N viagens". */
 const MAX_AVISOS_MARGEM = 3;
 const MAX_PERDAS = 6;
 
-export type LinhaVendida = {
-  viagemId: string;
-  codigo: string;
-  cliente: string;
-  destino: string;
-  consultorId: string;
-  consultorNome: string;
-  aceiteEm: string;
-  /** O "Vendido" da tela da viagem (`vendas.total`, `resumo.valorVendido`). */
-  vendido: bigint;
-  /** Preço do pacote da versão vendida: a receita planejada (entrada `preco` de `margemReal`). */
-  preco: bigint;
-  inicio: string;
-  fim: string;
-  conciliadaEm: Date | null;
-};
-
-export type ViagemVendidaDoPainel = LinhaVendida & { margens: MargensVendida };
-
-/** Viagens vendidas (não excluídas), com a venda e a versão vendida, que atendem `filtro`. Sem checagem de acesso. */
-async function linhasVendidas(filtro: SQL | undefined): Promise<LinhaVendida[]> {
-  const linhas = await db
-    .select({
-      viagemId: viagens.id,
-      seq: viagens.seq,
-      clienteCodigo: clientes.codigo,
-      cliente: clientes.grupo,
-      destino: viagens.destino,
-      consultorId: viagens.consultorId,
-      consultorNome: usuarios.nome,
-      aceiteEm: vendas.aceiteEm,
-      vendido: vendas.total,
-      preco: versoesPrecificacao.preco,
-      inicio: viagens.inicio,
-      fim: viagens.fim,
-      conciliadaEm: viagens.conciliadaEm,
-    })
-    .from(viagens)
-    .innerJoin(vendas, eq(vendas.viagemId, viagens.id))
-    .innerJoin(versoesPrecificacao, eq(versoesPrecificacao.id, vendas.versaoId))
-    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
-    .innerJoin(usuarios, eq(usuarios.id, viagens.consultorId))
-    .where(and(isNull(viagens.excluidoEm), eq(viagens.status, "vendida"), filtro))
-    .orderBy(asc(vendas.aceiteEm), asc(viagens.id));
-  return linhas.map(({ seq, clienteCodigo, ...l }) => ({ ...l, codigo: formatarCodigoViagem(clienteCodigo, seq) }));
-}
-
 const aceiteNo = (i: Intervalo) => between(vendas.aceiteEm, i.de, i.ate);
-
-function comMargens(linhas: LinhaVendida[], margens: Map<string, MargensVendida>): ViagemVendidaDoPainel[] {
-  return linhas
-    .filter((l) => margens.has(l.viagemId))
-    .map((l) => ({ ...l, margens: margens.get(l.viagemId)! }));
-}
 
 /**
  * Viagens vendidas com aceite no intervalo (R1), com o vendido, o preço planejado e as margens de `margensVendidas`
- * (uma leitura em lote). Uso interno, **sem checagem de acesso**: só chamar depois de `exigirPerfil`.
+ * (uma leitura em lote). **Sem checagem de acesso**: só chamar depois de `exigirPerfil`.
  */
-export async function viagensVendidasNoIntervalo(i: Intervalo): Promise<ViagemVendidaDoPainel[]> {
+async function viagensVendidasNoIntervalo(i: Intervalo): Promise<ViagemVendidaDoPainel[]> {
   const linhas = await linhasVendidas(aceiteNo(i));
   return comMargens(linhas, await margensVendidas(linhas.map((l) => l.viagemId)));
 }
@@ -150,8 +95,6 @@ export type VisaoGeral = {
   viagensAbaixoReferencia: number;
 };
 
-const bigintSql = (expr: SQL) => sql<string>`coalesce(${expr}, 0)::bigint`.mapWith((v: string) => BigInt(v));
-
 /**
  * Recebido de clientes e pago a fornecedores (R2): baixas no intervalo pelo valor de caixa. Pagamentos a fornecedor
  * pagos via cartão corporativo (`fatura_cartao_id IS NOT NULL`, `status_base = 'baixado'`) entram na data da quitação
@@ -171,24 +114,6 @@ async function caixaDoIntervalo(i: Intervalo): Promise<{ recebido: bigint; pago:
 /** Vendido com aceite no intervalo, pelas mesmas linhas (`linhasVendidas`) do vendido do período atual. */
 async function vendidoNoIntervalo(i: Intervalo): Promise<bigint> {
   return (await linhasVendidas(aceiteNo(i))).reduce((s, l) => s + l.vendido, 0n);
-}
-
-const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
-
-/** Viagens vendidas e não conciliadas (pela situação da viagem), com as margens. Sem checagem de acesso. */
-export async function viagensNaoConciliadas(hoje: string): Promise<ViagemVendidaDoPainel[]> {
-  const linhas = await linhasVendidas(isNull(viagens.conciliadaEm));
-  return naoConciliadasDe(linhas, await margensVendidas(linhas.map((l) => l.viagemId)), hoje);
-}
-
-function naoConciliadasDe(linhas: LinhaVendida[], margens: Map<string, MargensVendida>, hoje: string): ViagemVendidaDoPainel[] {
-  return comMargens(
-    linhas.filter(
-      (l) =>
-        statusDaViagem({ status: "vendida", inicio: l.inicio, fim: l.fim, conciliadaEm: l.conciliadaEm?.toISOString() ?? null, hoje }) !== "conciliada",
-    ),
-    margens,
-  );
 }
 
 /**
