@@ -3,6 +3,7 @@ import { converter, type Moeda } from "./cambio";
 import { cpfValido, formatarCpf } from "./clientes";
 import { arredondar, lerDecimal } from "./decimal";
 import { custoLiquido, impostoSobreMargem, pct1, type FormaPagamento, type TipoItem } from "./precificacao";
+import type { FormaDevolucao } from "./reembolsos";
 
 // Venda fechada (sem I/O): cronograma de recebimento, contas a pagar a partir do snapshot aprovado,
 // margem real (mesma conta da aprovação), ponte da margem, status derivado da viagem e documento da fatura.
@@ -389,6 +390,39 @@ export function efeitosDoRecebimento(preco: bigint, parcelas: ParcelaMargem[]): 
 
 export type ContaMargem = { aereo: boolean; previstoBrl: bigint; pagoBrl: bigint | null };
 
+/**
+ * Ajustes da viagem, fora do custo (spec §7): `caixa` = custo total da caixa de experiência confirmada (0 sem
+ * caixa); `reembolsos` = `ajusteDosReembolsos` dos casos da viagem (pode ser negativo).
+ */
+export type AjustesMargem = { caixa: bigint; reembolsos: bigint };
+
+const SEM_AJUSTES: AjustesMargem = { caixa: 0n, reembolsos: 0n };
+
+/**
+ * Σ (devolver − cobrar) dos casos não cancelados: cobrar = recebido do fornecedor, senão o valor a cobrar; devolver
+ * = devolvido ao cliente, senão o valor a devolver, e 0 na forma `abatimento` (o efeito já está na parcela recebida a
+ * menor, que a margem real conta). Negativo quando o fornecedor devolveu mais do que foi repassado ao cliente.
+ */
+export function ajusteDosReembolsos(
+  casos: {
+    cancelado: boolean;
+    forma: FormaDevolucao;
+    valorCobrar: bigint;
+    valorRecebido: bigint | null;
+    valorDevolver: bigint;
+    valorDevolvido: bigint | null;
+  }[],
+): bigint {
+  let total = 0n;
+  for (const c of casos) {
+    if (c.cancelado) continue;
+    const cobrar = c.valorRecebido ?? c.valorCobrar;
+    const devolver = c.forma === "abatimento" ? 0n : (c.valorDevolvido ?? c.valorDevolver);
+    total += devolver - cobrar;
+  }
+  return total;
+}
+
 export type EntradaMargemReal = {
   /** Preço do pacote da versão aprovada (sem a taxa de serviço). */
   preco: bigint;
@@ -403,6 +437,8 @@ export type EntradaMargemReal = {
   impostoPct: string;
   /** Custo da taxa de roteiro, como na aprovação (`taxaRoteiroDoSnapshot`). */
   taxaRoteiro: bigint;
+  /** Caixa de experiência e reembolsos da viagem; omitidos = 0 nos dois. */
+  ajustes?: AjustesMargem;
 };
 
 export type MargemReal = {
@@ -412,9 +448,13 @@ export type MargemReal = {
   imposto: bigint;
   taxas: bigint;
   fixo: bigint;
+  /** receita − custo − imposto − taxas − fixo − ajustes. */
   final: bigint;
   /** Sobre a receita realizada. */
   finalPct: string;
+  /** caixa + reembolsos (fora do custo e da base do imposto). */
+  ajustes: bigint;
+  ajustesDetalhe: AjustesMargem;
 };
 
 /**
@@ -422,7 +462,8 @@ export type MargemReal = {
  * mais e parcelas canceladas, na parte do pacote); custo = Σ contas não-Aéreo (pago em reais, senão o previsto
  * atual) − comissões recebidas + taxa de roteiro; imposto = imposto% × max(receita − custo, 0); taxas = Σ parcelas
  * não canceladas (efetiva se recebida e informada, senão a prevista alocada da aprovação) — com as previstas de
- * `alocarTaxasPrevistas`, é a taxa da aprovação + Σ (efetiva − prevista) das recebidas; fixo da versão.
+ * `alocarTaxasPrevistas`, é a taxa da aprovação + Σ (efetiva − prevista) das recebidas; fixo da versão. Os ajustes
+ * (caixa e reembolsos) saem só do `final`: não mexem em receita, custo, imposto, taxas nem fixo.
  */
 export function margemReal(e: EntradaMargemReal): MargemReal {
   const receita = e.preco + efeitosDoRecebimento(e.preco, e.parcelas).reduce((a, x) => a + x.valor, 0n);
@@ -432,8 +473,10 @@ export function margemReal(e: EntradaMargemReal): MargemReal {
   const taxas = e.parcelas
     .filter((p) => !p.cancelada)
     .reduce((a, p) => a + (p.recebida && p.taxaEfetiva !== null ? p.taxaEfetiva : p.taxaPrevista), 0n);
-  const final = receita - custo - imposto - taxas - e.fixo;
-  return { receita, custo, imposto, taxas, fixo: e.fixo, final, finalPct: pct1(final, receita) };
+  const ajustesDetalhe = { ...(e.ajustes ?? SEM_AJUSTES) };
+  const ajustes = ajustesDetalhe.caixa + ajustesDetalhe.reembolsos;
+  const final = receita - custo - imposto - taxas - e.fixo - ajustes;
+  return { receita, custo, imposto, taxas, fixo: e.fixo, final, finalPct: pct1(final, receita), ajustes, ajustesDetalhe };
 }
 
 export type MargemPlanejada = { custo: bigint; imposto: bigint; taxa: bigint; fixo: bigint; final: bigint; finalPct: string };
@@ -500,6 +543,8 @@ export type EntradaPonte = {
   contas: ContaPonte[];
   comissoes: ComissaoPonte[];
   parcelas: ParcelaMargem[];
+  /** Caixa de experiência e reembolsos da viagem; omitidos = 0 nos dois. */
+  ajustes?: AjustesMargem;
 };
 
 export type LinhaPonte = { rotulo: string; valor: bigint };
@@ -521,6 +566,7 @@ export type LinhaPonte = { rotulo: string; valor: bigint };
  * - "Recebido a menos", "Recebido a mais" (Σ das parcelas recebidas com valor diferente) e "Parcela cancelada: n de N",
  *   na parte do pacote (`efeitosDoRecebimento`).
  * - "Taxas financeiras" e "Imposto".
+ * - "Caixa de experiência" e "Reembolsos" (os ajustes da viagem, com sinal trocado; fora da base do imposto).
  * As linhas do meio somam exatamente real.final − planejada.final (conferido; senão lança).
  */
 export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: LinhaPonte[] } {
@@ -534,6 +580,7 @@ export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: Linh
     fixo: e.planejada.fixo,
     impostoPct: e.impostoPct,
     taxaRoteiro: e.taxaRoteiro,
+    ajustes: e.ajustes,
   });
 
   const meio: LinhaPonte[] = [];
@@ -593,6 +640,8 @@ export function ponteDaMargem(e: EntradaPonte): { real: MargemReal; linhas: Linh
 
   add("Taxas financeiras", -(real.taxas - e.planejada.taxa));
   add("Imposto", -(real.imposto - e.planejada.imposto));
+  add("Caixa de experiência", -real.ajustesDetalhe.caixa);
+  add("Reembolsos", -real.ajustesDetalhe.reembolsos);
 
   const soma = meio.reduce((a, l) => a + l.valor, 0n);
   if (soma !== real.final - e.planejada.final) throw new Error("Margem planejada não confere com o preço da versão");

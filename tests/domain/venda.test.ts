@@ -4,6 +4,7 @@ import { arredondar } from "@/domain/decimal";
 import { impostoSobreMargem, pct1, precoDoPacote, type FormaPagamento } from "@/domain/precificacao";
 import { REGRAS_INICIAIS as R } from "@/domain/regras";
 import {
+  ajusteDosReembolsos,
   aplicarFormaFornecedor,
   COMISSAO_TIPOS,
   contasDoSnapshot,
@@ -447,7 +448,153 @@ describe("margemReal", () => {
       impostoPct: "7.000",
       taxaRoteiro: 0n,
     });
-    expect(m).toEqual({ receita: 100000n, custo: 120000n, imposto: 0n, taxas: 0n, fixo: 0n, final: -20000n, finalPct: "-20.0" });
+    expect(m).toEqual({
+      receita: 100000n,
+      custo: 120000n,
+      imposto: 0n,
+      taxas: 0n,
+      fixo: 0n,
+      final: -20000n,
+      finalPct: "-20.0",
+      ajustes: 0n,
+      ajustesDetalhe: { caixa: 0n, reembolsos: 0n },
+    });
+  });
+});
+
+describe("ajustes da viagem (caixa de experiência e reembolsos)", () => {
+  const somaMeio = (l: { valor: bigint }[]) => l.slice(1, -1).reduce((a, x) => a + x.valor, 0n);
+  const AJUSTES = { caixa: 16240n, reembolsos: 2645n };
+
+  /** Os cenários fixos de `margemReal` acima, com os valores que eles já conferem. */
+  const cenarios = () => {
+    const taxas = {
+      preco: 900000n,
+      contas: [{ aereo: false, previstoBrl: 500000n, pagoBrl: 510000n }, { aereo: true, previstoBrl: 999999n, pagoBrl: null }],
+      comissoesRecebidas: 10000n,
+      parcelas: [
+        { valor: 500000n, recebida: true, taxaEfetiva: 1000n, taxaPrevista: 17350n },
+        { valor: 500000n, recebida: true, taxaEfetiva: null, taxaPrevista: 17350n },
+        { valor: 0n, recebida: false, taxaEfetiva: 5n, taxaPrevista: 3n },
+      ],
+      fixo: 100000n,
+      impostoPct: "7.000",
+      taxaRoteiro: 25000n,
+    };
+    const negativa = {
+      preco: 100000n,
+      contas: [{ aereo: false, previstoBrl: 120000n, pagoBrl: null }],
+      comissoesRecebidas: 0n,
+      parcelas: [],
+      fixo: 0n,
+      impostoPct: "7.000",
+      taxaRoteiro: 0n,
+    };
+    return [
+      { entrada: taxas, esperado: { receita: 900000n, custo: 525000n, imposto: 26250n, taxas: 18353n, fixo: 100000n, final: 230397n, finalPct: "25.6" } },
+      { entrada: negativa, esperado: { receita: 100000n, custo: 120000n, imposto: 0n, taxas: 0n, fixo: 0n, final: -20000n, finalPct: "-20.0" } },
+    ];
+  };
+
+  it("sem ajustes (omitidos ou zerados): os números de hoje, idênticos; ajustes 0", () => {
+    for (const { entrada, esperado } of cenarios()) {
+      const semCampo = margemReal(entrada);
+      const zerados = margemReal({ ...entrada, ajustes: { caixa: 0n, reembolsos: 0n } });
+      expect(semCampo).toEqual({ ...esperado, ajustes: 0n, ajustesDetalhe: { caixa: 0n, reembolsos: 0n } });
+      expect(zerados).toEqual(semCampo);
+    }
+  });
+
+  it("com caixa R$ 162,40 e reembolsos R$ 26,45: só o final cai 188,85 e o finalPct acompanha", () => {
+    for (const { entrada, esperado } of cenarios()) {
+      const m = margemReal({ ...entrada, ajustes: AJUSTES });
+      expect(m).toEqual({
+        receita: esperado.receita,
+        custo: esperado.custo,
+        imposto: esperado.imposto,
+        taxas: esperado.taxas,
+        fixo: esperado.fixo,
+        final: esperado.final - 18885n,
+        finalPct: pct1(esperado.final - 18885n, esperado.receita),
+        ajustes: 18885n,
+        ajustesDetalhe: AJUSTES,
+      });
+    }
+    // 230397 − 18885 = 211512 sobre 900000 → 23,5%
+    expect(margemReal({ ...cenarios()[0].entrada, ajustes: AJUSTES }).finalPct).toBe("23.5");
+  });
+
+  it("reembolso negativo (fornecedor devolveu mais que o repassado): aumenta a margem", () => {
+    const { entrada, esperado } = cenarios()[0];
+    const m = margemReal({ ...entrada, ajustes: { caixa: 0n, reembolsos: -8855n } });
+    expect(m.final).toBe(esperado.final + 8855n);
+    expect(m.ajustes).toBe(-8855n);
+    expect(m.imposto).toBe(esperado.imposto);
+  });
+
+  describe("ajusteDosReembolsos", () => {
+    const caso = {
+      cancelado: false,
+      forma: "pix" as const,
+      valorCobrar: 38500n,
+      valorRecebido: null,
+      valorDevolver: 41145n,
+      valorDevolvido: null,
+    };
+
+    it("devolve 411,45 e cobra 385,00 → 26,45", () => {
+      expect(ajusteDosReembolsos([caso])).toBe(2645n);
+    });
+
+    it("forma abatimento: o devolver não conta (já está na parcela recebida a menor); fica só −cobrar", () => {
+      expect(ajusteDosReembolsos([{ ...caso, forma: "abatimento" }])).toBe(-38500n);
+      expect(ajusteDosReembolsos([{ ...caso, forma: "abatimento", valorDevolvido: 41145n }])).toBe(-38500n);
+    });
+
+    it("cancelado: 0", () => {
+      expect(ajusteDosReembolsos([{ ...caso, cancelado: true }])).toBe(0n);
+    });
+
+    it("recebido e devolvido valem sobre o previsto: recebido 500,00 contra devolvido 411,45 → negativo", () => {
+      expect(ajusteDosReembolsos([{ ...caso, valorRecebido: 50000n, valorDevolvido: 41145n, valorDevolver: 99999n }])).toBe(-8855n);
+    });
+
+    it("soma os casos; lista vazia → 0", () => {
+      expect(ajusteDosReembolsos([])).toBe(0n);
+      expect(ajusteDosReembolsos([caso, { ...caso, cancelado: true }, { ...caso, forma: "transferencia", valorCobrar: 0n, valorDevolver: 10000n }])).toBe(12645n);
+    });
+  });
+
+  it("ponte: as linhas 'Caixa de experiência' e 'Reembolsos' e a soma fecha com real − planejada", () => {
+    const { s, modalidade } = ribeiro();
+    const { preco, resultado, contas, parcelas } = vender(s, modalidade, { tipo: "boleto", parcelas: 5 }, 18);
+    const comissao = contas.find((c) => c.comissao)!.comissao!;
+    const entrada = {
+      planejada: planejadaDaVersao(resultado),
+      preco,
+      impostoPct: R.impostoSobreMargemPct,
+      taxaRoteiro: taxaRoteiroDoSnapshot(s),
+      contas: contas.map((c) => ({ rotulo: c.fornecedor ?? c.descricao, aereo: c.aereo, moeda: c.moeda, previstoVendaBrl: c.previstoBrl, previstoBrl: c.previstoBrl, pagoBrl: null })),
+      comissoes: [{ fornecedor: "Operadora Mediterrânea", aereo: false, valorPrevisto: comissao.valor, valorRecebido: comissao.valor }],
+      parcelas,
+    };
+    const sem = ponteDaMargem(entrada);
+    expect(sem.linhas.map((l) => l.rotulo)).toEqual(["Margem planejada", "Margem real"]);
+
+    const p = ponteDaMargem({ ...entrada, ajustes: AJUSTES });
+    expect(p.linhas).toEqual([
+      { rotulo: "Margem planejada", valor: BigInt(resultado.final) },
+      { rotulo: "Caixa de experiência", valor: -16240n },
+      { rotulo: "Reembolsos", valor: -2645n },
+      { rotulo: "Margem real", valor: BigInt(resultado.final) - 18885n },
+    ]);
+    expect(p.real).toEqual({ ...sem.real, final: sem.real.final - 18885n, finalPct: pct1(sem.real.final - 18885n, sem.real.receita), ajustes: 18885n, ajustesDetalhe: AJUSTES });
+    expect(somaMeio(p.linhas)).toBe(p.real.final - BigInt(resultado.final));
+
+    // Só a caixa: a linha "Reembolsos" (zero) fica de fora.
+    const soCaixa = ponteDaMargem({ ...entrada, ajustes: { caixa: 16240n, reembolsos: 0n } });
+    expect(soCaixa.linhas.map((l) => l.rotulo)).toEqual(["Margem planejada", "Caixa de experiência", "Margem real"]);
+    expect(somaMeio(soCaixa.linhas)).toBe(soCaixa.real.final - BigInt(resultado.final));
   });
 });
 

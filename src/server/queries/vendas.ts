@@ -16,6 +16,7 @@ import {
   ROTULO_STATUS_VIAGEM,
   statusDaViagem,
   taxaRoteiroDoSnapshot,
+  type AjustesMargem,
   type ComissaoTipo,
   type FormaPagamentoFornecedorTipo,
   type LinhaPonte,
@@ -32,8 +33,9 @@ import { normalizarRegras } from "@/domain/regras";
 import { formatarCodigoViagem } from "@/domain/viagens";
 import { ehUuid } from "@/server/acesso";
 import { exigirPerfil } from "@/server/auth";
-import { db } from "@/server/db/client";
+import { db, type Transacao } from "@/server/db/client";
 import {
+  caixasExperiencia,
   cartoesCorporativos,
   clientes,
   comissoes,
@@ -456,6 +458,7 @@ function calcularMargens(d: {
   parcelas: ParcelaLinha[];
   contas: ContaVendida[];
   comissoes: ComissaoVendida[];
+  ajustes: AjustesMargem;
 }): MargensVendida {
   const { versao } = d;
   const planejada = planejadaDaVersao(versao.resultado as ResultadoVersao);
@@ -523,6 +526,7 @@ function calcularMargens(d: {
         fixo: planejada.fixo,
         impostoPct,
         taxaRoteiro,
+        ajustes: d.ajustes,
       });
     } catch {
       real = erro;
@@ -542,6 +546,7 @@ function calcularMargens(d: {
           naoRecebida: c.status === "nao_recebida",
         })),
         parcelas: parcelasMargem,
+        ajustes: d.ajustes,
       }).linhas;
     } catch {
       ponte = erro;
@@ -565,6 +570,28 @@ async function impostoPorRegras(ids: string[]): Promise<Map<string, string | nul
     }
   }
   return porId;
+}
+
+/**
+ * Ajustes da margem (spec §7) de várias viagens numa leitura: o custo total da caixa de experiência confirmada (uma
+ * por viagem, pelo índice único). Os reembolsos ainda não existem: 0. Toda viagem pedida tem entrada no mapa.
+ * Uso interno, **sem checagem de acesso** (como `margensVendidas`).
+ */
+async function ajustesDasViagens(executor: typeof db | Transacao, viagemIds: string[]): Promise<Map<string, AjustesMargem>> {
+  const ids = [...new Set(viagemIds)];
+  const porViagem = new Map<string, AjustesMargem>(ids.map((id) => [id, { caixa: 0n, reembolsos: 0n }]));
+  if (ids.length === 0) return porViagem;
+  const caixas = await executor
+    .select({ viagemId: caixasExperiencia.viagemId, custoTotal: caixasExperiencia.custoTotal })
+    .from(caixasExperiencia)
+    .where(and(inArray(caixasExperiencia.viagemId, ids), eq(caixasExperiencia.situacao, "confirmada")));
+  for (const c of caixas) porViagem.get(c.viagemId)!.caixa += c.custoTotal ?? 0n;
+  return porViagem;
+}
+
+/** Ajustes da margem de uma viagem (`ajustesDasViagens`). Uso interno, **sem checagem de acesso**. */
+export async function ajustesDaViagem(executor: typeof db | Transacao, viagemId: string): Promise<AjustesMargem> {
+  return (await ajustesDasViagens(executor, [viagemId])).get(viagemId)!;
 }
 
 /** Contas ativas das viagens (com o fornecedor), na ordem dos itens. */
@@ -601,8 +628,8 @@ function comissoesDe(viagemIds: string[]) {
 }
 
 /**
- * Margens (planejada, real, ponte) das viagens vendidas, em lote: versões, parcelas, contas, pagamentos e
- * comissões numa leitura cada, regras uma vez por versão. Uso interno, **sem checagem de acesso**: só chamar
+ * Margens (planejada, real, ponte) das viagens vendidas, em lote: versões, parcelas, contas, pagamentos,
+ * comissões e ajustes (caixa confirmada) numa leitura cada, regras uma vez por versão. Uso interno, **sem checagem de acesso**: só chamar
  * depois de conferir `veCamadaEstrategica`. Id sem venda fica de fora.
  */
 export async function margensVendidas(viagemIds: string[]): Promise<Map<string, MargensVendida>> {
@@ -617,11 +644,12 @@ export async function margensVendidas(viagemIds: string[]): Promise<Map<string, 
     .where(inArray(vendas.viagemId, ids));
   if (vs.length === 0) return resultado;
   const comVenda = vs.map((v) => v.viagemId);
-  const [ps, cs, coms, impostos] = await Promise.all([
+  const [ps, cs, coms, impostos, ajustes] = await Promise.all([
     db.select().from(parcelasReceber).where(inArray(parcelasReceber.viagemId, comVenda)).orderBy(asc(parcelasReceber.numero)),
     contasDe(comVenda),
     comissoesDe(comVenda),
     impostoPorRegras(vs.map((v) => v.versao.regrasVersaoId)),
+    ajustesDasViagens(db, comVenda),
   ]);
   const pags = await pagamentosDe(cs.map((x) => x.c.id));
   for (const v of vs) {
@@ -636,6 +664,7 @@ export async function margensVendidas(viagemIds: string[]): Promise<Map<string, 
         parcelas: ps.filter((p) => p.viagemId === v.viagemId),
         contas,
         comissoes: comissoesDa,
+        ajustes: ajustes.get(v.viagemId)!,
       }),
     );
   }
@@ -783,7 +812,7 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
   };
 
   if (estrategico) {
-    const impostos = await impostoPorRegras([versao.regrasVersaoId]);
+    const [impostos, ajustes] = await Promise.all([impostoPorRegras([versao.regrasVersaoId]), ajustesDaViagem(db, v.id)]);
     resposta.estrategico = calcularMargens({
       versao,
       fim: v.fim,
@@ -791,6 +820,7 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
       parcelas: ps,
       contas,
       comissoes: comissoesVendidas,
+      ajustes,
     });
   }
   return resposta;
