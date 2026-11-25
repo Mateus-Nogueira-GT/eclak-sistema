@@ -33,6 +33,7 @@ import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
 import {
   anexos,
+  caixasExperiencia,
   comissoes,
   faturasCartao,
   contasPagar,
@@ -87,6 +88,7 @@ const VIAGEM_NAO_ENCONTRADA = falha("Viagem não encontrada");
 const CONTA_NAO_ENCONTRADA = falha("Conta não encontrada");
 const JA_BAIXADO = falha(MSG_JA_BAIXADO_NA_CONTA);
 const NAO_CALCULA = falha(MSG_NAO_CALCULA);
+const MSG_CAIXA_EM_RASCUNHO = "Confirme ou cancele a caixa de experiência antes";
 
 /** Erro de banco inesperado: loga só o código (sem parâmetros) e relança genérico. */
 function erroDeBanco(mensagem: string, e: unknown): Error {
@@ -667,7 +669,8 @@ async function emAberto(tx: Transacao, viagemId: string): Promise<string[]> {
 
 /**
  * Concilia a viagem: só com tudo baixado (parcelas recebidas ou canceladas, pagamentos pagos, comissões recebidas
- * ou marcadas "não será recebida"); grava `conciliada_em`. Senão, "Ainda há valores em aberto: …".
+ * ou marcadas "não será recebida"); grava `conciliada_em`. Senão, "Ainda há valores em aberto: …". Recusada com a
+ * caixa de experiência em rascunho (a caixa trava a mesma viagem: a leitura com a viagem travada vale).
  */
 export async function conciliar(viagemId: string): Promise<Ok | Falha> {
   return comPerfil([...PERFIS_FINANCEIRO], async (usuario) => {
@@ -677,6 +680,11 @@ export async function conciliar(viagemId: string): Promise<Ok | Falha> {
       VIAGEM_NAO_ENCONTRADA,
       "Erro ao conciliar a viagem",
       async (tx, v) => {
+        const [rascunho] = await tx
+          .select({ id: caixasExperiencia.id })
+          .from(caixasExperiencia)
+          .where(and(eq(caixasExperiencia.viagemId, v.id), eq(caixasExperiencia.situacao, "rascunho")));
+        if (rascunho) return falha(MSG_CAIXA_EM_RASCUNHO);
         const abertos = await emAberto(tx, v.id);
         if (abertos.length > 0) return falha(msgEmAberto(abertos));
         const depois = { conciliadaEm: new Date() };

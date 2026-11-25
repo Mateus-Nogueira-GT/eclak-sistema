@@ -1,11 +1,11 @@
 "use server";
 
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import type { ZodError } from "zod";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import type { Centro } from "@/domain/financeiro";
-import { aposEntrada, aposSaida, CATEGORIA_DO_USO, desfazerEntrada, type Saldo, type TipoMovimento } from "@/domain/estoque";
+import { aposEntrada, aposSaida, CATEGORIA_DO_USO, desfazerEntrada } from "@/domain/estoque";
 import { ajusteSchema, entradaSchema, produtoSchema, saidaSchema } from "@/domain/estoque-entrada";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { MSG_DESFACA_FATURA_CARTAO } from "@/domain/venda-entrada";
@@ -13,6 +13,7 @@ import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
 import { categoriasFinanceiras, estoqueMovimentos, estoqueSaldos, fornecedores, lancamentos, produtosEstoque } from "@/server/db/schema";
+import { auditarAlteracao, gravarMovimento, gravarSaldo, saldoDe, travarSaldo, type SaldoLinha } from "@/server/estoque/movimentos";
 import { cancelarLancamentoNa, criarLancamentosNa, Desfazer, falha, type Falha, type Ok } from "@/server/financeiro/lancamentos";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
@@ -28,8 +29,6 @@ const PRODUTO_REPETIDO = falha("Já existe um produto ativo com este nome", "nom
 const MSG_FACA_AJUSTE = "Faça um ajuste de estoque.";
 
 type Produto = typeof produtosEstoque.$inferSelect;
-type SaldoLinha = typeof estoqueSaldos.$inferSelect;
-type Movimento = typeof estoqueMovimentos.$inferSelect;
 
 function falhaDeValidacao(erro: ZodError): Falha {
   return { ok: false, erro: erro.issues[0].message, campos: errosDeCampo(erro) };
@@ -51,14 +50,6 @@ async function transacao(mensagemErro: string, fn: (tx: Transacao) => Promise<Ok
   }
 }
 
-/** Auditoria de alteração: `antes` só com as chaves alteradas. */
-async function auditarAlteracao<T>(tx: Transacao, usuarioId: string, tabela: string, registroId: string, linha: T, depois: Partial<T>, acao: "alterar" | "desativar" = "alterar") {
-  const antes = Object.fromEntries(Object.keys(depois).map((k) => [k, linha[k as keyof T]]));
-  await registrarAuditoria(tx, { usuarioId, tabela, registroId, acao, antes, depois });
-}
-
-const idDoSaldo = (produtoId: string, filial: Centro) => `${produtoId}:${filial}`;
-
 /** Produto ativo, travado `for share` (desativar, que trava `for update`, espera as movimentações em curso). */
 async function produtoAtivo(tx: Transacao, id: string): Promise<Produto> {
   const [p] = await tx.select().from(produtosEstoque).where(eq(produtosEstoque.id, id)).for("share");
@@ -67,60 +58,6 @@ async function produtoAtivo(tx: Transacao, id: string): Promise<Produto> {
   return p;
 }
 
-/**
- * O saldo do par produto/filial travado (`for update`); a linha nasce zerada se não existe (`on conflict do nothing` e
- * releitura: duas primeiras movimentações ao mesmo tempo não criam duas linhas) e o nascimento é auditado.
- */
-async function travarSaldo(tx: Transacao, usuarioId: string, produtoId: string, filial: Centro): Promise<SaldoLinha> {
-  const [nova] = await tx.insert(estoqueSaldos).values({ produtoId, filial }).onConflictDoNothing().returning();
-  if (nova) await registrarAuditoria(tx, { usuarioId, tabela: "estoque_saldos", registroId: idDoSaldo(produtoId, filial), acao: "criar", depois: nova });
-  const [s] = await tx
-    .select()
-    .from(estoqueSaldos)
-    .where(and(eq(estoqueSaldos.produtoId, produtoId), eq(estoqueSaldos.filial, filial)))
-    .for("update");
-  return s;
-}
-
-async function gravarSaldo(tx: Transacao, usuarioId: string, s: SaldoLinha, novo: Saldo): Promise<void> {
-  const depois = { quantidade: novo.quantidade, custoMedio: novo.custoMedio };
-  await tx.update(estoqueSaldos).set(depois).where(and(eq(estoqueSaldos.produtoId, s.produtoId), eq(estoqueSaldos.filial, s.filial)));
-  await auditarAlteracao(tx, usuarioId, "estoque_saldos", idDoSaldo(s.produtoId, s.filial), s, depois);
-}
-
-/**
- * Grava o movimento (só inserção) com `custo_medio_antes` = o custo médio do saldo travado. `criado_em` vem de
- * `clock_timestamp()`, lido já com a trava do saldo: a ordem dos movimentos do par é a ordem das travas (o `now()`
- * padrão é o início da transação e poderia inverter duas transações concorrentes).
- */
-async function gravarMovimento(
-  tx: Transacao,
-  usuarioId: string,
-  s: SaldoLinha,
-  m: { tipo: TipoMovimento; quantidade: number; custoUnitario: bigint; motivo?: string | null; fornecedorId?: string | null; fornecedorTexto?: string | null; lancamentoId?: string | null },
-): Promise<Movimento> {
-  const [mov] = await tx
-    .insert(estoqueMovimentos)
-    .values({
-      produtoId: s.produtoId,
-      filial: s.filial,
-      tipo: m.tipo,
-      quantidade: m.quantidade,
-      custoUnitario: m.custoUnitario,
-      custoMedioAntes: s.custoMedio,
-      fornecedorId: m.fornecedorId ?? null,
-      fornecedorTexto: m.fornecedorTexto ?? null,
-      lancamentoId: m.lancamentoId ?? null,
-      motivo: m.motivo ?? null,
-      usuarioId,
-      criadoEm: sql`clock_timestamp()`,
-    })
-    .returning();
-  await registrarAuditoria(tx, { usuarioId, tabela: "estoque_movimentos", registroId: mov.id, acao: "criar", depois: mov });
-  return mov;
-}
-
-const saldoDe = (s: SaldoLinha): Saldo => ({ quantidade: s.quantidade, custoMedio: s.custoMedio });
 const semSaldo = (s: SaldoLinha): Falha => falha(`Só há ${s.quantidade} na filial`, "quantidade");
 
 // ---------------------------------------------------------------------------
