@@ -1,6 +1,6 @@
 import "server-only";
 import { and, count, eq, inArray, lt, lte, min, sql, type SQL } from "drizzle-orm";
-import { PASSO_AVISO, type AvisoCentral } from "@/domain/avisos";
+import { PASSO_AVISO, type AvisoCentral, type TipoAvisoPainel } from "@/domain/avisos";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { DIAS_AVISO } from "@/domain/conciliacao";
 import { formatarReais } from "@/domain/dinheiro";
@@ -34,7 +34,7 @@ export const plural = (n: number, um: string, varios: string) => `${n} ${n === 1
 const lista = (params: Record<string, string>) => `/financeiro/lancamentos?${new URLSearchParams(params).toString()}`;
 
 /** Aviso que resume várias linhas: a chave é só o tipo. */
-export function avisoAgregado(tipo: Aviso["tipo"], titulo: string, detalhe: string, href: string): AvisoCentral {
+export function avisoAgregado(tipo: Aviso["tipo"], titulo: string, detalhe: string, href: string): AvisoCentral<TipoAvisoPainel> {
   return { chave: tipo, tipo, titulo, detalhe, passo: PASSO_AVISO[tipo], setor: RESPONSAVEL_AVISO[tipo], href, dispensavel: true };
 }
 
@@ -43,7 +43,7 @@ export function avisoAgregado(tipo: Aviso["tipo"], titulo: string, detalhe: stri
  * vencidas ou vencendo em 7 dias e transações do extrato sem par há mais de `DIAS_AVISO` dias. Os mesmos textos e
  * links da Visão geral, nesta ordem.
  */
-export async function avisosFinanceiros(): Promise<AvisoCentral[]> {
+export async function avisosFinanceiros(): Promise<AvisoCentral<TipoAvisoPainel>[]> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
   const hoje = hojeEmCuiaba();
   const ontem = somarDias(hoje, -1);
@@ -57,7 +57,7 @@ export async function avisosFinanceiros(): Promise<AvisoCentral[]> {
     pendentesParaAviso(hoje),
   ]);
 
-  const avisos: AvisoCentral[] = [];
+  const avisos: AvisoCentral<TipoAvisoPainel>[] = [];
   if (parcelas.quantidade > 0 && parcelas.desde) {
     const filtro: Record<string, string> = { lado: "receber", base: "vencimento", situacao: "vencida", origem: "viagem" };
     if (categoriaVendas[0]) filtro.categoriaId = categoriaVendas[0].id;

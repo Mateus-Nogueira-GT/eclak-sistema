@@ -172,6 +172,10 @@ describe("RLS: anon não lê nada", () => {
     // Reembolsos (fatia 5b).
     await sql`insert into reembolsos (viagem_id, servico, ocorrido_em, ocorrido, valor_cobrar, valor_devolver, forma_devolucao, prazo_cliente, previsto_fornecedor, criado_por)
               values (${v.id}, 'Hotel', '2027-01-05', 'O hotel cancelou a reserva.', 10000, 8000, 'pix', '2027-01-20', '2027-01-30', ${u.id})`;
+    // Avisos (fatia 5b).
+    await sql`insert into avisos_dispensados (chave, tipo, titulo, detalhe, usuario_id, justificativa)
+              values ('parcela', 'parcela', '3 parcelas de cliente vencidas', 'R$ 300,00 em aberto', ${u.id}, 'Cliente já avisou que paga amanhã')`;
+    await sql`insert into avisos_comunicados (setor, texto, criado_por) values ('Operacional', 'Conferir os vouchers da semana', ${u.id})`;
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from lancamentos_financeiros`;
     expect(n).toBeGreaterThan(0);
   });
@@ -215,6 +219,8 @@ describe("RLS: anon não lê nada", () => {
     "caixas_experiencia",
     "caixa_itens",
     "reembolsos",
+    "avisos_dispensados",
+    "avisos_comunicados",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
@@ -245,6 +251,13 @@ describe("RLS: anon não lê nada", () => {
 
   it("tabelas do estoque e da caixa com RLS ligado", async () => {
     const tabelas = ["produtos_estoque", "estoque_saldos", "estoque_movimentos", "caixas_experiencia", "caixa_itens", "reembolsos"];
+    const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
+      select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
+    expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
+  });
+
+  it("tabelas dos avisos com RLS ligado", async () => {
+    const tabelas = ["avisos_dispensados", "avisos_comunicados"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());

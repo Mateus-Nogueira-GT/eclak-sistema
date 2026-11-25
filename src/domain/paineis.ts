@@ -1,4 +1,4 @@
-import type { AvisoCentral } from "./avisos";
+import type { AvisoCentral, TipoAvisoPainel } from "./avisos";
 import { arredondar } from "./decimal";
 import { formatarPercentual } from "./dinheiro";
 import { pct1 } from "./precificacao";
@@ -205,7 +205,7 @@ export const RESPONSAVEL_AVISO: Record<Aviso["tipo"], Aviso["responsavel"]> = {
 };
 
 /** Aviso da central na forma da Visão geral: caixa e margem de uma viagem abrem um item; os demais, uma lista. */
-export function avisoDoPainel(a: AvisoCentral): Aviso {
+export function avisoDoPainel(a: AvisoCentral<TipoAvisoPainel>): Aviso {
   return {
     tipo: a.tipo,
     titulo: a.titulo,

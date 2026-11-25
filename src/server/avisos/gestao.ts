@@ -1,6 +1,6 @@
 import "server-only";
 import { and, count, eq, isNull } from "drizzle-orm";
-import { PASSO_AVISO, type AvisoCentral } from "@/domain/avisos";
+import { PASSO_AVISO, type AvisoCentral, type TipoAvisoPainel } from "@/domain/avisos";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { formatarPercentual, formatarReais } from "@/domain/dinheiro";
 import { pctAbaixoDe, RESPONSAVEL_AVISO } from "@/domain/paineis";
@@ -35,7 +35,7 @@ async function pedidosAguardando(): Promise<number> {
  * não dispensável), margem real abaixo da referência (uma por viagem, a menor margem primeiro, sem corte) e, só para o
  * Diretor, pedidos aguardando aprovação. `dados` é o que a Visão geral já leu; sem ele, lê.
  */
-export async function avisosDeGestao(dados?: DadosGestao): Promise<AvisoCentral[]> {
+export async function avisosDeGestao(dados?: DadosGestao): Promise<AvisoCentral<TipoAvisoPainel>[]> {
   const usuario = await exigirPerfil("diretor", "fin_estrategico");
   const [d, aguardando] = await Promise.all([
     dados ??
@@ -47,7 +47,7 @@ export async function avisosDeGestao(dados?: DadosGestao): Promise<AvisoCentral[
     usuario.perfil === "diretor" ? pedidosAguardando() : Promise.resolve(0),
   ]);
 
-  const avisos: AvisoCentral[] = [];
+  const avisos: AvisoCentral<TipoAvisoPainel>[] = [];
   // Caixa: uma linha só, com quantas semanas ficam negativas, a primeira e a de menor saldo.
   const negativas = d.fluxo.semanas.filter((s) => s.saldoFinal < 0n);
   if (negativas.length > 0) {

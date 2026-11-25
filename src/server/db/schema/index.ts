@@ -15,3 +15,4 @@ export * from "./integracoes";
 export * from "./ia";
 export * from "./estoque";
 export * from "./reembolsos";
+export * from "./avisos";
