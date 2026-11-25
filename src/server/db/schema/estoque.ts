@@ -1,7 +1,8 @@
 import { sql } from "drizzle-orm";
 import { bigint, boolean, check, index, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { SITUACOES_CAIXA, TIPOS_MOVIMENTO, USOS_ESTOQUE } from "@/domain/estoque";
-import { lancamentos, centroCustoEnum } from "./financeiro";
+import { lancamentos } from "./financeiro";
+import { centroCustoEnum } from "./financeiro-enums";
 import { fornecedores } from "./fornecedores";
 import { usuarios } from "./usuarios";
 import { viagens } from "./viagens";
@@ -80,6 +81,11 @@ export const estoqueMovimentos = pgTable(
   },
   (t) => [
     check("estoque_movimentos_quantidade", sql`${t.quantidade} <> 0`),
+    // Sinal pelo tipo: entrada e devolução da caixa somam; saída e caixa tiram; ajuste vai para qualquer lado.
+    check(
+      "estoque_movimentos_sinal",
+      sql`(${t.tipo} IN ('entrada', 'devolucao_caixa') AND ${t.quantidade} > 0) OR (${t.tipo} IN ('saida', 'caixa') AND ${t.quantidade} < 0) OR ${t.tipo} = 'ajuste'`,
+    ),
     check("estoque_movimentos_custos", sql`${t.custoUnitario} >= 0 AND ${t.custoMedioAntes} >= 0`),
     check("estoque_movimentos_um_fornecedor", sql`num_nonnulls(${t.fornecedorId}, ${t.fornecedorTexto}) <= 1`),
     check("estoque_movimentos_fornecedor_so_entrada", sql`${t.tipo} = 'entrada' OR num_nonnulls(${t.fornecedorId}, ${t.fornecedorTexto}) = 0`),

@@ -48,6 +48,16 @@ describe("esquema do estoque e da caixa de experiência", () => {
                      values (${produto}, 'MT', 'entrada', 1, 100, ${x.fin.id})`).rejects.toThrow(/custo_medio_antes/);
   });
 
+  it("movimento: o sinal da quantidade segue o tipo (ajuste vai para qualquer lado)", async () => {
+    await expect(movimento({ quantidade: -1 })).rejects.toThrow(/estoque_movimentos_sinal/);
+    await expect(movimento({ tipo: "devolucao_caixa", quantidade: -1 })).rejects.toThrow(/estoque_movimentos_sinal/);
+    await expect(movimento({ tipo: "saida", quantidade: 1, motivo: "Brinde avulso" })).rejects.toThrow(/estoque_movimentos_sinal/);
+    await expect(movimento({ tipo: "caixa", quantidade: 2 })).rejects.toThrow(/estoque_movimentos_sinal/);
+    await movimento({ tipo: "devolucao_caixa", quantidade: 1 });
+    await movimento({ tipo: "ajuste", quantidade: 2, motivo: "Contagem" });
+    await movimento({ tipo: "ajuste", quantidade: -2, motivo: "Contagem" });
+  });
+
   it("movimento: motivo de 5 a 200 caracteres em saída e ajuste; fornecedor só na entrada e no máximo um", async () => {
     await expect(movimento({ tipo: "saida", quantidade: -1 })).rejects.toThrow(/estoque_movimentos_motivo/);
     await expect(movimento({ tipo: "ajuste", quantidade: -1, motivo: "ab" })).rejects.toThrow(/estoque_movimentos_motivo/);

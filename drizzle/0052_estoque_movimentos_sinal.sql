@@ -1,0 +1,1 @@
+ALTER TABLE "estoque_movimentos" ADD CONSTRAINT "estoque_movimentos_sinal" CHECK (("estoque_movimentos"."tipo" IN ('entrada', 'devolucao_caixa') AND "estoque_movimentos"."quantidade" > 0) OR ("estoque_movimentos"."tipo" IN ('saida', 'caixa') AND "estoque_movimentos"."quantidade" < 0) OR "estoque_movimentos"."tipo" = 'ajuste');
