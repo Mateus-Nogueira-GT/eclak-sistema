@@ -4,11 +4,12 @@ Data: 25/11/2026 · Base: `main` (depois do PR #14; o PR #16 move o botão do ch
 
 Pedido do Mateus (25/11/2026): "Quero que ele seja um agente que consiga fazer ações no Trello e no Drive e poder responder questões a partir de lá."
 
-Respostas do Mateus às quatro dúvidas (25/11/2026):
+Respostas do Mateus às dúvidas (25/11/2026):
 1. **Alcance:** ler tudo (o quadro do Trello e a pasta raiz do Drive inteiros); agir só nas viagens do sistema.
 2. **Ações no Trello:** comentar no cartão; marcar itens de checklist (e adicionar itens); mover de lista e prazo; criar cartão avulso.
 3. **Ações no Drive:** enviar arquivo anexado no chat; criar subpastas; renomear e mover. Apagar fica de fora.
 4. **Conteúdo do Drive:** ler o texto dos arquivos, com máscara de dados pessoais.
+5. **"Uso interno":** todos os perfis leem o conteúdo pelo chat.
 
 Toda ação pede "Confirmar" na tela antes de executar (estava no enunciado das perguntas 2 e 3).
 
@@ -66,8 +67,8 @@ Novas, deste desenho:
 - **Quadro:** o `idBoard` vem de `GET /lists/{TRELLO_LISTA_ID}` e fica em memória do processo (como o token do Google); cartão ou lista de outro quadro é tratado como inexistente.
 - **Descendência no Drive:** sobe por `parents` (`files.get?fields=id,name,mimeType,parents`) até achar o alvo ou acabar, no máximo 12 níveis; fora disso é inexistente. A credencial pode alcançar mais que a pasta raiz (conta de serviço Editor do drive compartilhado): por isso a conferência é do sistema, não do Google.
 - **Viagem:** para agir, o alvo precisa ser de uma viagem não excluída. O sistema não tem hoje filtro de viagem por consultor (`cabecalhoDaViagem` faz `exigirPerfil()` sem perfil): qualquer pessoa ativa vê qualquer viagem, e aqui vale o mesmo. O código da viagem (ECL-0001-01) é resolvido para o id por uma query nova com `exigirPerfil`.
-- **Perfis (decisão minha, conferir):** os cinco perfis leem e propõem ações. Motivo: o link da pasta e do cartão já aparece para todos na viagem (ruling da 6c) e toda ação fica auditada com o nome de quem confirmou. Custo se estiver errado: trocar a lista de perfis num lugar só (`PERFIS_ACAO_CHAT`).
-- **Atenção para o Mateus:** a leitura usa a credencial do sistema, não a da pessoa. Quem não tem acesso a um arquivo no Google passa a poder perguntar por ele no chat (dentro da pasta raiz). Se "Uso interno" guardar algo que consultor ou operacional não devem ler, a regra precisa mudar antes de ligar (ver §11).
+- **Perfis:** os cinco perfis leem e propõem ações (`PERFIS_ACAO_CHAT`); toda ação fica auditada com o nome de quem confirmou.
+- **"Uso interno" (decisão do Mateus, 25/11/2026):** todos os perfis leem pelo chat o conteúdo de "Público" e de "Uso interno". A leitura usa a credencial do sistema, não a da pessoa: quem não abre um arquivo no Google pode perguntar por ele no chat, dentro da pasta raiz.
 
 ## 5. Ferramentas de leitura
 
@@ -197,7 +198,7 @@ Admin › Integrações não muda, exceto a nota do Trello e do Drive: o token d
 
 ## 11. Para o Mateus conferir (decisões minhas)
 
-1. Os cinco perfis leem e agem (§4). Se "Uso interno" não deve ser lido por consultor ou operacional pelo chat, a leitura de conteúdo dessa subpasta fica só para Diretor e financeiros.
+1. (Resolvido pelo Mateus em 25/11/2026: os cinco perfis leem "Uso interno" pelo chat.) Os cinco perfis também propõem ações.
 2. Cartão avulso pode ser criado em qualquer lista do quadro (é a única ação fora de uma viagem).
 3. Comentário sai com "[Nome, pelo sistema]" na frente, porque o Trello mostra todos como a mesma conta (a do token).
 4. Proposta vale 15 minutos; anexo no chat, 60 minutos; até 3 ações por pergunta e 3 anexos por conversa.
