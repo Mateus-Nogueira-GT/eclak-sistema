@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, gt, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { tamanhoLegivel } from "@/domain/anexos";
 import { MAX_CARACTERES_CHAT, MAX_MENSAGENS_CHAT } from "@/domain/chat";
@@ -155,26 +155,29 @@ export async function conversar(
     const conversa: MensagemIA[] = remontar(validadas, conhecidos);
 
     if (anexoIds.length > 0) {
+      const agora = new Date();
       const uuids = anexoIds.filter(ehUuid);
-      const achados =
+      const encontrados =
         uuids.length > 0
           ? await db
-              .select({ id: chatAnexos.id, nome: chatAnexos.nome, mime: chatAnexos.mime, tamanho: chatAnexos.tamanho })
+              .select({
+                id: chatAnexos.id,
+                nome: chatAnexos.nome,
+                mime: chatAnexos.mime,
+                tamanho: chatAnexos.tamanho,
+                expiraEm: chatAnexos.expiraEm,
+                usadoEm: chatAnexos.usadoEm,
+              })
               .from(chatAnexos)
-              .where(
-                and(
-                  inArray(chatAnexos.id, uuids),
-                  eq(chatAnexos.usuarioId, usuario.id),
-                  isNull(chatAnexos.usadoEm),
-                  gt(chatAnexos.expiraEm, new Date()),
-                ),
-              )
+              .where(and(inArray(chatAnexos.id, uuids), eq(chatAnexos.usuarioId, usuario.id)))
           : [];
-      const notas: string[] = achados.map(
+      const ativos = encontrados.filter((a) => a.usadoEm === null && a.expiraEm > agora);
+      const usados = encontrados.filter((a) => a.usadoEm !== null);
+      const notas: string[] = ativos.map(
         (a) =>
           `Arquivo anexado: ${protegerTexto(a.nome, conhecidos)} (${ROTULO_MIME[a.mime] ?? a.mime}, ${tamanhoLegivel(a.tamanho)}), referência ${a.id}`,
       );
-      if (achados.length < anexoIds.length) {
+      if (ativos.length + usados.length < anexoIds.length) {
         notas.push("[Aviso: um arquivo anexado venceu ou não está mais disponível.]");
       }
       const ultima = conversa[conversa.length - 1];

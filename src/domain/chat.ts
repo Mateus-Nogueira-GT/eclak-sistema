@@ -69,3 +69,56 @@ export function partesComLink(texto: string): ParteTextoChat[] {
   if (pos < texto.length) empurrarTexto(texto.slice(pos));
   return partes;
 }
+
+const SAUDACAO_SO_SISTEMA =
+  "Posso responder perguntas sobre viagens, tarefas e dailies com o que o seu perfil pode ver. Por enquanto eu só leio: nada é salvo pelo chat.";
+
+/** Saudação inicial do chat conforme as integrações ligadas (spec §8). */
+export function saudacaoDoChat({ trello, drive }: { trello: boolean; drive: boolean }): string {
+  if (trello && drive) {
+    return "Posso responder sobre viagens, tarefas, dailies, o quadro do Trello e os arquivos do Drive, e fazer ações neles. Nada é alterado sem a sua confirmação.";
+  }
+  if (trello) {
+    return "Posso responder sobre viagens, tarefas, dailies e o quadro do Trello, e fazer ações nele. Nada é alterado sem a sua confirmação.";
+  }
+  if (drive) {
+    return "Posso responder sobre viagens, tarefas, dailies e os arquivos do Drive, e fazer ações nele. Nada é alterado sem a sua confirmação.";
+  }
+  return SAUDACAO_SO_SISTEMA;
+}
+
+/** Rodapé do painel do chat conforme as integrações ligadas (spec §8). */
+export function rodapeDoChat({ trello, drive }: { trello: boolean; drive: boolean }): string {
+  if (trello && drive) {
+    return "Segue o seu nível de acesso. Ações no Trello e no Drive pedem a sua confirmação. A conversa some ao recarregar a página.";
+  }
+  if (trello) {
+    return "Segue o seu nível de acesso. Ações no Trello pedem a sua confirmação. A conversa some ao recarregar a página.";
+  }
+  if (drive) {
+    return "Segue o seu nível de acesso. Ações no Drive pedem a sua confirmação. A conversa some ao recarregar a página.";
+  }
+  return "Segue o seu nível de acesso. A conversa some ao recarregar a página.";
+}
+
+/** Rótulo do link de resultado de uma ação executada (spec §8). */
+export function rotuloLinkAcao(url: string): "Abrir no Trello" | "Abrir no Drive" {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === "trello.com" || host.endsWith(".trello.com")) return "Abrir no Trello";
+  } catch {
+    // cai no Drive
+  }
+  return "Abrir no Drive";
+}
+
+/** Linha fixa acrescentada ao histórico enviado ao modelo depois de confirmar ou cancelar uma proposta (spec §6.4). */
+export function notaDeDecisao(
+  decisao: "confirmou" | "cancelou",
+  titulo: string,
+  detalhe?: string,
+): string {
+  const acao = titulo.toLowerCase();
+  if (decisao === "cancelou") return `[A pessoa cancelou: ${acao}.]`;
+  return `[A pessoa confirmou: ${acao}. Resultado: ${detalhe ?? "feito"}.]`;
+}
