@@ -29,6 +29,8 @@ export async function definirSenha(_: EstadoSenha, form: FormData): Promise<Esta
             : "Não foi possível salvar a senha. Tente novamente",
       };
     }
+    // Revoga sessões em outros dispositivos após a troca/redefinição da senha.
+    await supabase.auth.signOut({ scope: "others" }).catch(() => {});
     return { erro: null };
   });
   if ("ok" in r) return { erro: r.erro };

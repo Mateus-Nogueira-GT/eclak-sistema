@@ -82,6 +82,8 @@ describe("indicadores que falham", () => {
     const r = conferir("Buongiorno!\n\nVamos estar enviando o voucher");
     expect(r[1].ok).toBe(false);
     expect(r[1].dica).toBe('Troque "Vamos estar enviando" pelo verbo direto, como "enviaremos" ou "aguardamos".');
+    expect(conferir("Buongiorno!\n\nVamos estar começando o passeio")[1].ok).toBe(false);
+    expect(conferir("Buongiorno!\n\nEstaremos almoçando às 13h")[1].ok).toBe(false);
   });
   it("3 troca", () => {
     const invertido = "Buongiorno!\n\nCheck-in: A\nhttps://maps.google.com/?q=A\nCheck-out: B\n\n*10h*: x.";
@@ -90,6 +92,8 @@ describe("indicadores que falham", () => {
     expect(conferir(invertido, true)[2].nome).toBe("Troca de hotel: check-out e check-in no topo, com o mapa");
     const curto = "Buongiorno!\n\nCheck-out: B\nCheck-in: A\nhttps://maps.app.goo.gl/abc\n\n*10h*: x.";
     expect(conferir(curto, true)[2].ok).toBe(true);
+    expect(conferir(curto.replace("https://maps.app.goo.gl/abc", "https://www.google.com/maps/place/Hotel+A"), true)[2].ok).toBe(true);
+    expect(conferir(curto.replace("https://maps.app.goo.gl/abc", "https://www.google.com.br/maps/place/Hotel+A"), true)[2].ok).toBe(true);
     expect(conferir(curto.replace("https://maps.app.goo.gl/abc", "sem link"), true)[2].ok).toBe(false);
     const sem = conferir(MODELO, false)[2];
     expect(sem.nome).toBe("Sem troca de hotel neste dia");

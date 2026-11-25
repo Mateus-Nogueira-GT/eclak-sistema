@@ -74,7 +74,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
       </Card>
 
       <Card className="mt-5">
-        <CardHeader eyebrow="Mês a mês, a partir do mês atual" title="Projeção de 12 meses" />
+        <CardHeader eyebrow="Mês a mês, a partir do mês atual" title={`Projeção de ${fluxo.meses.length} ${fluxo.meses.length === 1 ? "mês" : "meses"}`} />
         {/* A meta de reserva compara com o saldo de todas as contas: com filtro, a coluna esconde (o card usa a projeção sem filtro). */}
         <TabelaPeriodos periodos={fluxo.meses} coluna="Mês" meta={filtrado ? undefined : fluxo.reserva.meta} />
       </Card>
@@ -114,10 +114,12 @@ function SaldoAtual({ fluxo }: { fluxo: FluxoDeCaixa }) {
 function Reserva({ fluxo }: { fluxo: FluxoDeCaixa }) {
   const r = fluxo.reserva;
   const pct = pctDe(r.temos, r.meta);
+  const rotuloMeses = `${r.meses} ${r.meses === 1 ? "mês" : "meses"}`;
+  const rotuloHorizonte = `${fluxo.meses.length} ${fluxo.meses.length === 1 ? "mês" : "meses"}`;
   return (
     <Card className="p-6">
       <h2 className="text-[16px] font-bold text-texto">Reserva de caixa</h2>
-      <p className="mt-0.5 text-[13.5px] text-cinza">Meta de 6 meses de custo fixo, pelo custo fixo mensal dos Parâmetros.</p>
+      <p className="mt-0.5 text-[13.5px] text-cinza">Meta de {rotuloMeses} de custo fixo, pelo custo fixo mensal dos Parâmetros.</p>
       <div className="mt-4 h-3 overflow-hidden rounded-full bg-fundo" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Reserva atingida">
         <div className="h-full rounded-full bg-verde" style={{ width: `${pct}%` }} />
       </div>
@@ -125,7 +127,7 @@ function Reserva({ fluxo }: { fluxo: FluxoDeCaixa }) {
       <dl className="mt-3 border-t border-linha">
         {(
           [
-            ["Meta (6 × custo fixo mensal)", r.meta],
+            [`Meta (${r.meses} × custo fixo mensal)`, r.meta],
             ["Quanto já temos", r.temos],
             ["Quanto falta", r.falta],
           ] as const
@@ -144,7 +146,7 @@ function Reserva({ fluxo }: { fluxo: FluxoDeCaixa }) {
             No ritmo projetado, a meta é atingida em <b>{r.atingidaEm}</b>.
           </>
         ) : (
-          <>No ritmo projetado, a meta não é atingida nos próximos 12 meses.</>
+          <>No ritmo projetado, a meta não é atingida nos próximos {rotuloHorizonte}.</>
         )}
       </p>
     </Card>

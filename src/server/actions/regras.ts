@@ -23,22 +23,31 @@ async function salvar(usuarioId: string, valores: Regras): Promise<Resultado> {
     return { ok: false, erro: p.error.issues[0].message, campos: errosDeCampo(p.error) };
   }
 
-  const versaoId = await db.transaction(async (tx) => {
-    await garantirVersaoInicial(tx);
-    const [v] = await tx
-      .insert(regrasVersoes)
-      .values({ valores: p.data, criadoPor: usuarioId })
-      .returning({ id: regrasVersoes.id });
-    await registrarAuditoria(tx, {
-      usuarioId,
-      tabela: "regras_versoes",
-      registroId: v.id,
-      acao: "criar",
-      depois: p.data,
+  let versaoId: string;
+  try {
+    versaoId = await db.transaction(async (tx) => {
+      await garantirVersaoInicial(tx);
+      const [v] = await tx
+        .insert(regrasVersoes)
+        .values({ valores: p.data, criadoPor: usuarioId })
+        .returning({ id: regrasVersoes.id });
+      await registrarAuditoria(tx, {
+        usuarioId,
+        tabela: "regras_versoes",
+        registroId: v.id,
+        acao: "criar",
+        depois: p.data,
+      });
+      return v.id;
     });
-    return v.id;
-  });
+  } catch (e) {
+    const x = e as { code?: string; cause?: { code?: string } } | null;
+    console.error("Erro ao salvar os parâmetros", { code: x?.cause?.code ?? x?.code });
+    throw new Error("Erro ao salvar os parâmetros");
+  }
 
   revalidatePath("/admin/parametros");
+  revalidatePath("/financeiro/caixa");
+  revalidatePath("/visao-geral");
   return { ok: true, versaoId };
 }

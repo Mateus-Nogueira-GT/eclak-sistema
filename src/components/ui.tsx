@@ -73,9 +73,10 @@ const variantes: Record<Variante, string> = {
   fantasma: "text-verde hover:bg-verde/8",
 };
 
-export function Botao({ variante = "primario", className, children, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { variante?: Variante }) {
+export function Botao({ variante = "primario", type = "button", className, children, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { variante?: Variante }) {
   return (
     <button
+      type={type}
       {...rest}
       className={cx("inline-flex cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[5px] px-3.5 py-2 text-[14px] font-semibold transition-colors disabled:cursor-not-allowed", variantes[variante], className)}
     >
@@ -107,6 +108,7 @@ export function Tabs<T extends string>({ value, onChange, options }: { value: T;
     <div className="flex max-w-full gap-6 overflow-x-auto border-b border-linha">
       {options.map((o) => (
         <button
+          type="button"
           key={o.value}
           onClick={() => onChange(o.value)}
           className={cx(
@@ -121,12 +123,13 @@ export function Tabs<T extends string>({ value, onChange, options }: { value: T;
   );
 }
 
-export function Select({ value, onChange, children, className }: { value: string; onChange: (v: string) => void; children: ReactNode; className?: string }) {
+export function Select({ value, onChange, children, className, disabled }: { value: string; onChange: (v: string) => void; children: ReactNode; className?: string; disabled?: boolean }) {
   return (
     <select
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      className={cx("cursor-pointer rounded-[5px] border border-[#C9CDD1] bg-white px-3 py-2 text-[14px] text-texto outline-none focus:border-verde", className)}
+      className={cx("cursor-pointer rounded-[5px] border border-[#C9CDD1] bg-white px-3 py-2 text-[14px] text-texto outline-none focus:border-verde disabled:cursor-not-allowed disabled:bg-fundo disabled:text-cinza", className)}
     >
       {children}
     </select>

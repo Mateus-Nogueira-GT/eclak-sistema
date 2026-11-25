@@ -145,7 +145,7 @@ export async function reescreverTexto(dados: {
 
     if (r.parada === "refusal") return SEM_RESPOSTA;
     const sugestao = r.texto.trim();
-    if (r.parada === "max_tokens" || sugestao === "") return SEM_RESPOSTA;
+    if (r.parada === "max_tokens" || r.parada === "model_context_window_exceeded" || sugestao === "") return SEM_RESPOSTA;
     if (sugestao.length > LIMITE[finalidade]) return LONGA_DEMAIS;
     return { ok: true as const, texto: sugestao };
   });

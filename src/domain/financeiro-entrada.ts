@@ -89,6 +89,9 @@ export const lancamentoSchema = z
     const preenchidos = [v.fornecedorId, v.clienteId, v.pessoaTexto].filter((x) => x !== null).length;
     if (preenchidos > 1) ctx.addIssue({ code: "custom", message: MSG_PESSOA, path: ["pessoa"] });
     if (ehCompraNoCartao(v) && !v.cartaoId) ctx.addIssue({ code: "custom", message: MSG_CARTAO_CORPORATIVO, path: ["cartaoId"] });
+    if (v.repeticao.tipo === "parcelado" && v.valor < BigInt(v.repeticao.parcelas)) {
+      ctx.addIssue({ code: "custom", message: "O valor total precisa ser de pelo menos R$ 0,01 por parcela", path: ["valor"] });
+    }
   })
   .transform((v) => (ehCompraNoCartao(v) ? v : { ...v, cartaoId: null }));
 export type LancamentoEntrada = z.infer<typeof lancamentoSchema>;

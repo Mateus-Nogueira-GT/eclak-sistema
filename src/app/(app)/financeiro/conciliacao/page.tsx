@@ -111,7 +111,7 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
     <div className="mx-auto max-w-[1640px]">
       {cabecalho}
 
-      <form method="get" className="mb-5 flex flex-wrap items-end gap-3">
+      <form key={`${conta.id}|${de}|${ate}|${situacao ?? ""}`} method="get" className="mb-5 flex flex-wrap items-end gap-3">
         <label className="text-[13px] text-cinza">
           Conta
           <select name="conta" defaultValue={conta.id} className={`${campoCls} mt-1 block`}>

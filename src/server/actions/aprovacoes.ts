@@ -11,6 +11,7 @@ import {
   MOTIVO_SUBSTITUIDA,
   MSG_JA_DECIDIDO,
   MSG_NAO_CALCULA,
+  MSG_SEM_ANTECIPACAO,
   precoCalculado,
   custosDoSnapshot,
   resultadoDaVersao,
@@ -18,6 +19,7 @@ import {
   type ResultadoVersao,
   type Snapshot,
 } from "@/domain/aprovacoes";
+import { veCamadaEstrategica } from "@/domain/perfis";
 import type { FormaPagamento, Rateio } from "@/domain/precificacao";
 import type { Regras } from "@/domain/regras";
 import { MSG_VIAGEM_VENDIDA } from "@/domain/venda-entrada";
@@ -218,7 +220,9 @@ export async function enviarParaAprovacao(
         const snapshot: Snapshot = { destino: v.destino, inicio: v.inicio, fim: v.fim, passageiros, itens };
         const dias = diasDaViagem(v.inicio, v.fim);
         const rateio = regras.rateio.metodo;
-        const preco = p.data.preco ?? precoCalculado(custosDoSnapshot(snapshot).custo, forma, regras);
+        // Só perfis com camada estratégica podem informar um preço diferente da fórmula; os demais sempre usam o calculado.
+        const precoInformado = veCamadaEstrategica(usuario.perfil) ? p.data.preco : null;
+        const preco = precoInformado ?? precoCalculado(custosDoSnapshot(snapshot).custo, forma, regras);
         if (preco === null) throw new Desfazer(NAO_CALCULA);
         let resultado: ResultadoVersao;
         try {
@@ -343,6 +347,7 @@ export async function aprovar(versaoId: string): Promise<{ ok: true } | Falha> {
     decidir(
       versaoId,
       async (tx, { v, ver, agora }) => {
+        if ((ver.forma as FormaPagamento).antecipado) return { ok: false, erro: MSG_SEM_ANTECIPACAO };
         await decidirVersao(tx, usuario.id, ver, "aprovada", null, agora);
         await mudarStatusViagem(tx, usuario.id, v, { status: "aprovado", versaoAprovadaId: ver.id }, agora);
         return {};

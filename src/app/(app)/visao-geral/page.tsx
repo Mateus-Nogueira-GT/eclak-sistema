@@ -200,7 +200,7 @@ function Reserva({ reserva: r }: { reserva: VisaoGeral["reserva"] }) {
       </div>
       {/* `num` só nos valores: no parágrafo inteiro ele impede a quebra de linha e o texto sai do cartão. */}
       <p className="mt-2 text-[13px] leading-relaxed text-cinza">
-        <span className="num">{formatarReais(r.temos)}</span> de <span className="num">{formatarReais(r.meta)}</span> (6 meses de custo fixo).{" "}
+        <span className="num">{formatarReais(r.temos)}</span> de <span className="num">{formatarReais(r.meta)}</span> ({r.meses} {r.meses === 1 ? "mês" : "meses"} de custo fixo).{" "}
         {r.falta === 0n ? (
           "A reserva já está na meta."
         ) : (

@@ -249,7 +249,7 @@ describe("clienteDrive", () => {
 });
 
 describe("drive: limite e token revogado", () => {
-  it("401 numa chamada do Drive descarta o token guardado: a próxima chamada pede outro", async () => {
+  it("401 numa chamada do Drive descarta o token guardado e tenta uma vez com token novo (e falha se persistir)", async () => {
     let primeira = true;
     const g = googleFalso((c) => {
       if (!ehToken(c) && primeira) {
@@ -259,9 +259,15 @@ describe("drive: limite e token revogado", () => {
       return null;
     });
     const cli = clienteDrive(CFG, g.buscar);
-    await expect(cli.criarPasta("a", "p")).rejects.toMatchObject({ classe: "autenticacao", status: 401 });
-    expect(await cli.criarPasta("b", "p")).toMatchObject({ id: expect.any(String) });
+    expect(await cli.criarPasta("a", "p")).toMatchObject({ id: expect.any(String) });
     expect(g.chamadas.filter(ehToken)).toHaveLength(2);
+    expect(g.drive()).toHaveLength(2);
+
+    esquecerTokensGoogle();
+    const sempre401 = googleFalso((c) => (ehToken(c) ? null : 401));
+    await expect(clienteDrive(CFG, sempre401.buscar).criarPasta("b", "p")).rejects.toMatchObject({ classe: "autenticacao", status: 401 });
+    expect(sempre401.chamadas.filter(ehToken)).toHaveLength(2);
+    expect(sempre401.drive()).toHaveLength(2);
   });
 
   it("403 de outro erro não descarta o token", async () => {

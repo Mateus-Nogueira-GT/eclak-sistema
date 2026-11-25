@@ -164,6 +164,8 @@ function revalidar(viagemId: string) {
   revalidatePath(`/viagens/${viagemId}`);
   revalidatePath("/aprovacoes");
   revalidatePath("/tarefas");
+  revalidatePath("/financeiro", "layout");
+  revalidatePath("/visao-geral");
 }
 
 // ---------------------------------------------------------------------------

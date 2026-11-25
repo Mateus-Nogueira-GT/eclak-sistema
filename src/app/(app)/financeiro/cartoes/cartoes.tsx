@@ -142,6 +142,11 @@ export function Cartoes({
   );
 
   const aberta = faturaAberta ? cartoes.flatMap((k) => k.faturas.map((f) => ({ k, f }))).find((x) => x.f.id === faturaAberta) : undefined;
+  const cartaoEditando = editando ? cartoes.find((k) => k.id === editando) : undefined;
+  const contaDesativada =
+    cartaoEditando && !contas.some((c) => c.id === cartaoEditando.contaBancariaId)
+      ? { id: cartaoEditando.contaBancariaId, nome: cartaoEditando.contaBancaria }
+      : null;
 
   return (
     <div className="space-y-5">
@@ -168,7 +173,8 @@ export function Cartoes({
           </Campo>
           <Campo label="Conta de débito da fatura" className="sm:col-span-2 lg:col-span-3">
             <select className={`${inputCls} ${marca("contaBancariaId")}`} value={v.contaBancariaId} onChange={(e) => mudar("contaBancariaId", e.target.value)}>
-              <option value="">{contas.length === 0 ? "Cadastre uma conta bancária antes" : "Escolha a conta"}</option>
+              <option value="">{contas.length === 0 && !contaDesativada ? "Cadastre uma conta bancária antes" : "Escolha a conta"}</option>
+              {contaDesativada && <option value={contaDesativada.id}>{contaDesativada.nome} (desativada)</option>}
               {contas.map((c) => (
                 <option key={c.id} value={c.id}>{c.nome}</option>
               ))}

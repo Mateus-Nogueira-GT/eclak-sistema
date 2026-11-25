@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { ShieldAlert } from "lucide-react";
 import { alertasDoCliente, hojeEmCuiaba } from "@/domain/clientes";
 import { margemDaAprovacao, FORMA_REFERENCIA, FORMAS_SIMULADOR, resultadoDoPreco } from "@/domain/precificacao";
-import { veCamadaEstrategica } from "@/domain/perfis";
+import { podeAcessar, veCamadaEstrategica } from "@/domain/perfis";
 import { exigirPerfil } from "@/server/auth";
 import { obterCliente } from "@/server/queries/clientes";
 import { listarCartoesAtivos } from "@/server/queries/cartoes";
@@ -119,6 +119,7 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
         removidos={removidos}
         fornecedores={fornecedores.map((f) => ({ id: f.id, nome: f.nome, comissaoPct: f.comissaoPct, tarifaFixa: f.tarifaFixa }))}
         extras={extras}
+        podeFecharVenda={podeAcessar(usuario.perfil, "/vendas")}
       />
     </div>
   );

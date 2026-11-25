@@ -324,7 +324,7 @@ function PainelNota({
               <input className={cx(campo("documento"), "num")} inputMode="numeric" value={documento} disabled={desabilitado} onChange={(e) => setDocumento(e.target.value)} placeholder="Só números ou com pontuação" />
             </Campo>
             <Campo label="Ligada a (opcional)" className="col-span-2">
-              <Select value={vinculo} onChange={escolherVinculo} className={cx("w-full", marca(acao, "fornecedorId"), marca(acao, "clienteId"))}>
+              <Select value={vinculo} onChange={escolherVinculo} disabled={desabilitado} className={cx("w-full", marca(acao, "fornecedorId"), marca(acao, "clienteId"))}>
                 <option value="">Ninguém: só o nome</option>
                 <optgroup label="Fornecedores">
                   {fornecedores.map((x) => (
@@ -339,7 +339,7 @@ function PainelNota({
               </Select>
             </Campo>
             <Campo label="Viagem (opcional)" className="col-span-4">
-              <Select value={viagemId} onChange={setViagemId} className={cx("w-full", marca(acao, "viagemId"))}>
+              <Select value={viagemId} onChange={setViagemId} disabled={desabilitado} className={cx("w-full", marca(acao, "viagemId"))}>
                 <option value="">Nenhuma</option>
                 {viagens.map((x) => (
                   <option key={x.id} value={x.id}>{x.rotulo}</option>

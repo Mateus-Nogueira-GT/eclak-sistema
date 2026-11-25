@@ -306,6 +306,12 @@ describe("casos-limite", () => {
     expect(precoDoPacote(100000n, pix, R, "92.999")).toBe(9300000000n);
   });
 
+  it("vendaDoItem recusa ganhoMinimoHotelPct de 100% ou mais", () => {
+    const hotel = novo({ tipo: "Hotelaria", diarias: 2, valorFornecedor: 100000n });
+    expect(() => vendaDoItem(hotel, { ...R, ganhoMinimoHotelPct: "100.000" })).toThrow("Ganho mínimo de hotelaria não pode ser 100% ou mais");
+    expect(() => vendaDoItem(hotel, { ...R, ganhoMinimoHotelPct: "120.000" })).toThrow("Ganho mínimo de hotelaria não pode ser 100% ou mais");
+  });
+
   it("compensação negativa ainda fecha no centavo", () => {
     // Hotéis acima do limite vendem pelo valor; com 50% de comissão o preço fica abaixo da soma das vendas.
     const p = precificar(

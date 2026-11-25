@@ -155,9 +155,12 @@ export function vendaDoItem(i: ItemCalc, r: Regras): bigint {
       throw new Error("Aéreo fica fora da precificação do terrestre");
     case "Taxa":
       return v;
-    case "Hotelaria":
+    case "Hotelaria": {
       if (i.diarias && v > BigInt(r.limiteDiariaSemReajuste) * BigInt(i.diarias)) return v;
-      return arredondar(custoLiquido(i) * E, E - pct(r.ganhoMinimoHotelPct));
+      const den = E - pct(r.ganhoMinimoHotelPct);
+      if (den <= 0n) throw new Error("Ganho mínimo de hotelaria não pode ser 100% ou mais");
+      return arredondar(custoLiquido(i) * E, den);
+    }
     case "Trem":
       return arredondar(v * (E + pct(r.markupTremPct)), E);
     default: {

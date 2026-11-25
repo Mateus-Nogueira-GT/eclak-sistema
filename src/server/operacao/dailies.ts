@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lte } from "drizzle-orm";
 import { nomesDaSaudacao, textoDoDaily } from "@/domain/daily";
 import { ehUuid } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
@@ -175,7 +175,7 @@ export async function gerarDailiesDoDia(data: string): Promise<{ gerados: number
     .select({ id: roteiros.id, conteudo: roteiros.conteudo })
     .from(roteiros)
     .innerJoin(viagens, eq(viagens.id, roteiros.viagemId))
-    .where(and(eq(roteiros.status, "aprovado"), eq(viagens.status, "vendida"), isNull(viagens.excluidoEm)))
+    .where(and(eq(roteiros.status, "aprovado"), eq(viagens.status, "vendida"), isNull(viagens.excluidoEm), lte(viagens.inicio, data), gte(viagens.fim, data)))
     .orderBy(asc(roteiros.id));
   const doDia = candidatos.filter((r) => r.conteudo.dias.some((d) => d.data === data));
   if (doDia.length === 0) return { gerados: 0, pulados: 0 };

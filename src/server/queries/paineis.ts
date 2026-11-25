@@ -152,15 +152,19 @@ export type VisaoGeral = {
 
 const bigintSql = (expr: SQL) => sql<string>`coalesce(${expr}, 0)::bigint`.mapWith((v: string) => BigInt(v));
 
-/** Recebido de clientes e pago a fornecedores (R2): baixas no intervalo que transitam pelo caixa, pelo valor de caixa. */
+/**
+ * Recebido de clientes e pago a fornecedores (R2): baixas no intervalo pelo valor de caixa. Pagamentos a fornecedor
+ * pagos via cartão corporativo (`fatura_cartao_id IS NOT NULL`, `status_base = 'baixado'`) entram na data da quitação
+ * da fatura (`baixado_em = pago_em`), enquanto contas quitadas pelo cartão direto no fornecedor (`no_cartao`) ficam fora.
+ */
 async function caixaDoIntervalo(i: Intervalo): Promise<{ recebido: bigint; pago: bigint }> {
   const [t] = await db
     .select({
-      recebido: bigintSql(sql`sum(${lf.valorCaixaBaixado}) filter (where ${lf.origem} = 'parcela')`),
-      pago: bigintSql(sql`sum(${lf.valorCaixaBaixado}) filter (where ${lf.origem} = 'pagamento')`),
+      recebido: bigintSql(sql`sum(${lf.valorCaixaBaixado}) filter (where ${lf.origem} = 'parcela' and ${lf.transitaCaixa})`),
+      pago: bigintSql(sql`sum(${lf.valorCaixaBaixado}) filter (where ${lf.origem} = 'pagamento' and (${lf.transitaCaixa} or ${lf.faturaCartaoId} is not null))`),
     })
     .from(lf)
-    .where(and(eq(lf.statusBase, "baixado"), eq(lf.transitaCaixa, true), between(lf.baixadoEm, i.de, i.ate)));
+    .where(and(eq(lf.statusBase, "baixado"), between(lf.baixadoEm, i.de, i.ate)));
   return t ?? { recebido: 0n, pago: 0n };
 }
 
@@ -463,7 +467,7 @@ export async function relatorioContas(lado: Lado, i: Intervalo): Promise<Relator
     })
     .from(lf)
     .innerJoin(categoriasFinanceiras, eq(categoriasFinanceiras.id, lf.categoriaId))
-    .where(and(eq(lf.lado, lado), ne(lf.statusBase, "cancelado"), isNull(lf.faturaCartaoId), between(lf.vencimento, i.de, i.ate)))
+    .where(and(eq(lf.lado, lado), ne(lf.statusBase, "cancelado"), eq(lf.transitaCaixa, true), isNull(lf.faturaCartaoId), between(lf.vencimento, i.de, i.ate)))
     .orderBy(asc(lf.vencimento), asc(lf.id), asc(lf.origem));
 
   const totais: Record<string, bigint> = {};

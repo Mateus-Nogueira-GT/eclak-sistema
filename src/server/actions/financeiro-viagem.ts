@@ -32,6 +32,7 @@ import { comPerfil, ehUuid, errosDeCampo } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
 import {
+  anexos,
   comissoes,
   faturasCartao,
   contasPagar,
@@ -112,6 +113,8 @@ function revalidar(viagemId: string) {
   revalidatePath("/viagens");
   revalidatePath(`/viagens/${viagemId}`);
   revalidatePath("/vendas");
+  revalidatePath("/financeiro", "layout");
+  revalidatePath("/visao-geral");
 }
 
 /**
@@ -282,6 +285,14 @@ export async function definirFormaFornecedor(contaId: string, forma: FormaFornec
         }
         if (novas.some((l) => l.vencimento === null) && !vencimentoAtual) return falha("Informe a data", "vencimento");
         // Cartão corporativo: cada linha na fatura do ciclo da sua data (a data informada é a da compra).
+        if (linhas.length > 0) {
+          const [comAnexo] = await tx
+            .select({ id: anexos.id })
+            .from(anexos)
+            .where(and(eq(anexos.donoTipo, "pagamento"), inArray(anexos.donoId, linhas.map((l) => l.id)), isNull(anexos.excluidoEm)))
+            .limit(1);
+          if (comAnexo) return falha("Remova os anexos dos pagamentos antes de trocar a forma de pagamento");
+        }
         // As faturas de saída (das linhas antigas) e de entrada são travadas juntas, em ordem única, antes das escritas.
         const entradas = f.tipo === "cartao_corporativo" ? novas.map((l) => ({
                 cartaoId: f.cartaoId,
@@ -449,6 +460,9 @@ export async function atualizarPrevisto(contaId: string, valorBrl: string, motiv
         // Sem linha em aberto e o previsto subiu acima do já pago: o aumento vira uma linha nova em aberto
         // (vence hoje), sem passar do novo previsto; a conta volta a `a_pagar`.
         const complemento = linhas.some((l) => l.status !== "pago") ? 0n : minimo(novo - conta.previstoBrl, novo - jaPago);
+        if (complemento > 0n && linhas.some((l) => l.repasseParcelaId !== null)) {
+          return falha("Conta quitada pelo repasse do cartão: desfaça o repasse antes de aumentar o previsto");
+        }
         if (complemento > 0n) {
           const hoje = hojeEmCuiaba();
           // Conta paga no cartão corporativo: o complemento é compra nova no mesmo cartão, na fatura do ciclo de hoje

@@ -196,11 +196,12 @@ async function reenviar(diretorId: string, id: string): Promise<Resultado> {
   const naoEncontrado = { ok: false as const, erro: "Usuário não encontrado" };
   if (!ehUuid(id)) return naoEncontrado;
   const [alvo] = await db
-    .select({ id: usuarios.id, email: usuarios.email })
+    .select({ id: usuarios.id, email: usuarios.email, ativo: usuarios.ativo })
     .from(usuarios)
     .where(eq(usuarios.id, id))
     .limit(1);
   if (!alvo) return naoEncontrado;
+  if (!alvo.ativo) return { ok: false, erro: "Usuário desativado" };
 
   const admin = supabaseAdmin();
   const { data, error } = await admin.auth.admin.getUserById(id);
@@ -215,20 +216,26 @@ async function reenviar(diretorId: string, id: string): Promise<Resultado> {
       ? await supabaseAnonimo().auth.resetPasswordForEmail(alvo.email, { redirectTo })
       : convite;
     if (reserva.error) {
-      console.error("Falha ao reenviar convite", id, reserva.error.message);
+      console.error("Falha ao reenviar convite", { status: reserva.error.status ?? null });
       return { ok: false, erro: "Não foi possível reenviar o convite. Tente novamente" };
     }
   }
 
-  await db.transaction(async (tx) => {
-    await registrarAuditoria(tx, {
-      usuarioId: diretorId,
-      tabela: "usuarios",
-      registroId: id,
-      acao: "alterar",
-      depois: { conviteReenviadoEm: new Date() },
+  try {
+    await db.transaction(async (tx) => {
+      await registrarAuditoria(tx, {
+        usuarioId: diretorId,
+        tabela: "usuarios",
+        registroId: id,
+        acao: "alterar",
+        depois: { conviteReenviadoEm: new Date() },
+      });
     });
-  });
+  } catch (e) {
+    const x = e as { code?: string; cause?: { code?: string } } | null;
+    console.error("Falha ao auditar reenvio de convite", { code: x?.cause?.code ?? x?.code });
+    throw new Error("Falha ao registrar o reenvio do convite");
+  }
   revalidatePath("/admin/usuarios");
   return { ok: true };
 }
