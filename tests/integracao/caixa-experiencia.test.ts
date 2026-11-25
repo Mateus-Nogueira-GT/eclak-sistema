@@ -382,7 +382,11 @@ describe("caixa de experiência", () => {
         registrarEntrada({ produtoId: p1, filial: "RS", quantidade: 1, valorUnitario: "38,00", fornecedorId: "", fornecedorTexto: "Loja", vencimento: "2027-01-31", forma: "PIX", cartaoId: "" }),
       ),
     ).toEqual({ ok: false, erro: "Produto desativado" });
-    expect((await comSessao(x.u.id, () => salvarCaixa(x.viagemId, [{ produtoId: p1, quantidade: 1 }]))).ok).toBe(false);
+    expect(await comSessao(x.u.id, () => salvarCaixa(x.viagemId, [{ produtoId: p1, quantidade: 1 }]))).toEqual({
+      ok: false,
+      erro: "Escolha produtos ativos de caixa de experiência",
+      campos: { itens: "Escolha produtos ativos de caixa de experiência" },
+    });
     expect(await foto()).toEqual(antes);
   });
 });
