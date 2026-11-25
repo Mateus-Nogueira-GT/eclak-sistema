@@ -212,3 +212,37 @@ Cada aviso tem uma **chave estável** (`tipo:id do alvo`, por exemplo `caixa_a_m
 ## 13. O que fica para quem implementa
 
 Nomes internos, a divisão em arquivos seguindo o padrão das fatias 4 e 5 (`src/domain`, `src/server/{actions,queries}`, `src/app/(app)`), os textos de erro não citados aqui (no tom dos existentes) e o desenho fino das telas dentro do estilo atual, com o protótipo como referência.
+
+## 14. Precisões depois da conferência com o código (valem sobre o texto acima em caso de conflito)
+
+**Núcleo do financeiro**
+- Hoje só `criarLancamentosNa` e `baixarLancamentoNa` (`src/server/financeiro/lancamentos.ts`) aceitam uma transação. Esta fatia **extrai** para o mesmo arquivo, sem mudar o comportamento: desfazer baixa, cancelar e alterar valor e vencimento de um lançamento em aberto. As actions atuais passam a chamar o núcleo.
+- Contas do reembolso: `emissao` = hoje, `competencia` = mês de hoje (o do registro), `forma` = `transferencia` na conta a receber e `pix` ou `transferencia` (a do caso) na conta a pagar.
+- A baixa com valor diferente do previsto exige observação, como na lista: os marcos "Fornecedor pagou" e "Cliente reembolsado" têm o campo "Observação" (obrigatório só nesse caso).
+- Entrada de estoque com valor unitário 0 (doação, brinde recebido) é aceita e **não gera conta**.
+- Entrada no **cartão corporativo** é aceita: a conta entra na fatura do ciclo e é paga pela fatura, como qualquer compra no cartão. "Desfazer entrada" usa o cancelamento do núcleo (que tira a compra da fatura) e é recusado se a fatura já foi paga.
+
+**Reembolso: o caso lê as contas, não as copia**
+- `reembolsos` **não** guarda `recebido_em`, `valor_recebido` nem `valor_devolvido`, e não tem a coluna `situacao`: o estado de cada lado vem da conta ligada (`status`, `baixado_em`, `valor_pago`). Ficam no caso só `reembolsado_em` (usado quando a forma é `abatimento` ou `credito`, que não têm conta) e `cancelado_em`/`cancelado_por`/`motivo_cancelamento`. O enum `situacao_reembolso` não é criado.
+- Assim a baixa pode ser feita pelo caso ou pela lista sem gancho: as duas mexem na mesma conta. O caso não trava a viagem (não altera nada dela).
+- A view `lancamentos_financeiros` ganha duas colunas no ramo manual, `estoque_movimento_id` e `reembolso_id` (nulas nos outros ramos), numa migração nova que copia a versão atual (`0045`). A lista usa essas colunas para esconder "Editar" e "Cancelar" e as actions de editar e cancelar recusam pelo mesmo critério.
+- **Benefício em dobro:** se o financeiro também reduzir o previsto da conta do serviço que falhou, o mesmo dinheiro melhora a margem duas vezes. O formulário do caso avisa: "Se o fornecedor vai abater na conta dele em vez de devolver, deixe o valor a cobrar em 0." Não há bloqueio.
+
+**Categorias**
+- As quatro categorias viram categorias de sistema (não podem ser desativadas nem trocadas de lado): slugs `reembolso_cliente`, `reembolso_fornecedor`, `caixa_experiencia`, `papelaria`, numa migração que atualiza as linhas da `0020` pelo (lado, grupo, nome), cria as que faltarem e amplia o CHECK.
+
+**Margem**
+- `ponteDaMargem` também recebe os ajustes e ganha as duas linhas; a soma das linhas continua fechando com `real.final − planejada.final`.
+
+**Estoque**
+- "Desfazer entrada" só quando ela é o **último movimento** daquele produto naquela filial (assim o inverso do custo médio é exato). Depois de qualquer outro movimento: "Faça um ajuste de estoque."
+- Conciliar a viagem é recusado com a caixa em rascunho ("Confirme ou cancele a caixa de experiência antes"). Reembolso aberto não impede a conciliação.
+- **Valores da caixa:** consultor e operacional veem itens, quantidades e o disponível na filial, **sem valores** (custo é camada estratégica no HANDOFF §4). Valor por item e total aparecem só para Diretor e financeiros.
+
+**Avisos**
+- Os sete avisos de hoje estão montados dentro de `obterVisaoGeral`, só para Diretor e financeiro estratégico. Esta fatia os **extrai** para um módulo próprio (`src/server/avisos/`), uma função por aviso, cada uma com o seu `exigirPerfil`; a Visão geral passa a chamá-las e continua mostrando o mesmo que hoje. O financeiro operacional passa a receber parcela, comissão, pagar e conciliação em `/avisos`.
+- **Chaves:** aviso de um alvo só usa `tipo:id` (`margem:<viagem>`, `caixa_a_montar:<viagem>`, `estoque_minimo:<produto>:<filial>`, `reembolso_pedir:<caso>`…). Os avisos que resumem vários (parcela, comissão, pagar, conciliação, aprovação) usam só o `tipo`. Em `/avisos` a margem é um aviso por viagem, sem o corte de três.
+- **Validade da dispensa:** vale enquanto o `detalhe` do aviso for igual ao do momento da dispensa, por no máximo 30 dias. Mudou o texto (por exemplo, de 3 para 4 parcelas vencidas) ou passaram 30 dias: o aviso volta.
+- `daily_a_gerar`: dia de hoje ou de amanhã sem linha de daily ou com ela `pendente`. Com o agendador ligado, quase nunca aparece (ele gera sozinho).
+- **Contador:** o `Shell` fica no layout e não é refeito a cada navegação. O contador é um pequeno componente de cliente que chama a action `contarAvisos()` ao montar e a cada troca de rota; a action guarda o resultado por pessoa durante 60 segundos na memória do processo. A página `/avisos` calcula sempre na hora.
+- "Para mim" é por setor (o sistema não separa viagens por consultor).
