@@ -1,10 +1,10 @@
 # Passagem de sessão — Sistema ECLAK Viagens
 
-Atualizado em 24/11/2026. Leia este arquivo inteiro antes de mexer no código. Ele resume o que foi feito, onde está, como rodar, as decisões tomadas e o que falta.
+Atualizado em 25/11/2026. Leia este arquivo inteiro antes de mexer no código. Ele resume o que foi feito, onde está, como rodar, as decisões tomadas e o que falta.
 
 ## 1. Em uma frase
 
-O sistema real da ECLAK Viagens (agência de turismo de alto padrão de Rondonópolis-MT, diretor Augusto Kraemer) está sendo construído **por fatias**. **As fatias 1, 2, 3a, 3b, 4a, 4b, 5a, 6a, 6b e 6c estão prontas, revisadas e mergeadas em `main`** (PRs #1 a #6 em 23/11/2026; #7 a #11 em 24/11/2026, todos com o "sim" do Mateus). Os PRs #8, #9 e #10 eram empilhados e foram mergeados nas branches de base; o conteúdo chegou a `main` pelo PR [#11](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/11) (branch `claude/fatia-6c-integracoes`, que continha as três). **A 5b (Reembolsos, Estoque, Caixa de experiência, Avisos) segue esperando o retorno do grupo e da Valeska (§8).** A 6b foi testada só com OFX sintéticos: falta um OFX real de cada banco. As integrações da 6c ficam desligadas enquanto faltar alguma variável e **foram testadas só contra serviços falsos**: nenhuma chamada real, nenhuma conta ou chave criada; "ligar" fica provado só quando o primeiro "Testar conexão" real de cada uma der certo (checklist em §8.6). Nada foi publicado (sem Railway, sem Supabase de produção).
+O sistema real da ECLAK Viagens (agência de turismo de alto padrão de Rondonópolis-MT, diretor Augusto Kraemer) está sendo construído **por fatias**. **As fatias 1, 2, 3a, 3b, 4a, 4b, 5a, 6a, 6b e 6c estão prontas, revisadas e mergeadas em `main`** (PRs #1 a #6 em 23/11/2026; #7 a #11 em 24/11/2026, todos com o "sim" do Mateus). Os PRs #8, #9 e #10 eram empilhados e foram mergeados nas branches de base; o conteúdo chegou a `main` pelo PR [#11](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/11) (branch `claude/fatia-6c-integracoes`, que continha as três). Os PRs #12 a #17 (24 e 25/11/2026: documentação, antecipação manual, correções do debug, botão flutuante e agente do chat) também estão em `main`. **A fatia 5b (Estoque, Caixa de experiência, Reembolsos e Avisos) foi entregue no branch `claude/fatia-5b`, com PR a abrir (base `main`, sem merge até o "sim" do Mateus).** O Mateus decidiu em 25/11/2026 quatro das perguntas do grupo e mandou construir; as demais seguem as decisões do spec, listadas em §6 para conferir com a Valeska e o grupo. A 6b foi testada só com OFX sintéticos: falta um OFX real de cada banco. As integrações da 6c ficam desligadas enquanto faltar alguma variável e **foram testadas só contra serviços falsos**: nenhuma chamada real, nenhuma conta ou chave criada; "ligar" fica provado só quando o primeiro "Testar conexão" real de cada uma der certo (checklist em §8.6). Nada foi publicado (sem Railway, sem Supabase de produção).
 
 ## 2. Onde está cada coisa
 
@@ -31,6 +31,7 @@ Os PRs #1 a #6 foram mergeados em `main` em ordem (merge commit, branches mantid
 | 6a Painéis (Visão geral e Relatórios) | `claude/fatia-6a-paineis` | [#8](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/8) (em `main` pelo [#11](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/11), 24/11/2026) |
 | 6b Extrato OFX e conciliação | `claude/fatia-6b-conciliacao` | [#9](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/9) (em `main` pelo #11, 24/11/2026) |
 | 6c Integrações (Trello, Drive, IA, agendador do daily) | `claude/fatia-6c-integracoes` | [#10](https://github.com/Mateus-Nogueira-GT/eclak-sistema/pull/10) (em `main` pelo #11, 24/11/2026) |
+| 5b Estoque, Caixa de experiência, Reembolsos e Avisos | `claude/fatia-5b` (parte de `main` em `b7b7b0f`, depois do #17) | PR a abrir com `--base main`; sem merge |
 
 **Integração da 5a com a 4b (feita em 23/11/2026).** A 5a foi construída sobre `main` sem a 4b, e as duas fatias criaram migrações com os mesmos números. Em vez de renomear, as migrações da 5a foram apagadas num commit, `main` (com a 4b) foi mergeada na branch da 5a e as migrações foram **regeneradas** depois das da 4b (0035_operacao e 0036_operacao_rls), com o SQL custom de RLS, índices parciais e CHECKs colado sem mudança. Motivo: o `drizzle-kit migrate` registra no banco só o `created_at` da última migração aplicada e **pula as entradas do journal mais antigas que ela**, então uma migração renumerada mas com data antiga nunca rodaria num banco que já tem a 4b. Quem tinha banco local da 5a antiga precisa de `npx supabase db reset && npm run db:migrate`.
 
@@ -48,6 +49,7 @@ Os PRs #1 a #6 foram mergeados em `main` em ordem (merge commit, branches mantid
 - Plano da 6a: `docs/superpowers/plans/2026-11-23-fatia-6a-paineis.md` (tem os rulings R1 a R10 e a seção "Para a 6b e a 6c").
 - Desenho das fatias 6b e 6c: `docs/superpowers/specs/2026-11-24-fatia-6b-6c-design.md` (§4 a 6b, §5 a 6c, §6 os rulings R-B1 a R-B3 e R-C1 a R-C8, §8 a tabela "para ligar cada integração").
 - Planos: `docs/superpowers/plans/2026-11-24-fatia-6b-conciliacao.md` e `docs/superpowers/plans/2026-11-24-fatia-6c-integracoes.md` (a 6c tem as "Decisões" com os nomes exatos das variáveis, da fila e das chamadas a cada serviço).
+- Desenho da 5b: `docs/superpowers/specs/2026-11-25-fatia-5b-design.md` (decisões do Mateus no topo, §10 as decisões do Claude, **§14 as precisões depois da conferência com o código, que valem sobre o resto**). Plano: `docs/superpowers/plans/2026-11-25-fatia-5b.md`. Ledger da execução (rulings do controlador) em `.superpowers/sdd/2026-11-25-fatia-5b/progress.md` (o git ignora; copiados em §6).
 - `README.md`: como rodar, banco local, seed, convite/senha, RLS, **Integrações** (variáveis, onde conseguir, como ligar, serviço cron do Railway, o que nunca sai do sistema) e **passo a passo do deploy** (ainda não executado).
 - Protótipo, para regras e visual: `eclak-mockup/PRODUCT.md`, `eclak-mockup/DESIGN.md`, `eclak-mockup/src/app/**`, `eclak-mockup/src/lib/**`.
 
@@ -99,9 +101,16 @@ src/server/cron.ts   exigirCron (segredo das rotas de cron)
 src/app/api/cron/integracoes, /dailies  rotas POST do serviço cron do Railway (fila a cada 10 min; dailies de hoje, hoje + 1 e hoje + 2 às 07:00 de Cuiabá)
 src/server/operacao/dailies.ts  núcleo de gerar o daily (usado por gerarDaily e pelo agendador) e gerarDailiesDoDia
 src/app/(app)/admin/integracoes/  Admin › Integrações (só Diretor); src/components/chat-ia.tsx  painel do chat
+src/domain/estoque.ts, estoque-entrada.ts  custo médio (entrada, saída, desfazer pelo custo_medio_antes), schemas do estoque e da caixa (5b)
+src/domain/reembolsos.ts, reembolsos-entrada.ts  formas de devolução, situação derivada do caso, schemas (5b)
+src/domain/avisos.ts  setores, quem recebe o quê (SETORES_DO_PERFIL, recebe), tipos, passos e chaves dos avisos (5b)
+src/server/estoque/movimentos.ts  núcleo do estoque: travarSaldo, gravarSaldo, gravarMovimento (usado pelo estoque e pela caixa)
+src/server/actions/estoque.ts, caixa-experiencia.ts, reembolsos.ts, avisos.ts  actions da 5b; queries/estoque.ts, caixa-experiencia.ts, reembolsos.ts
+src/server/avisos/   um módulo por grupo de avisos (gestao, financeiros, operacao, estoque, reembolsos), cada função com o seu exigirPerfil; central.ts monta a central (dispensas e comunicados)
+src/app/(app)/financeiro/estoque, /financeiro/reembolsos, /avisos  telas da 5b; viagens/[id]/caixa-experiencia.tsx  bloco da caixa; components/contador-avisos.tsx  o sino
 src/app/(app)/       telas logadas; src/app/login, /auth/confirmar, /definir-senha
-drizzle/             migrações 0000–0044 (geradas + custom para RLS, índices, enums; 0026–0034 da 4b, 0035_operacao e 0036_operacao_rls da 5a, 0037_situacao_extrato_enum, 0038_extratos e 0039_extratos_rls da 6b; 0040_integracoes_enums, 0041_integracao_envios, 0042_integracao_envios_rls, 0043_ia_usos e 0044_ia_usos_rls da 6c)
-scripts/             seed-local, seed-orcamentos, seed-vendas, seed-financeiro, seed-operacao, seed-conciliacao, criar-diretor, local-guard, postbuild
+drizzle/             migrações 0000–0058 (geradas + custom para RLS, índices, enums; 0026–0034 da 4b, 0035_operacao e 0036_operacao_rls da 5a, 0037_situacao_extrato_enum, 0038_extratos e 0039_extratos_rls da 6b; 0040_integracoes_enums, 0041_integracao_envios, 0042_integracao_envios_rls, 0043_ia_usos e 0044_ia_usos_rls da 6c; 0045_view_sem_antecipacao; 0046–0058 da 5b)
+scripts/             seed-local, seed-orcamentos, seed-vendas, seed-financeiro, seed-operacao, seed-conciliacao, seed-5b, criar-diretor, local-guard, postbuild
 tests/domain, tests/integracao (integração roda contra Supabase local e TRUNCA o banco)
 ```
 
@@ -115,6 +124,10 @@ tests/domain, tests/integracao (integração roda contra Supabase local e TRUNCA
 - Valor novo de enum em migração própria (só o `ALTER TYPE … ADD VALUE`).
 - Escritas em viagem/venda/financeiro: `travarViagem` (advisory + `for update`) e mesma ordem de travas.
 - Erros de banco logados só com o código (sem parâmetros: evitam CPF/passaporte em log).
+- Núcleo do financeiro (5b): criar, baixar, desfazer baixa, cancelar e alterar valor e vencimento de lançamento em aberto existem numa transação `tx` em `src/server/financeiro/lancamentos.ts` (`…Na`); quem mexe em dinheiro de outro módulo (estoque, reembolso) usa o núcleo, nunca `insert` cru em `lancamentos`.
+- Contas com vínculo (5b): lançamento com `estoque_movimento_id` ou `reembolso_id` pode ser baixado na lista, mas não editado nem cancelado ali (a view `lancamentos_financeiros` expõe as duas colunas no ramo manual; a lista esconde os botões e as actions recusam pelo mesmo critério). Altera-se pelo Estoque ou pelo caso.
+- Estoque (5b): movimento só é inserido (nunca alterado nem apagado), grava `custo_medio_antes` e `criado_em = clock_timestamp()` lido já com a trava do saldo; travas na ordem viagem → caixa → produtos (`for share`) → saldos (`for update`) em ordem crescente de `produto_id`.
+- Categorias de sistema (5b): "Reembolso a cliente", "Reembolso de fornecedor", "Caixa de experiência" e "Papelaria" têm slug em `categorias_financeiras.sistema` (`reembolso_cliente`, `reembolso_fornecedor`, `caixa_experiencia`, `papelaria`) e são procuradas pelo slug, não pelo nome.
 - Integrações (6c): segredos só em `process.env` (nunca em código, banco, log, auditoria ou tela; a tela mostra só os **nomes** das variáveis que faltam); nenhuma chamada externa dentro de `db.transaction` nem sob `travarViagem` (enfileirar sim, na transação do evento); só enfileirar com a integração configurada no momento do evento; ação do sistema (cron) audita com `usuarioId: null`; nenhum teste, seed ou verificação chama serviço real.
 
 ### Perfis e acesso
@@ -205,6 +218,15 @@ Rulings da tarefa do agendador (Task 7):
 - A rota do cron não chama `revalidatePath` (as telas de dailies são dinâmicas).
 - `ProvedorHotelaria`: quartos com adultos e idades das crianças, regime de refeição (`sem_refeicao` a `tudo_incluido`), só reembolsável opcional; tarifa com código, quarto, refeição, reembolsável, prazo de cancelamento e total em centavos (`bigint`) na moeda do provedor (custo: ajustar os tipos quando chegar a documentação).
 
+**Fatia 5b — Estoque, Caixa de experiência, Reembolsos e Avisos** (branch `claude/fatia-5b`, a partir de `main` depois do PR #17; PR a abrir). Desenho `docs/superpowers/specs/2026-11-25-fatia-5b-design.md` (§14 vale sobre o resto), plano `docs/superpowers/plans/2026-11-25-fatia-5b.md`. Migrações 0046–0058, todas aditivas: 0046 (enums `uso_estoque`, `tipo_movimento_estoque`, `situacao_caixa`), 0047 (tabelas `produtos_estoque`, `estoque_saldos`, `estoque_movimentos`, `caixas_experiencia`, `caixa_itens` e a coluna `lancamentos.estoque_movimento_id`), 0048 (RLS), 0049 (as quatro categorias de sistema novas), 0050 (`lancamentos.reembolso_id`), 0051 (view `lancamentos_financeiros` com as duas colunas de vínculo, cópia da 0045), 0052 (CHECK do sinal da quantidade por tipo de movimento), 0053 (enum `forma_devolucao`), 0054 (tabela `reembolsos` e a FK de `lancamentos.reembolso_id`), 0055 (RLS), 0056 (dono `reembolso` nos anexos), 0057 (`avisos_dispensados` e `avisos_comunicados`), 0058 (RLS).
+- **Estoque** (`/financeiro/estoque`, Diretor e financeiros): produtos (brindes de caixa de experiência e papelaria) com mínimo por filial; saldo e custo médio por filial (MT = Rondonópolis, RS); entrada (compra) gera **uma conta a pagar** pelo núcleo (categoria pelo uso, centro = filial, "Estoque: <n> × <produto>"; valor 0 não gera conta; aceita o cartão corporativo, e a conta entra na fatura do ciclo); saída e ajuste com motivo, sem lançamento; desfazer entrada só quando é o último movimento do produto na filial e a conta não foi paga (volta ao `custo_medio_antes`); produto só desativa com saldo 0 nas duas filiais. Cartões (valor em estoque, abaixo do mínimo), filtros, histórico e a aba "Caixas" (vendidas não conciliadas que embarcam em até 60 dias, com a situação da caixa).
+- **Caixa de experiência** (bloco na viagem vendida, os cinco perfis): rascunho com produtos de caixa ativos da filial da viagem; confirmar trava a viagem, a caixa e os saldos, recusa item acima do saldo, baixa ao custo médio e grava o custo de cada item e o total; cancelar o rascunho apaga, cancelar a confirmada (motivo) devolve ao estoque ao custo gravado; uma caixa não cancelada por viagem; só em viagem vendida e não conciliada; conciliar é recusado com caixa em rascunho. Consultor e operacional não veem valores.
+- **Reembolsos** (`/financeiro/reembolsos`, Diretor e financeiros; bloco na viagem para os mesmos perfis): o caso (serviço da viagem, ocorrido, valor a cobrar e a devolver, forma, prazos) cria na mesma transação a conta a receber do fornecedor e, em PIX ou transferência, a conta a pagar ao cliente; "Fornecedor pagou" e "Cliente reembolsado" são a **baixa dessas contas** (a mesma da lista; o caso lê as contas, não as copia); editar acompanha a conta em aberto; cancelar só sem baixa; comprovantes pelos anexos. Situação derivada: Pedir ao fornecedor, Aguardando fornecedor e cliente, Aguardando o fornecedor, Reembolsar o cliente, Concluído, Cancelado. Vale em viagem conciliada (a tela avisa "Margem alterada por reembolso depois da conciliação").
+- **Margem real com ajustes:** `margemReal` e `ponteDaMargem` recebem `ajustes { caixa, reembolsos }` (padrão 0): `receita`, `custo`, `imposto`, `taxas` e `fixo` não mudam (viagem sem ajuste dá o mesmo resultado de antes, testado); só `final` desconta. Reembolsos = Σ (devolver − cobrar) dos casos não cancelados (o recebido e o devolvido quando baixados; abatimento conta 0, porque a parcela recebida a menor já reduz a receita). A ponte ganha as linhas "Caixa de experiência" e "Reembolsos" depois de "Imposto". O DRE não conta duas vezes (as compras e as contas do reembolso aparecem só nas categorias).
+- **Núcleo do financeiro extraído:** desfazer baixa, cancelar e alterar valor e vencimento de lançamento em aberto passaram a existir numa transação em `src/server/financeiro/lancamentos.ts`, e as actions da lista chamam o núcleo (sem mudança de comportamento). Contas com vínculo (estoque ou reembolso) não são editadas nem canceladas na lista.
+- **Avisos** (`/avisos`, os cinco perfis, e o sino no topo com o contador "para mim"): os sete avisos da Visão geral saíram para `src/server/avisos/` (uma função por aviso, cada uma com `exigirPerfil`; a Visão geral mostra o mesmo de antes) e a central soma tarefa vencida, daily a gerar, aniversário na viagem, estoque abaixo do mínimo, caixa a montar e os três de reembolso, cada um com chave estável, setor e próximo passo. Setores e quem recebe: spec §8.2 (o financeiro operacional passa a receber parcela, comissão, pagar e conciliação). Dispensar com justificativa de 10 a 500 caracteres (caixa negativo não dispensa), aba "Dispensados" (90 dias) e "Desfazer dispensa" (quem dispensou ou o Diretor); comunicados para um setor ou Geral, resolvidos por quem recebe ou quem criou. Contador por Server Action com 60 s de memória por pessoa.
+- **Seed** (`scripts/seed-5b.ts`): 11 produtos do protótipo com o saldo do protótipo nas duas filiais, cada saldo vindo de uma entrada com conta a pagar (o Caderno em MT no cartão corporativo); caixa confirmada na Família Ribeiro (MT) e em rascunho na Família Teixeira (viagem vendida nova do seed, RS, embarque em 20 dias); três reembolsos (Pedir ao fornecedor e Reembolsar o cliente na Ribeiro; Concluído na viagem conciliada dos Vasconcelos); dois comunicados (Operacional e Geral).
+
 ## 6. Decisões tomadas (todas)
 
 Do Mateus:
@@ -216,6 +238,25 @@ Do Mateus:
 - Aéreo à parte; cotações em moeda original com câmbio.
 - Fatia 3 dividida em 3a e 3b; baixa simples já na 3b, só Diretor e financeiro.
 - Venda só com orçamento aprovado.
+
+Do Mateus para a 5b (25/11/2026, "Construa 5b"):
+1. **Reembolso:** a diferença entre o devolvido ao cliente e o recebido do fornecedor é **custo da viagem** (entra na margem real).
+2. **Caixa de experiência:** o custo dos itens **entra na margem real** da viagem.
+3. **Limite da caixa:** **sem limite por enquanto**; a tela só mostra o total, sem aprovação.
+4. **Perfis:** Reembolsos e Estoque **só para Diretor e financeiros**; consultor e operacional só montam a caixa de experiência na viagem.
+
+Rulings do controlador durante a execução da 5b (ledger `.superpowers/sdd/2026-11-25-fatia-5b/progress.md`, copiados aqui; entre parênteses, o custo de trocar):
+- Desfazer entrada volta o saldo ao `custo_medio_antes` gravado no movimento, não pela fórmula inversa da média (que perde centavos no arredondamento) (uma coluna).
+- Ajuste positivo numa filial com saldo 0 entra ao custo médio da **outra filial** (se maior que 0), senão a 0: a "transferência" por dois ajustes (spec §10.3) não zera o custo (uma linha na action).
+- Próximo passo dos sete avisos que já existiam só na central (a Visão geral continua sem passo), com os textos do spec §14 (textos).
+- A dispensa vale enquanto **título e detalhe** forem iguais aos gravados (o título dos avisos agregados traz a contagem), por até 30 dias; o spec dizia só o detalhe (um campo).
+- "Para mim" inclui os comunicados que a pessoa criou, mesmo para outro setor (nenhum).
+- Aniversário segue o spec: avisa até o fim da viagem (nenhum; ver §8.7).
+- Cancelar a caixa em rascunho apaga a caixa e os itens (nada saiu do estoque); só a confirmada vira `cancelada` com motivo (nenhum).
+- `ajustesDaViagem` (soma da caixa e dos reembolsos para a margem) é interna, sem `exigirPerfil`; só é chamada por `calcularMargens`, que já está atrás do perfil (uma chamada).
+- Motivo do cancelamento do reembolso com 5 a 200 caracteres (constante).
+- Migrações numeradas pelo próximo número livre (o plano ficou defasado): 0046–0058.
+- Seed da 5b (Task 15): escreve pelo mesmo núcleo das actions (`travarSaldo`/`gravarMovimento`/`gravarSaldo`, `criarLancamentosNa`, `baixarLancamentoNa`, `naViagemVendidaNa`) e valida pelos mesmos schemas, porque as Server Actions não rodam fora do Next (`cookies()` da sessão e `revalidatePath` exigem a requisição); o corpo das actions de entrada, caixa e reembolso fica, portanto, repetido no seed (custo: manter os dois iguais). O seed **não limpa** nada (padrão dos outros seeds; apagar lançamentos ligados a movimentos e casos seria `delete` cru em tabela de dinheiro). Ganhou uma terceira viagem vendida (Família Teixeira, RS) porque a caixa só vai em viagem vendida e não conciliada, uma por viagem. A entrada em MT soma o que a caixa da Ribeiro consome, para o saldo final ficar o do protótipo.
 
 Do Augusto (respostas no WhatsApp, 23/11/2026; registradas pelo Mateus em 24/11/2026):
 - **Antecipação de recebíveis:** "a gente não usa antecipação automática, ela é calculada quando precisamos de caixa". Mudança feita (branch `claude/antecipacao-manual`): a forma "6x com antecipação" fica só como referência nas análises do simulador (não é forma de proposta, de aprovação nem de venda; `formaSchema` recusa com mensagem) e o caixa põe cada parcela de cartão no seu vencimento (migração 0045, cópia da view 0034 sem o deslocamento). Ainda **não** existe uma ação "antecipar recebíveis" no caixa: falta saber se a taxa da antecipação reduz a margem da viagem ou é custo financeiro da empresa (§7).
@@ -262,6 +303,26 @@ Fatia 5a (Claude, **conferir com o Mateus**; D1–D32 completas no spec `docs/su
 - Roteiro: idioma e fuso guardados, sem cadastro de destinos (D13); pré-preenchimento só na criação e no botão "Trazer hotéis e voos" (D15); aprovar direto do rascunho, edição depois só avisa (D16).
 - Outros: nome de arquivo com último sobrenome e destino em maiúsculas sem acento (D19); encerramento versionado, só o Diretor edita (D20); plantão sem telefone (D21); listas `/roteiros` e `/dailies` (D22); sem vouchers em PDF no daily (D23); aniversário só aviso na tela e item no roteiro (D24); textos do protótipo cortados: "e vão para o Trello" e "Data conferida no passaporte." (D31); `roteiros.atualizado_em` só muda com o conteúdo (D32).
 
+### Para conferir com a Valeska e o grupo (5b)
+Decisões do Claude no spec da 5b (§10 e §14), tomadas sem resposta do grupo; cada uma foi escrita para ser trocada num lugar só:
+1. Os lançamentos do reembolso nascem **no registro da ocorrência**, em aberto; as baixas acontecem nos marcos ("Fornecedor pagou", "Cliente reembolsado"), que são a mesma baixa da lista única.
+2. "Abatimento na próxima parcela" **não muda a parcela sozinho**: a Valeska dá baixa na parcela pelo valor menor, e é por aí que a margem sente; o caso só guarda a data. "Crédito para a próxima viagem" conta como custo desta viagem e não vira saldo do cliente no sistema.
+3. Estoque pelo **custo médio**; saída manual e ajuste com motivo; mínimo **por filial**; sem transferência entre filiais (ajuste numa e na outra, com o motivo). Ajuste positivo em filial vazia entra ao **custo médio da outra filial**.
+4. "Onde foi comprado": fornecedor do cadastro **ou** texto livre.
+5. Caixa só em viagem vendida e não conciliada, sem prazo antes do embarque; cancelar devolve ao estoque; conciliar a viagem é recusado com a caixa em rascunho.
+6. Os ajustes (caixa e reembolso) **não reduzem a base do imposto** sobre a margem.
+7. Avisos: sem lido/não lido por pessoa e sem notificação fora do sistema; o financeiro estratégico recebe Gestão e Financeiro; o consultor recebe Comercial e Operacional; o financeiro operacional recebe Financeiro (passa a ver parcela, comissão, pagar e conciliação).
+8. Eventos automáticos: tabela do spec §8.3. Caixa a montar avisa a 30 dias do embarque; aniversário, a 60.
+9. Reembolso pode ser registrado em viagem já conciliada (muda a margem real dela, com aviso na tela).
+10. **Desfazer entrada** só quando ela é o último movimento do produto na filial; depois disso, "Faça um ajuste de estoque".
+11. **Consultor e operacional não veem valores da caixa** (só itens, quantidades e o disponível); valor por item e total só para Diretor e financeiros.
+12. Entrada com valor unitário 0 (doação, brinde recebido) é aceita e não gera conta; entrada no cartão corporativo entra na fatura do ciclo, e desfazer é recusado com a fatura paga.
+13. A baixa do reembolso com valor diferente do previsto exige observação, como na lista.
+14. Se o fornecedor vai abater na conta dele em vez de devolver, o valor a cobrar fica em 0 (o formulário avisa; não há bloqueio contra o benefício em dobro).
+15. **Textos de próximo passo dos sete avisos** que já existiam: caixa "Rever o fluxo de caixa"; margem "Rever os custos lançados na viagem"; parcela "Cobrar o cliente"; comissão "Cobrar a comissão do fornecedor"; pagar "Pagar ou reprogramar as contas"; conciliação "Conciliar o extrato"; aprovação "Aprovar ou devolver os pedidos".
+16. **Dispensa** vale para todos enquanto o título e o detalhe do aviso forem os mesmos, **por até 30 dias**; mudou o texto (por exemplo, de 3 para 4 parcelas vencidas) ou passaram 30 dias, o aviso volta. Aviso de caixa negativo não pode ser dispensado.
+17. "Para mim" é por setor (o sistema não separa viagens por consultor).
+
 ## 7. Perguntas abertas para o Augusto
 Novas (das respostas de 23/11/2026):
 - **Antecipação (Valeska):** quando a ECLAK antecipa, quem recebe é a maquininha (qual?) e o valor entra de uma vez? A taxa da antecipação deve reduzir a margem da viagem dona das parcelas ou entrar como custo financeiro da empresa (DRE)? Com isso dá para ter no Fluxo de caixa um "simular/registrar antecipação".
@@ -277,23 +338,11 @@ Anteriores:
 
 ## 8. Próximo passo
 
-**Fatia 6 (painéis e integrações):** 6a, 6b e 6c em `main` (24/11/2026). Pendências para usar de verdade: um OFX real de cada banco (6b); as credenciais de cada integração e o primeiro "Testar conexão" real (6c, README › Integrações e §8.6). A **5b** continua esperando a Valeska e o grupo. Toda fatia nova parte de `main`.
+**Imediato:** abrir o PR da `claude/fatia-5b` com `--base main` e revisar (abrir e mergear só com o "sim" do Mateus). A 5a, a 4b e as fatias 6a, 6b e 6c já estão em `main` (§2); toda fatia nova parte de `main`. Depois do merge, conferir com a Valeska e o grupo a lista "Para conferir com a Valeska e o grupo (5b)" em §6 (cada decisão troca num lugar só) e as pendências menores da 5b (§8.7).
 
-**Imediato:** abrir o PR da `claude/fatia-5a-operacao` com `--base main` (só com o "sim" do Mateus) e revisar; a 4b já está em `main` (PR #6) e a 5a já foi integrada com ela (ver §2). Depois, a **5b**, que **depende do retorno do grupo e da Valeska** sobre Reembolsos, Estoque, Caixa de experiência e Avisos por setor, e do **texto oficial de encerramento do daily** (entra por Admin › Parâmetros, sem código). Escopo e perguntas no spec `docs/superpowers/specs/2026-11-23-fatia-5-operacao-design.md` §6 e no fim do plano da 5a ("Para a 5b e a fatia 6"):
-- Reembolsos e Estoque com lançamentos na lista única da 4a (categorias "Reembolso a cliente", "Reembolso de fornecedor", "Caixa de experiência", "Papelaria").
-- Caixa de experiência como custo da viagem na margem real (mexe em `margemReal`: exige decisão explícita).
-- Avisos por setor, com os eventos candidatos da 5a (tarefa vencida, daily "A gerar", aniversário na viagem).
+**Fatia 6 (painéis e integrações):** pendências para usar de verdade: um OFX real de cada banco (6b); as credenciais de cada integração e o primeiro "Testar conexão" real (6c, README › Integrações e §8.6). Ainda falta o **texto oficial de encerramento do daily** (entra por Admin › Parâmetros, sem código).
 
-Perguntas abertas da 5b (spec §6):
-1. Reembolso: os lançamentos nascem no registro da ocorrência ou nos marcos ("Fornecedor pagou", "Cliente reembolsado")? "Abatimento na próxima parcela" reduz a parcela da viagem ou vira lançamento à parte? Reembolso mexe na margem real?
-2. Valor a devolver maior que o cobrado (ex.: 411,45 × 385,00): a diferença é custo da viagem ou da empresa?
-3. Estoque: valor unitário pelo último preço (protótipo) ou custo médio? Precisa de saída manual, ajuste e transferência MT↔RS? Mínimo por filial ou um só?
-4. Estoque: "onde foi comprado" é texto livre ou fornecedor do cadastro?
-5. Caixa de experiência: regra do limite (faixas 30/60/100 mil → 100/180/260/350, ou 0,4% da venda)? Quem pode estourar e como o Diretor aprova? O custo entra como custo variável da viagem na margem real?
-6. Caixa de experiência: em que status da viagem pode ser montada e até quando antes do embarque? Cancelar devolve ao estoque?
-7. Avisos: lido/não lido por pessoa? Notificação fora do sistema (e-mail, WhatsApp)? O financeiro estratégico entra em que setor?
-8. Avisos: quais eventos geram aviso automático (tarefa vencida, daily a gerar, estoque abaixo do mínimo, caixa a montar, reembolso)?
-9. Perfis: Reembolsos e Estoque abertos aos cinco perfis (como no protótipo) ou só ao financeiro e ao Diretor?
+**O que a 5b deixou de fora (não-objetivos do spec §2):** limite e aprovação da caixa (decisão 3 do Mateus); transferência de estoque entre filiais; inventário com contagem; aviso por e-mail ou WhatsApp; lido/não lido por pessoa; reduzir a parcela do cliente automaticamente no "abatimento"; crédito do cliente como saldo reutilizável; reembolso em moeda estrangeira. As nove perguntas abertas da 5b (spec da 5a §6) viraram as decisões listadas em §6.
 
 Materiais pendentes da 5a: PDFs reais TAREFAS e RT (conferir colunas e layout da impressão), fontes da marca (Evaida, CA Saygon Text) para o PDF do RT, lista de destinos frequentes com idioma e fuso. **Fatia 6:** Trello, Drive, "Reescrever com IA" e o agendador do daily em D-2 entraram na 6c. Ficam de fora: vouchers em PDF no daily (R-C8), plano logístico e mapas.
 
@@ -365,6 +414,17 @@ Teste de auditoria sem `orderBy`; sem teste de concorrência no "esta e as próx
 - `gravarEspera` (auditoria da espera pelo cartão): `antes.tentativas` mantido como as tentativas que o envio tinha antes da tomada (o teste da fila fixa esse valor de propósito); não mudou nesta rodada.
 - No agendador, a reconferência de "roteiro aprovado" sob a trava (roteiro desaprovado entre a consulta e a transação) não tem teste próprio: a consulta dos candidatos já filtra.
 
+### 8.7 Pendências menores da 5b (não bloqueiam)
+- O aviso de **aniversário** continua aparecendo até o fim da viagem (o spec diz "durante a viagem"; depois do dia do aniversário ele ainda fica até a volta).
+- **Barra de navegação no celular** (390 px) rola para o lado sem indício de que há mais itens; em `/avisos` a barra de baixo mostra a primeira área sem marcação. A barra do `Shell` já estourava a 390 antes da 5b.
+- Seed: repete o corpo das actions de entrada, caixa e reembolso (as actions não rodam fora do Next; ver os rulings em §6); não limpa o que os testes de integração deixam no banco (`npx supabase db reset`, `npm run db:migrate` e o seed para começar limpo).
+- Estoque: erro de fornecedor repetido sai no campo `fornecedor` (a tela mapeia); `aposEntrada` assume quantidade ≥ 1 (o schema garante); valores `bigint` passados direto ao componente de cliente; título do histórico com filtro.
+- Caixa: uma recusa antiga pode reaparecer se o editor desmonta e volta; sufixo fixo "O rascunho ficou gravado" na recusa; "Descartar rascunho" sem confirmação; `caixaItensSchema` aceita lista vazia (a confirmação recusa).
+- Núcleo: `alterarEmAbertoNa` não valida data e descrição (quem chama valida) e pode lançar `Desfazer`; `auditarAlteracao` existe em três lugares.
+- Reembolsos: `?editar` e `?anexos` só resolvem na aba atual; o aviso de margem alterada depois da conciliação compara só `criado_em` do caso com `conciliada_em`; a lista de viagens do formulário vai até 500.
+- Avisos: sem teste do `?setor=` para quem não é Diretor.
+- Teste intermitente: `caixa-experiencia.test.ts` ("cancelar a confirmada… depois outra caixa pode ser montada") ordena as caixas por `criado_em` e falhou uma vez na suíte inteira (veio `rascunho` antes de `cancelada`); passou sozinho 4 vezes. Causa não confirmada: `criado_em` é o `now()` do início da transação e as duas transações rodam uma depois da outra, então a ordem não deveria inverter. Investigar.
+
 Outras pendências menores acumuladas (não bloqueiam): teste de RLS aceita qualquer erro; `comSessao` nos testes depende de `fileParallelism: false`; auditoria guarda CPF/passaporte (anotar na política de LGPD); trava global de CPF serializa cadastros; telefones só brasileiros; lista de orçamentos sem paginação; sugestão de custo de referência conta cotações, não itens; "Passeio guiado" virou "Passeio" no tipo de item; validação de data duplicada entre formulário e domínio de regras.
 
 Deploy (quando o Mateus der o "sim"): seguir `README.md` › Deploy. Cuidados já documentados: usar o **Session pooler** (IPv4) para migrações e `criar-diretor`, Transaction pooler para a aplicação, sem `?pgbouncer=true`; configurar os templates de e-mail de convite e recuperação no Supabase; `NEXT_PUBLIC_SITE_URL`; Railpack com Node 22.
@@ -381,7 +441,7 @@ export SUPABASE_INTERNAL_IMAGE_REGISTRY=ghcr.io
 npm run db:local          # supabase start sem os serviços pesados
 npx supabase status -o env   # chaves para o .env.local
 npm run db:migrate
-npm run seed:local        # usuários (senha eclak-local), fornecedores, 30 clientes, orçamentos, vendas, financeiro e operação de exemplo
+npm run seed:local        # usuários (senha eclak-local), fornecedores, 31 clientes, orçamentos, vendas, financeiro, operação, conciliação e a 5b (estoque, caixas, reembolsos, comunicados)
 npm run dev               # abrir em localhost (127.0.0.1 não fica interativo no dev)
 ```
 - `.env.local` (não versionado): `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SITE_URL` (ver `.env.example`). As variáveis das integrações (`CRON_SECRET`, `TRELLO_*`, `GOOGLE_*`, `ANTHROPIC_API_KEY`, `IA_MODELO`) ficam vazias em desenvolvimento; **nunca ponha credencial real no `.env.local`**. Se a shell exporta uma `ANTHROPIC_API_KEY`, suba com `ANTHROPIC_API_KEY= npm run dev`.
@@ -389,6 +449,7 @@ npm run dev               # abrir em localhost (127.0.0.1 não fica interativo n
 - Testes: `npm run lint && npm run typecheck && npm test && npm run test:integracao && npm run build` (uma execução de integração por vez: a trava do global setup recusa a segunda). Últimos números (23/11/2026, branch `claude/fatia-5a-operacao` integrada com `main` e a 4b): 363 testes de domínio (23 arquivos) e 425 de integração (26 arquivos), tudo verde, build ok, seed duas vezes sem duplicar. **A integração trunca o banco local**: rodar `npm run seed:local` depois.
 - Números da 6b (24/11/2026, branch `claude/fatia-6b-conciliacao`, depois da revisão final): 464 testes de domínio (26 arquivos) e 473 de integração (28 arquivos), lint, typecheck e build ok, seed duas vezes sem duplicar (a segunda cria 0 transações de extrato); relatório "Conciliação extrato x sistema", importação de outra conta com confirmação e "Desfazer importação" conferidos no navegador.
 - Números da 6c (24/11/2026, branch `claude/fatia-6c-integracoes`, depois da rodada de correções da revisão final): 554 testes de domínio (31 arquivos) e 660 de integração (35 arquivos), lint, typecheck e build ok (rotas `/api/cron/integracoes` e `/api/cron/dailies` dinâmicas), seed duas vezes sem duplicar. Nenhum teste chama serviço real: Trello e Drive contra `fetch` falso, IA contra provedor falso, `ANTHROPIC_API_KEY` forçada vazia.
+- Números da 5b (25/11/2026, branch `claude/fatia-5b`, Task 15): 616 testes de domínio (34 arquivos) e 783 de integração (44 arquivos), lint e typecheck ok, seed duas vezes sem duplicar (contagens das tabelas da 5b, `lancamentos`, `viagens` e `auditoria` iguais depois da segunda). Na suíte inteira, 1 falha de asserção em `caixa-experiencia.test.ts` (ordem das caixas, que o teste lê por `criado_em`; causa não confirmada); o arquivo sozinho passou 4 vezes seguidas (13/13).
 - Migração nova: `npm run db:generate` (gerada) ou `npx drizzle-kit generate --custom --name <nome>` (RLS, índices, enums); validar do zero (`npx supabase db reset` + `npm run db:migrate`) e sobre banco populado.
 - Next gera `AGENTS.md` no dev: está no `.gitignore`.
 
