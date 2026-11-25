@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { historicoParaEnviar, MAX_CARACTERES_CHAT, MAX_MENSAGENS_CHAT } from "@/domain/chat";
+import { DOMINIOS_LINK_CHAT, historicoParaEnviar, MAX_CARACTERES_CHAT, MAX_MENSAGENS_CHAT, partesComLink } from "@/domain/chat";
 
 describe("historicoParaEnviar", () => {
   it("só de/texto, sem os balões de erro", () => {
@@ -35,5 +35,38 @@ describe("historicoParaEnviar", () => {
     expect(r.length).toBeLessThanOrEqual(MAX_MENSAGENS_CHAT);
     expect(r[0].de).toBe("eu");
     expect(r[r.length - 1]).toEqual({ de: "eu", texto: "40" });
+  });
+});
+
+describe("partesComLink", () => {
+  it("só libera os três domínios do spec", () => {
+    expect(DOMINIOS_LINK_CHAT).toEqual(["trello.com", "drive.google.com", "docs.google.com"]);
+  });
+
+  it("transforma links permitidos (https) e mantém outros endereços como texto", () => {
+    expect(
+      partesComLink("Veja o cartão em https://trello.com/c/abc e o doc https://docs.google.com/x."),
+    ).toEqual([
+      { tipo: "texto", valor: "Veja o cartão em " },
+      { tipo: "link", url: "https://trello.com/c/abc" },
+      { tipo: "texto", valor: " e o doc " },
+      { tipo: "link", url: "https://docs.google.com/x" },
+      { tipo: "texto", valor: "." },
+    ]);
+
+    expect(partesComLink("Subdomínio https://sub.drive.google.com/file/d/1/view ok")).toEqual([
+      { tipo: "texto", valor: "Subdomínio " },
+      { tipo: "link", url: "https://sub.drive.google.com/file/d/1/view" },
+      { tipo: "texto", valor: " ok" },
+    ]);
+
+    for (const recusado of [
+      "https://trello.com.evil.io/x",
+      "http://trello.com/c/abc",
+      "https://exemplo.com",
+      "https://faketrello.com/c/abc",
+    ]) {
+      expect(partesComLink(`Link: ${recusado}`)).toEqual([{ tipo: "texto", valor: `Link: ${recusado}` }]);
+    }
   });
 });
