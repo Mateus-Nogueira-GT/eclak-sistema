@@ -7,6 +7,7 @@ import { LogOut, MessagesSquare } from "lucide-react";
 import { podeAcessar, ROTAS_POR_PERFIL, type Perfil } from "@/domain/perfis";
 import { sair } from "@/app/(app)/actions";
 import { ChatIA } from "./chat-ia";
+import { ContadorAvisos } from "./contador-avisos";
 import { cx } from "./ui";
 
 type Item = { href: string; label: string };
@@ -84,7 +85,9 @@ export function Shell({
   const visiveis = areas
     .map((a) => ({ ...a, itens: a.itens.filter((i) => podeAcessar(perfil, i.href)) }))
     .filter((a) => a.itens.length);
-  const atual = visiveis.find((a) => a.itens.some((i) => ativo(path, i.href))) ?? visiveis[0];
+  // Fora das áreas (por exemplo, /avisos, que só tem o sino): nenhuma área marcada; a barra de baixo mostra a primeira.
+  const casada = visiveis.find((a) => a.itens.some((i) => ativo(path, i.href)));
+  const atual = casada ?? visiveis[0];
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
@@ -95,9 +98,9 @@ export function Shell({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/logo-eclak.png" alt="ECLAK Viagens" className="h-[34px] w-auto" />
             </Link>
-            <nav className="flex h-full items-stretch gap-1" aria-label="Áreas">
+            <nav className="flex h-full min-w-0 items-stretch gap-1 overflow-x-auto" aria-label="Áreas">
               {visiveis.map((a) => {
-                const on = a === atual;
+                const on = a === casada;
                 return (
                   <Link key={a.titulo} href={a.itens[0].href} className={cx("relative flex items-center px-3 text-[14.5px] transition-colors", on ? "font-bold text-verde" : "font-medium text-cinza hover:text-verde")}>
                     {a.titulo}
@@ -107,6 +110,7 @@ export function Shell({
               })}
             </nav>
             <div className="ml-auto flex items-center gap-3">
+              <ContadorAvisos />
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-verde text-[13px] font-bold text-white">{nome[0]}</span>
               <span className="hidden text-left leading-tight md:block">
                 <span className="block text-[13.5px] font-bold text-texto">{nome}</span>

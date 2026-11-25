@@ -73,6 +73,13 @@ describe("perfis", () => {
       expect(podeAcessar(p, "/dailies/x")).toBe(true);
     }
   });
+  it("avisos: todos os perfis acessam, sem mudar a primeira tela", () => {
+    for (const p of PERFIS_VALORES) {
+      expect(podeAcessar(p, "/avisos")).toBe(true);
+      expect(podeAcessar(p, "/avisosX")).toBe(false);
+      expect(ROTAS_POR_PERFIL[p][0]).not.toBe("/avisos");
+    }
+  });
   it("visão geral: primeira tela do Diretor e do Financeiro estratégico; relatórios nos três do financeiro", () => {
     expect(ROTAS_POR_PERFIL.diretor[0]).toBe("/visao-geral");
     expect(ROTAS_POR_PERFIL.fin_estrategico[0]).toBe("/visao-geral");
