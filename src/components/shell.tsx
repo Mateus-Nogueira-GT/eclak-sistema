@@ -105,16 +105,6 @@ export function Shell({
               })}
             </nav>
             <div className="ml-auto flex items-center gap-3">
-              {iaLigada && (
-                <button
-                  type="button"
-                  onClick={() => setChatAberto(true)}
-                  aria-expanded={chatAberto}
-                  className="flex cursor-pointer items-center gap-2 rounded-[5px] border border-linha px-3 py-1.5 text-[14px] font-medium text-verde hover:bg-fundo"
-                >
-                  <MessagesSquare size={16} /> Chat com IA
-                </button>
-              )}
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-verde text-[13px] font-bold text-white">{nome[0]}</span>
               <span className="hidden text-left leading-tight md:block">
                 <span className="block text-[13.5px] font-bold text-texto">{nome}</span>
@@ -143,6 +133,19 @@ export function Shell({
       </header>
       {iaLigada && <ChatIA aberto={chatAberto} onFechar={() => setChatAberto(false)} perfilNome={perfilNome} />}
       <main className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-4 pb-20 pt-6 md:px-8 md:pt-9 print:max-w-none print:p-0">{children}</main>
+
+      {/* Botão flutuante do chat (como no protótipo): canto inferior direito; no celular vira só o ícone. */}
+      {iaLigada && !chatAberto && (
+        <button
+          type="button"
+          onClick={() => setChatAberto(true)}
+          aria-label="Abrir o chat com IA"
+          aria-expanded={chatAberto}
+          className="fixed bottom-5 right-5 z-40 flex h-14 cursor-pointer items-center gap-2 rounded-full bg-terracota pl-4 pr-5 text-[14.5px] font-bold text-white shadow-[0_8px_24px_rgba(51,49,50,0.28)] hover:brightness-95 max-md:w-14 max-md:justify-center max-md:p-0 print:hidden"
+        >
+          <MessagesSquare size={20} /> <span className="max-md:hidden">Chat com IA</span>
+        </button>
+      )}
     </div>
   );
 }
