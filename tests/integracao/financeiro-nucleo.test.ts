@@ -20,6 +20,7 @@ import {
 } from "@/server/financeiro/lancamentos";
 import { listarLancamentos } from "@/server/queries/financeiro";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
+import { vendida } from "../helpers/venda";
 
 const MSG_DESFACA_FATURA = "Desfaça a baixa da fatura do cartão antes";
 const HOJE = hojeEmCuiaba();
@@ -65,11 +66,13 @@ async function comEstoque(id: string): Promise<string> {
   return m.id;
 }
 
-/** Conta ligada a um caso de reembolso (a tabela `reembolsos` e a FK vêm na Task 9: qualquer uuid serve). */
+/** Conta ligada a um caso de reembolso (caso mínimo inserido à mão numa viagem vendida: a FK exige o caso). */
 async function comReembolso(id: string): Promise<string> {
-  const r = crypto.randomUUID();
-  await db.update(lancamentos).set({ reembolsoId: r }).where(eq(lancamentos.id, id));
-  return r;
+  const x = await vendida();
+  const [r] = await sql<{ id: string }[]>`insert into reembolsos (viagem_id, servico, ocorrido_em, ocorrido, valor_cobrar, valor_devolver, forma_devolucao, prazo_cliente, criado_por)
+    values (${x.viagemId}, 'Hotel', '2027-01-05', 'O hotel cancelou a reserva.', 0, 1000, 'pix', '2027-01-20', ${c.fin}) returning id`;
+  await db.update(lancamentos).set({ reembolsoId: r.id }).where(eq(lancamentos.id, id));
+  return r.id;
 }
 
 /** O núcleo numa transação, como as actions o chamam (`Desfazer` vira a falha). */
