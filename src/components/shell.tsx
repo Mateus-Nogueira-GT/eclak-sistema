@@ -68,6 +68,8 @@ export function Shell({
   nome,
   perfilNome,
   iaLigada,
+  trelloLigado = false,
+  driveLigado = false,
   children,
 }: {
   perfil: Perfil;
@@ -75,6 +77,8 @@ export function Shell({
   perfilNome: string;
   /** IA configurada no servidor: só então o botão do chat aparece. */
   iaLigada: boolean;
+  trelloLigado?: boolean;
+  driveLigado?: boolean;
   children: ReactNode;
 }) {
   const path = usePathname();
@@ -131,7 +135,15 @@ export function Shell({
           </nav>
         </div>
       </header>
-      {iaLigada && <ChatIA aberto={chatAberto} onFechar={() => setChatAberto(false)} perfilNome={perfilNome} />}
+      {iaLigada && (
+        <ChatIA
+          aberto={chatAberto}
+          onFechar={() => setChatAberto(false)}
+          perfilNome={perfilNome}
+          trelloLigado={trelloLigado}
+          driveLigado={driveLigado}
+        />
+      )}
       <main className="mx-auto w-full min-w-0 max-w-[1440px] flex-1 px-4 pb-20 pt-6 md:px-8 md:pt-9 print:max-w-none print:p-0">{children}</main>
 
       {/* Botão flutuante do chat (como no protótipo): canto inferior direito; no celular vira só o ícone. */}

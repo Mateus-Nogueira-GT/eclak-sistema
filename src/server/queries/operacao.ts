@@ -104,6 +104,26 @@ function situacaoNaViagem(
   return ligada && vendida ? "enviar" : "desligada";
 }
 
+const CODIGO_VIAGEM_RE = /^ECL-(\d+)-(\d+)$/i;
+
+/** Viagem não excluída pelo código completo (`ECL-0001-01`). Exige sessão ativa. */
+export async function viagemPorCodigo(codigo: string): Promise<{ id: string; codigo: string; cliente: string } | null> {
+  await exigirPerfil();
+  const m = CODIGO_VIAGEM_RE.exec(codigo.trim());
+  if (!m) return null;
+  const clienteCodigo = Number(m[1]);
+  const seq = Number(m[2]);
+  if (!Number.isSafeInteger(clienteCodigo) || !Number.isSafeInteger(seq)) return null;
+  const [v] = await db
+    .select({ id: viagens.id, seq: viagens.seq, clienteCodigo: clientes.codigo, grupo: clientes.grupo })
+    .from(viagens)
+    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
+    .where(and(eq(clientes.codigo, clienteCodigo), eq(viagens.seq, seq), isNull(viagens.excluidoEm)))
+    .limit(1);
+  if (!v) return null;
+  return { id: v.id, codigo: formatarCodigoViagem(v.clienteCodigo, v.seq), cliente: v.grupo };
+}
+
 /** Cabeçalho da trilha da operação (só dados cadastrais; nada de preço, custo, margem ou comissão). */
 export async function cabecalhoDaViagem(viagemId: string): Promise<CabecalhoViagem | null> {
   const usuario = await exigirPerfil();
