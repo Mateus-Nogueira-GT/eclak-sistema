@@ -3,7 +3,7 @@
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { ZodError } from "zod";
 import { hojeEmCuiaba } from "@/domain/clientes";
-import { ORIGENS, type Origem } from "@/domain/financeiro";
+import { ORIGENS, type CategoriaSistema, type Origem } from "@/domain/financeiro";
 import {
   MSG_LOTE_LADOS,
   MSG_LOTE_RECUSADO,
@@ -78,8 +78,15 @@ import { travarViagem } from "@/server/trava-viagem";
 
 const CATEGORIA_NAO_ENCONTRADA = falha("Categoria não encontrada");
 const CONTA_NAO_ENCONTRADA = falha("Conta bancária não encontrada");
-const msgCategoriaSistema = (sistema: string, acao: string) =>
-  `Categoria usada ${sistema === "cartao_corporativo" ? "pelo cartão corporativo" : "pelas viagens"}: não pode ${acao}`;
+const USO_DA_CATEGORIA: Partial<Record<CategoriaSistema, string>> = {
+  cartao_corporativo: "pelo cartão corporativo",
+  reembolso_cliente: "pelos reembolsos",
+  reembolso_fornecedor: "pelos reembolsos",
+  caixa_experiencia: "pelo estoque",
+  papelaria: "pelo estoque",
+};
+const msgCategoriaSistema = (sistema: CategoriaSistema, acao: string) =>
+  `Categoria usada ${USO_DA_CATEGORIA[sistema] ?? "pelas viagens"}: não pode ${acao}`;
 const MSG_DESFACA_BAIXA = "Desfaça a baixa para editar";
 /** Erro de banco inesperado: loga só o código (sem parâmetros) e relança genérico. */
 function erroDeBanco(mensagem: string, e: unknown): Error {

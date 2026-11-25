@@ -22,6 +22,7 @@ import { CATEGORIAS_SISTEMA, type CategoriaSistema, type Origem } from "@/domain
 import { cartoesCorporativos, faturasCartao } from "./cartoes";
 import { clientes } from "./clientes";
 import { centroCustoEnum, formaFinanceiroEnum, ladoFinanceiroEnum, statusLancamentoEnum } from "./financeiro-enums";
+import { estoqueMovimentos } from "./estoque";
 import { fornecedores } from "./fornecedores";
 import { usuarios } from "./usuarios";
 import { vendas } from "./vendas";
@@ -104,6 +105,8 @@ export const lancamentos = pgTable(
     cartaoId: uuid("cartao_id").references((): AnyPgColumn => cartoesCorporativos.id, { onDelete: "restrict" }),
     /** Fatura do ciclo da compra (pelo vencimento = data da compra); nula se cancelada ou fora do cartão. */
     faturaCartaoId: uuid("fatura_cartao_id"),
+    /** Entrada de estoque que originou a conta (fatia 5b): na lista única só se baixa, não se edita nem cancela. */
+    estoqueMovimentoId: uuid("estoque_movimento_id").references((): AnyPgColumn => estoqueMovimentos.id, { onDelete: "restrict" }),
     criadoPor: uuid("criado_por")
       .notNull()
       .references(() => usuarios.id),
@@ -132,6 +135,7 @@ export const lancamentos = pgTable(
     // A fatura é do mesmo cartão da compra (FK composta; sem fatura, nada a conferir).
     foreignKey({ name: "lancamentos_fatura_cartao_fk", columns: [t.faturaCartaoId, t.cartaoId], foreignColumns: [faturasCartao.id, faturasCartao.cartaoId] }).onDelete("restrict"),
     index("lancamentos_fatura_cartao_idx").on(t.faturaCartaoId),
+    index("lancamentos_estoque_movimento_idx").on(t.estoqueMovimentoId),
     index("lancamentos_em_aberto_vencimento_idx").on(t.vencimento).where(sql`${t.status} = 'em_aberto'`),
     index("lancamentos_grupo_idx").on(t.grupoId),
     index("lancamentos_categoria_idx").on(t.categoriaId),

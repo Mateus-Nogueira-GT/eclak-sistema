@@ -162,6 +162,13 @@ describe("RLS: anon não lê nada", () => {
     // IA (fatia 6c): um uso registrado.
     await sql`insert into ia_usos (usuario_id, recurso, modelo, tokens_entrada, tokens_saida)
               values (${u.id}, 'reescrever:dica', 'claude-opus-5-5', 10, 5)`;
+    // Estoque e caixa de experiência (fatia 5b).
+    const [prod] = await sql<{ id: string }[]>`insert into produtos_estoque (nome, uso) values ('Caderno', 'caixa_experiencia') returning id`;
+    await sql`insert into estoque_saldos (produto_id, filial, quantidade, custo_medio) values (${prod.id}, 'MT', 3, 1500)`;
+    await sql`insert into estoque_movimentos (produto_id, filial, tipo, quantidade, custo_unitario, custo_medio_antes, usuario_id)
+              values (${prod.id}, 'MT', 'entrada', 3, 1500, 0, ${u.id})`;
+    const [cx] = await sql<{ id: string }[]>`insert into caixas_experiencia (viagem_id, filial, criado_por) values (${v.id}, 'MT', ${u.id}) returning id`;
+    await sql`insert into caixa_itens (caixa_id, produto_id, quantidade) values (${cx.id}, ${prod.id}, 1)`;
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from lancamentos_financeiros`;
     expect(n).toBeGreaterThan(0);
   });
@@ -199,6 +206,11 @@ describe("RLS: anon não lê nada", () => {
     "extrato_transacoes",
     "integracao_envios",
     "ia_usos",
+    "produtos_estoque",
+    "estoque_saldos",
+    "estoque_movimentos",
+    "caixas_experiencia",
+    "caixa_itens",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
@@ -222,6 +234,13 @@ describe("RLS: anon não lê nada", () => {
 
   it("tabelas das integrações com RLS ligado", async () => {
     const tabelas = ["integracao_envios", "ia_usos"];
+    const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
+      select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
+    expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
+  });
+
+  it("tabelas do estoque e da caixa com RLS ligado", async () => {
+    const tabelas = ["produtos_estoque", "estoque_saldos", "estoque_movimentos", "caixas_experiencia", "caixa_itens"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());

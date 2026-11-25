@@ -1,7 +1,7 @@
 import type { CategoriaSistema, Lado } from "@/domain/financeiro";
 
-// Dados iniciais do financeiro: a migração drizzle/0020_financeiro.sql os insere em produção (replica esta lista
-// literalmente) e `limparBanco` (tests/helpers/db.ts) os reinsere depois de truncar. O teste
+// Dados iniciais do financeiro: a migração drizzle/0020_financeiro.sql os insere em produção (replica esta lista, com
+// `sistema` nulo nas linhas que as migrações 0032 e 0049 marcam depois) e `limparBanco` (tests/helpers/db.ts) os reinsere depois de truncar. O teste
 // tests/integracao/financeiro-schema.test.ts executa os INSERTs da 0020 e confere que dão exatamente estes dados.
 
 export type CategoriaInicial = { lado: Lado; grupo: string; nome: string; sistema: CategoriaSistema | null };
@@ -10,8 +10,8 @@ export type CategoriaInicial = { lado: Lado; grupo: string; nome: string; sistem
 export const CATEGORIAS_INICIAIS: CategoriaInicial[] = (
   [
     ["pagar", "Viagens", "Fornecedores de viagem", "fornecedores_viagem"],
-    ["pagar", "Viagens", "Reembolso a cliente", null],
-    ["pagar", "Viagens", "Caixa de experiência", null],
+    ["pagar", "Viagens", "Reembolso a cliente", "reembolso_cliente"],
+    ["pagar", "Viagens", "Caixa de experiência", "caixa_experiencia"],
     ["pagar", "Pessoal", "Salários", null],
     ["pagar", "Pessoal", "13º salário", null],
     ["pagar", "Pessoal", "Férias", null],
@@ -25,7 +25,7 @@ export const CATEGORIAS_INICIAIS: CategoriaInicial[] = (
     ["pagar", "Administrativo", "Internet", null],
     ["pagar", "Administrativo", "Seguros", null],
     ["pagar", "Administrativo", "Serviços contratados", null],
-    ["pagar", "Administrativo", "Papelaria", null],
+    ["pagar", "Administrativo", "Papelaria", "papelaria"],
     ["pagar", "Administrativo", "Cartão corporativo", "cartao_corporativo"],
     ["pagar", "Impostos e encargos", "Impostos federais", null],
     ["pagar", "Impostos e encargos", "FGTS", null],
@@ -34,7 +34,7 @@ export const CATEGORIAS_INICIAIS: CategoriaInicial[] = (
     ["receber", "Vendas", "Vendas de viagem", "vendas_viagem"],
     ["receber", "Vendas", "Comissões de hotel", "comissoes_hotel"],
     ["receber", "Vendas", "Comissões de operadora", "comissoes_operadora"],
-    ["receber", "Outros", "Reembolso de fornecedor", null],
+    ["receber", "Outros", "Reembolso de fornecedor", "reembolso_fornecedor"],
     ["receber", "Outros", "Rendimentos", null],
   ] as const
 ).map(([lado, grupo, nome, sistema]) => ({ lado, grupo, nome, sistema }));
