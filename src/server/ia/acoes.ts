@@ -24,6 +24,7 @@ import { configDrive, configTrello } from "@/server/integracoes/config";
 import { clienteDrive, MIME_PASTA, type ClienteDrive, type ItemDrive } from "@/server/integracoes/drive";
 import { ErroIntegracao, type Buscar } from "@/server/integracoes/http";
 import { clienteTrello, type CartaoDetalhe } from "@/server/integracoes/trello";
+import { baixarObjeto, removerObjeto } from "@/server/storage";
 import { descendeDe, refsDaViagem, refsDaViagemPorId, viagemDoCartao, viagemDoItem, type RefsDaViagem } from "./alcance";
 import { ERRO_DO_SERVICO } from "./erros-servico";
 import type { ContextoFerramenta } from "./ferramentas";
@@ -551,5 +552,43 @@ export async function executarAcao(
     return { link: linkHttps(item.link) };
   }
 
-  throw new ErroAlcance("Envio de anexo não disponível.");
+  if (acao.tipo === "drive_enviar_arquivo") {
+    const pastaId = strCampo(dados, "pastaId") ?? strCampo(alvo, "pastaId");
+    const anexoId = strCampo(dados, "anexoId") ?? strCampo(alvo, "anexoId");
+    if (!pastaId || !anexoId || !ehUuid(anexoId)) {
+      throw new ErroAlcance("Os dados do envio não são mais válidos.");
+    }
+    if (!(await descendeDe(drive, pastaId, refs.pastaId, cache))) {
+      throw new ErroAlcance("A pasta de destino não pertence mais a esta viagem.");
+    }
+    const pasta = cache.get(pastaId) ?? (await drive.obter(pastaId));
+    if (!pasta || pasta.mime !== MIME_PASTA) throw new ErroAlcance("A pasta de destino não foi encontrada.");
+
+    const [anexo] = await db
+      .select()
+      .from(chatAnexos)
+      .where(
+        and(
+          eq(chatAnexos.id, anexoId),
+          eq(chatAnexos.usuarioId, acao.usuarioId),
+          isNull(chatAnexos.usadoEm),
+          gt(chatAnexos.expiraEm, new Date()),
+        ),
+      )
+      .limit(1);
+    if (!anexo) throw new ErroAlcance("O arquivo anexado expirou ou já foi usado.");
+
+    const bytes = await baixarObjeto(anexo.caminho);
+    if (!bytes) throw new ErroAlcance("Não foi possível ler o arquivo anexado.");
+
+    const nome = strCampo(dados, "nome") ?? anexo.nome;
+    // Se falhar aqui, o anexo continua no bucket e sem `usado_em` até vencer, para a pessoa pedir de novo (spec §7).
+    const enviado = await drive.enviarArquivo(pastaId, nome, anexo.mime, bytes);
+
+    await db.update(chatAnexos).set({ usadoEm: new Date() }).where(eq(chatAnexos.id, anexo.id));
+    await removerObjeto(anexo.caminho);
+    return { link: linkHttps(enviado.link) };
+  }
+
+  throw new ErroAlcance("Ação desconhecida.");
 }

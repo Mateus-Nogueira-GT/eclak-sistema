@@ -1,15 +1,17 @@
 "use server";
 
+import { and, eq, gt, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { tamanhoLegivel } from "@/domain/anexos";
 import { MAX_CARACTERES_CHAT, MAX_MENSAGENS_CHAT } from "@/domain/chat";
 import type { Proposta } from "@/domain/chat-acoes";
 import { hojeEmCuiaba } from "@/domain/clientes";
 import { protegerTexto } from "@/domain/ia-privacidade";
 import { PERFIS, veCamadaEstrategica } from "@/domain/perfis";
-import { comPerfil } from "@/server/acesso";
+import { comPerfil, ehUuid } from "@/server/acesso";
 import type { UsuarioAtual } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { iaUsos } from "@/server/db/schema";
+import { chatAnexos, iaUsos } from "@/server/db/schema";
 import { ERRO_DA_CLASSE } from "@/server/ia/erros";
 import { conhecidosDoSistema } from "@/server/ia/alcance";
 import { buscarDoChat, executarFerramenta, ferramentasDoChat } from "@/server/ia/ferramentas";
@@ -116,16 +118,33 @@ async function gravarUso(usuarioId: string, modelo: string, entrada: number, sai
   }
 }
 
+const ROTULO_MIME: Record<string, string> = {
+  "application/pdf": "PDF",
+  "image/png": "PNG",
+  "image/jpeg": "JPEG",
+};
+
+function validarAnexos(anexos: unknown): string[] | Falha {
+  if (anexos === undefined) return [];
+  if (!Array.isArray(anexos) || anexos.length > 10 || !anexos.every((a) => typeof a === "string")) {
+    return { ok: false, erro: "Dados inválidos" };
+  }
+  return [...new Set(anexos)];
+}
+
 /**
  * Uma pergunta ao chat. `mensagens` é a conversa visível (até 30, cada uma até 4.000 caracteres), terminando na
- * pergunta. Laço de ferramentas de leitura (até 6 voltas); grava um `ia_usos` (`chat`, tokens somados, sem texto).
+ * pergunta. `anexos` (opcional) são ids de `chat_anexos` esperando envio ao Drive (só metadados vão ao modelo).
  */
 export async function conversar(
   mensagens: { de: "eu" | "ia"; texto: string }[],
+  anexos?: string[],
 ): Promise<{ ok: true; texto: string; propostas: Proposta[] } | Falha> {
   return comPerfil([], async (usuario) => {
     const validadas = validar(mensagens);
     if (!Array.isArray(validadas)) return validadas;
+    const anexoIds = validarAnexos(anexos);
+    if (!Array.isArray(anexoIds)) return anexoIds;
     const provedor = provedorIA();
     if (!provedor) return DESLIGADA;
 
@@ -134,6 +153,35 @@ export async function conversar(
     const drive = configDrive() !== null;
     const ferramentas = ferramentasDoChat();
     const conversa: MensagemIA[] = remontar(validadas, conhecidos);
+
+    if (anexoIds.length > 0) {
+      const uuids = anexoIds.filter(ehUuid);
+      const achados =
+        uuids.length > 0
+          ? await db
+              .select({ id: chatAnexos.id, nome: chatAnexos.nome, mime: chatAnexos.mime, tamanho: chatAnexos.tamanho })
+              .from(chatAnexos)
+              .where(
+                and(
+                  inArray(chatAnexos.id, uuids),
+                  eq(chatAnexos.usuarioId, usuario.id),
+                  isNull(chatAnexos.usadoEm),
+                  gt(chatAnexos.expiraEm, new Date()),
+                ),
+              )
+          : [];
+      const notas: string[] = achados.map(
+        (a) =>
+          `Arquivo anexado: ${protegerTexto(a.nome, conhecidos)} (${ROTULO_MIME[a.mime] ?? a.mime}, ${tamanhoLegivel(a.tamanho)}), referência ${a.id}`,
+      );
+      if (achados.length < anexoIds.length) {
+        notas.push("[Aviso: um arquivo anexado venceu ou não está mais disponível.]");
+      }
+      const ultima = conversa[conversa.length - 1];
+      if (ultima && typeof ultima.content === "string" && notas.length > 0) {
+        ultima.content += `\n\n${notas.join("\n")}`;
+      }
+    }
     const inicio = Date.now();
     const prazoAte = inicio + PRAZO_CHAT_MS;
     const buscar = buscarDoChat();

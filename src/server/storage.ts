@@ -36,3 +36,13 @@ export async function linkAssinado(caminho: string): Promise<string | null> {
   }
   return data.signedUrl;
 }
+
+/** Baixa os bytes de um objeto do bucket `anexos`; devolve `null` se não existir ou falhar. */
+export async function baixarObjeto(caminho: string): Promise<Uint8Array | null> {
+  const { data, error } = await bucket().download(caminho);
+  if (error || !data) {
+    console.error("Falha ao baixar o anexo do Storage", { code: (error as { statusCode?: string } | null)?.statusCode ?? error?.name });
+    return null;
+  }
+  return new Uint8Array(await data.arrayBuffer());
+}

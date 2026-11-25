@@ -498,7 +498,7 @@ describe("rota POST /api/cron/integracoes", () => {
     const e = await inserir({ proximaEm: new Date(Date.now() - MIN) });
     const r = await POST(pedir("Bearer segredo-do-cron"));
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ enviados: 1, falhas: 0 });
+    expect(await r.json()).toEqual({ enviados: 1, falhas: 0, expiradas: 0, anexosRemovidos: 0 });
     expect((await ler(e.id)).situacao).toBe("enviado");
   });
 
