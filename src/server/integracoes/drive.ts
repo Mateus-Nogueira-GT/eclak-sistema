@@ -7,7 +7,7 @@ import { configDrive, type ConfigDrive } from "./config";
 // Só tipos: `fila.ts` importa o processador daqui (sem ciclo de valores).
 import type { DepsProcessador, EnvioTomado, Processador } from "./fila";
 import { descartarTokenGoogle, tokenGoogle } from "./google";
-import { chamar, ErroIntegracao, type Buscar, type Motivo403 } from "./http";
+import { baixar, chamar, ErroIntegracao, urlDeTeste, type Buscar, type Motivo403 } from "./http";
 
 // Google Drive: cliente REST v3 (token Bearer da conta de serviço, só no cabeçalho) e o processador da fila. Conta de
 // serviço não tem cota própria: tudo é criado dentro da pasta raiz, que fica num drive compartilhado
@@ -19,9 +19,24 @@ export const MIME_PASTA = "application/vnd.google-apps.folder";
 /** Upload multipart (uma chamada) só até 5 MB; acima disso o Google pede upload retomável. */
 export const LIMITE_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+export function baseDrive(env: Record<string, string | undefined> = process.env): { api: string; upload: string } {
+  const base = urlDeTeste(env.DRIVE_API_URL, "");
+  if (!base) return { api: DRIVE_API, upload: DRIVE_UPLOAD };
+  return { api: `${base}/drive/v3`, upload: `${base}/upload/drive/v3` };
+}
+
 type Json = Record<string, unknown>;
 
 const texto = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+
+function parseTamanho(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.trunc(v);
+  if (typeof v === "string" && /^\d+$/.test(v)) {
+    const n = Number(v);
+    return Number.isSafeInteger(n) ? n : null;
+  }
+  return null;
+}
 
 /** Link para abrir a pasta: o `webViewLink` devolvido ou, se não vier, o endereço de pasta do Drive. */
 const linkDe = (json: Json, id: string, pasta: boolean) =>
@@ -38,10 +53,36 @@ const MOTIVOS_LIMITE = new Set(["rateLimitExceeded", "userRateLimitExceeded"]);
 const ehLimiteDoDrive = (m: Motivo403) => (m.reason !== null && MOTIVOS_LIMITE.has(m.reason)) || m.status === "RESOURCE_EXHAUSTED";
 
 export type ArquivoDrive = { id: string; nome: string; mime: string; link: string | null };
+export type ItemDrive = {
+  id: string;
+  nome: string;
+  mime: string;
+  pais: string[];
+  modificado: string | null;
+  tamanho: number | null;
+  link: string | null;
+};
+
+function itemDe(f: Json): ItemDrive | null {
+  const id = texto(f.id);
+  if (!id) return null;
+  const pais = Array.isArray(f.parents) ? f.parents.filter((p): p is string => typeof p === "string" && p !== "") : [];
+  return {
+    id,
+    nome: texto(f.name) ?? "",
+    mime: texto(f.mimeType) ?? "",
+    pais,
+    modificado: texto(f.modifiedTime),
+    tamanho: parseTamanho(f.size),
+    link: texto(f.webViewLink),
+  };
+}
 
 const MAX_PAGINAS_LISTAGEM = 50;
 
-export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
+export function clienteDrive(cfg: ConfigDrive, buscar: Buscar, opcoes: { timeoutMs?: number } = {}) {
+  const { api, upload } = baseDrive();
+
   async function autorizacao(): Promise<string> {
     return `Bearer ${await tokenGoogle(cfg, buscar)}`;
   }
@@ -51,6 +92,7 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
       ...init,
       headers: { ...(init.headers as Record<string, string>), Authorization: await autorizacao(), Accept: "application/json" },
       limite403: ehLimiteDoDrive,
+      timeoutMs: opcoes.timeoutMs,
     });
     if (!r.ok) {
       if (r.status === 401) {
@@ -63,6 +105,24 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
     return { json: r.json as Json, status: r.status };
   }
 
+  async function pedirBytes(url: string, jaRenovou = false): Promise<{ bytes: Uint8Array; mime: string }> {
+    const r = await baixar(buscar, url, {
+      method: "GET",
+      headers: { Authorization: await autorizacao() },
+      maxBytes: LIMITE_UPLOAD_BYTES,
+      limite403: ehLimiteDoDrive,
+      timeoutMs: opcoes.timeoutMs,
+    });
+    if (!r.ok) {
+      if (r.status === 401) {
+        descartarTokenGoogle(cfg.email);
+        if (!jaRenovou) return pedirBytes(url, true);
+      }
+      throw new ErroIntegracao(r.classe, r.status);
+    }
+    return { bytes: r.bytes, mime: r.mime };
+  }
+
   /** Resposta 2xx sem o `id` do que foi criado: conta como erro do serviço (tenta de novo). */
   function idDe(r: { json: Json; status: number }): string {
     const id = texto(r.json.id);
@@ -71,9 +131,104 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
   }
 
   return {
+    async obter(id: string): Promise<ItemDrive | null> {
+      const q = new URLSearchParams({
+        supportsAllDrives: "true",
+        fields: "id,name,mimeType,parents,modifiedTime,size,webViewLink,trashed",
+      });
+      try {
+        const r = await pedir(`${api}/files/${encodeURIComponent(id)}?${q}`, { method: "GET" });
+        if (r.json.trashed === true) return null;
+        return itemDe(r.json);
+      } catch (e) {
+        if (e instanceof ErroIntegracao && e.status === 404) return null;
+        throw e;
+      }
+    },
+
+    async listarItens(pastaId: string): Promise<ItemDrive[]> {
+      const todos: ItemDrive[] = [];
+      const vistos = new Set<string>();
+      let pagina: string | null = null;
+      for (let i = 0; i < MAX_PAGINAS_LISTAGEM; i++) {
+        const q = new URLSearchParams({
+          q: `${literalQ(pastaId)} in parents and trashed = false`,
+          supportsAllDrives: "true",
+          includeItemsFromAllDrives: "true",
+          pageSize: "100",
+          fields: "nextPageToken,files(id,name,mimeType,parents,modifiedTime,size,webViewLink)",
+        });
+        if (pagina) q.set("pageToken", pagina);
+        const r = await pedir(`${api}/files?${q}`, { method: "GET" });
+        const files = Array.isArray(r.json.files) ? (r.json.files as Json[]) : [];
+        for (const f of files) {
+          const item = itemDe(f);
+          if (item) todos.push(item);
+        }
+        const proxima = texto(r.json.nextPageToken);
+        if (!proxima || vistos.has(proxima)) break;
+        vistos.add(proxima);
+        pagina = proxima;
+      }
+      return todos;
+    },
+
+    async buscar(termo: string): Promise<ItemDrive[]> {
+      const lit = literalQ(termo);
+      const q = new URLSearchParams({
+        q: `(fullText contains ${lit} or name contains ${lit}) and trashed = false`,
+        supportsAllDrives: "true",
+        includeItemsFromAllDrives: "true",
+        pageSize: "50",
+        fields: "files(id,name,mimeType,parents,modifiedTime,size,webViewLink)",
+      });
+      const r = await pedir(`${api}/files?${q}`, { method: "GET" });
+      const files = Array.isArray(r.json.files) ? (r.json.files as Json[]) : [];
+      const saida: ItemDrive[] = [];
+      for (const f of files) {
+        const item = itemDe(f);
+        if (item) saida.push(item);
+      }
+      return saida;
+    },
+
+    async exportar(id: string, mime: "text/plain" | "text/csv"): Promise<string> {
+      const q = new URLSearchParams({ mimeType: mime });
+      const r = await pedirBytes(`${api}/files/${encodeURIComponent(id)}/export?${q}`);
+      return new TextDecoder("utf-8").decode(r.bytes);
+    },
+
+    async baixarBytes(id: string): Promise<{ bytes: Uint8Array; mime: string }> {
+      const q = new URLSearchParams({ alt: "media", supportsAllDrives: "true" });
+      return pedirBytes(`${api}/files/${encodeURIComponent(id)}?${q}`);
+    },
+
+    async renomear(id: string, nome: string): Promise<void> {
+      const q = new URLSearchParams({ supportsAllDrives: "true", fields: "id" });
+      await pedir(`${api}/files/${encodeURIComponent(id)}?${q}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+        body: JSON.stringify({ name: nome }),
+      });
+    },
+
+    async mover(id: string, de: string, para: string): Promise<void> {
+      const q = new URLSearchParams({
+        supportsAllDrives: "true",
+        addParents: para,
+        removeParents: de,
+        fields: "id",
+      });
+      await pedir(`${api}/files/${encodeURIComponent(id)}?${q}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json; charset=UTF-8" },
+        body: JSON.stringify({}),
+      });
+    },
+
     async criarPasta(nome: string, paiId: string): Promise<{ id: string; link: string }> {
       const q = new URLSearchParams({ supportsAllDrives: "true", fields: "id,webViewLink" });
-      const r = await pedir(`${DRIVE_API}/files?${q}`, {
+      const r = await pedir(`${api}/files?${q}`, {
         method: "POST",
         headers: { "Content-Type": "application/json; charset=UTF-8" },
         body: JSON.stringify({ name: nome, mimeType: MIME_PASTA, parents: [paiId] }),
@@ -94,7 +249,7 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
         Buffer.from(`\r\n--${boundary}--\r\n`, "utf8"),
       ]);
       const q = new URLSearchParams({ uploadType: "multipart", supportsAllDrives: "true", fields: "id,webViewLink" });
-      const r = await pedir(`${DRIVE_UPLOAD}/files?${q}`, {
+      const r = await pedir(`${upload}/files?${q}`, {
         method: "POST",
         headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
         body: corpo,
@@ -116,7 +271,7 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
           fields: "nextPageToken,files(id,name,mimeType,webViewLink)",
         });
         if (pagina) q.set("pageToken", pagina);
-        const r = await pedir(`${DRIVE_API}/files?${q}`, { method: "GET" });
+        const r = await pedir(`${api}/files?${q}`, { method: "GET" });
         const files = Array.isArray(r.json.files) ? (r.json.files as Json[]) : [];
         for (const f of files) {
           const id = texto(f.id);
@@ -135,7 +290,7 @@ export function clienteDrive(cfg: ConfigDrive, buscar: Buscar) {
     async testar(): Promise<{ ok: true; pasta: string } | { ok: false; classe: ClasseErro }> {
       try {
         const q = new URLSearchParams({ supportsAllDrives: "true", fields: "id,name" });
-        const r = await pedir(`${DRIVE_API}/files/${encodeURIComponent(cfg.pastaRaizId)}?${q}`, { method: "GET" });
+        const r = await pedir(`${api}/files/${encodeURIComponent(cfg.pastaRaizId)}?${q}`, { method: "GET" });
         const nome = texto(r.json.name);
         return nome ? { ok: true, pasta: nome } : { ok: false, classe: "servidor" };
       } catch (e) {
