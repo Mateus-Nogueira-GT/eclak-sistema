@@ -101,14 +101,15 @@ export function perfisDoSetor(setor: Setor): Perfil[] {
 export const DIAS_VALIDADE_DISPENSA = 30;
 /** A aba "Dispensados" mostra os últimos 90 dias. */
 export const DIAS_DISPENSADOS = 90;
-const DIA_MS = 24 * 60 * 60 * 1000;
+export const DIA_MS = 24 * 60 * 60 * 1000;
 
 /**
- * A dispensa ainda esconde o aviso (spec §14): o `detalhe` atual é igual ao gravado e ela tem no máximo 30 dias. Mudou
- * o texto (de 3 para 4 parcelas vencidas) ou passou o prazo: o aviso volta.
+ * A dispensa ainda esconde o aviso (spec §14, com a decisão do coordenador): título e detalhe atuais iguais aos
+ * gravados (o título dos agregados traz a contagem) e no máximo 30 dias. Mudou o texto (de 3 para 4 parcelas vencidas,
+ * de 1 para 2 pedidos) ou passou o prazo: o aviso volta.
  */
-export function dispensaVale(d: { detalhe: string; criadoEm: Date }, atual: { detalhe: string }, agora: Date): boolean {
-  return d.detalhe === atual.detalhe && agora.getTime() - d.criadoEm.getTime() <= DIAS_VALIDADE_DISPENSA * DIA_MS;
+export function dispensaVale(d: { titulo: string; detalhe: string; criadoEm: Date }, atual: { titulo: string; detalhe: string }, agora: Date): boolean {
+  return d.titulo === atual.titulo && d.detalhe === atual.detalhe && agora.getTime() - d.criadoEm.getTime() <= DIAS_VALIDADE_DISPENSA * DIA_MS;
 }
 
 const MSG_JUSTIFICATIVA = "Escreva a justificativa (10 a 500 caracteres)";

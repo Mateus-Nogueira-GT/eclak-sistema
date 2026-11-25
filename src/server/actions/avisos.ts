@@ -23,15 +23,20 @@ const DISPENSA_NAO_ENCONTRADA = falha("Dispensa não encontrada");
 const SO_QUEM_DISPENSOU = falha("Só quem dispensou ou o Diretor pode desfazer a dispensa");
 const JA_RESOLVIDO = falha("Este aviso já foi resolvido");
 
-/** Contador do topo: o resultado por pessoa vale 60 s (spec §14). Qualquer gravação limpa tudo (a dispensa e o comunicado valem para todos do setor). */
+/**
+ * Contador do topo: o resultado por pessoa vale 60 s (spec §14). Qualquer gravação limpa tudo (a dispensa e o comunicado
+ * valem para todos do setor) e avança a geração: um cálculo começado antes da limpeza não é guardado.
+ */
 const CACHE_MS = 60_000;
 const contagens = new Map<string, { valor: number; ate: number }>();
+let geracao = 0;
 
 function falhaDeValidacao(erro: ZodError): Falha {
   return { ok: false, erro: erro.issues[0].message, campos: errosDeCampo(erro) };
 }
 
 function aposGravar() {
+  geracao += 1;
   contagens.clear();
   revalidatePath("/avisos");
 }
@@ -131,9 +136,11 @@ export async function contarAvisos(): Promise<number> {
     const agora = Date.now();
     const guardado = contagens.get(usuario.id);
     if (guardado && guardado.ate > agora) return guardado.valor;
+    if (guardado) contagens.delete(usuario.id);
+    const inicio = geracao;
     const { abertos, comunicados } = await avisosDaCentral({});
     const valor = abertos.length + comunicados.length;
-    contagens.set(usuario.id, { valor, ate: agora + CACHE_MS });
+    if (geracao === inicio) contagens.set(usuario.id, { valor, ate: agora + CACHE_MS });
     return valor;
   });
   return typeof r === "number" ? r : 0;

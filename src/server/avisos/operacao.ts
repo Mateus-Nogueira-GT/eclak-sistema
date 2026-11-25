@@ -84,7 +84,7 @@ async function dailiesAGerar(hoje: string): Promise<AvisoCentral[]> {
         aviso(
           "daily_a_gerar",
           `${l.viagemId}:${dia}`,
-          `Daily de ${dia === hoje ? "hoje" : "amanhã"} a gerar na ${formatarCodigoViagem(l.clienteCodigo, l.seq)}`,
+          `Daily de ${dataBr(dia)} a gerar na ${formatarCodigoViagem(l.clienteCodigo, l.seq)}`,
           `${l.cliente} (${l.destino}): daily de ${dataBr(dia)}`,
           `/viagens/${l.viagemId}/dailies`,
         ),

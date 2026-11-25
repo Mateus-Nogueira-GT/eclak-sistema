@@ -109,18 +109,24 @@ describe("avisos novos da central (spec §8.3)", () => {
 describe("validade da dispensa (Review Focus 5)", () => {
   const agora = new Date("2026-11-25T12:00:00Z");
   const dias = (n: number) => new Date(agora.getTime() - n * 24 * 60 * 60 * 1000);
+  const gravado = (n: number) => ({ titulo: "3 parcelas de cliente vencidas", detalhe: "R$ 300,00 em aberto", criadoEm: dias(n) });
+  const atual = { titulo: "3 parcelas de cliente vencidas", detalhe: "R$ 300,00 em aberto" };
 
-  it("mesmo detalhe e até 30 dias: vale", () => {
-    expect(dispensaVale({ detalhe: "3 parcelas vencidas", criadoEm: dias(0) }, { detalhe: "3 parcelas vencidas" }, agora)).toBe(true);
-    expect(dispensaVale({ detalhe: "3 parcelas vencidas", criadoEm: dias(30) }, { detalhe: "3 parcelas vencidas" }, agora)).toBe(true);
+  it("mesmo título e detalhe, até 30 dias: vale", () => {
+    expect(dispensaVale(gravado(0), atual, agora)).toBe(true);
+    expect(dispensaVale(gravado(30), atual, agora)).toBe(true);
   });
 
-  it("detalhe mudou (3 → 4 parcelas vencidas): não vale", () => {
-    expect(dispensaVale({ detalhe: "3 parcelas vencidas", criadoEm: dias(1) }, { detalhe: "4 parcelas vencidas" }, agora)).toBe(false);
+  it("detalhe mudou: não vale", () => {
+    expect(dispensaVale(gravado(1), { ...atual, detalhe: "R$ 400,00 em aberto" }, agora)).toBe(false);
+  });
+
+  it("título mudou (3 → 4 parcelas vencidas): não vale", () => {
+    expect(dispensaVale(gravado(1), { ...atual, titulo: "4 parcelas de cliente vencidas" }, agora)).toBe(false);
   });
 
   it("31 dias: não vale", () => {
-    expect(dispensaVale({ detalhe: "3 parcelas vencidas", criadoEm: dias(31) }, { detalhe: "3 parcelas vencidas" }, agora)).toBe(false);
+    expect(dispensaVale(gravado(31), atual, agora)).toBe(false);
   });
 });
 

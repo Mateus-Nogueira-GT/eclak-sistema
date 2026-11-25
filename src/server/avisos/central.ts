@@ -1,6 +1,7 @@
 import "server-only";
-import { and, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, or, type SQL } from "drizzle-orm";
 import {
+  DIA_MS,
   DIAS_DISPENSADOS,
   DIAS_VALIDADE_DISPENSA,
   dispensaVale,
@@ -54,7 +55,6 @@ export type Dispensado = {
   podeDesfazer: boolean;
 };
 
-const DIA_MS = 24 * 60 * 60 * 1000;
 const nenhum = Promise.resolve([] as AvisoCentral[]);
 
 /** Os automáticos dos setores, na ordem Gestão, Financeiro, Comercial, Operacional. */
@@ -71,12 +71,12 @@ async function automaticos(setores: Setor[]): Promise<AvisoCentral[]> {
   return listas.flat();
 }
 
-/** Tira os avisos com dispensa que ainda vale (mesmo detalhe, até 30 dias): a dispensa vale para todos. */
+/** Tira os avisos com dispensa que ainda vale (mesmo título e detalhe, até 30 dias): a dispensa vale para todos. */
 async function semDispensados(avisos: AvisoCentral[]): Promise<AvisoCentral[]> {
   if (avisos.length === 0) return avisos;
   const agora = new Date();
   const dispensas = await db
-    .select({ chave: tabelaDispensados.chave, detalhe: tabelaDispensados.detalhe, criadoEm: tabelaDispensados.criadoEm })
+    .select({ chave: tabelaDispensados.chave, titulo: tabelaDispensados.titulo, detalhe: tabelaDispensados.detalhe, criadoEm: tabelaDispensados.criadoEm })
     .from(tabelaDispensados)
     .where(
       and(
@@ -87,7 +87,12 @@ async function semDispensados(avisos: AvisoCentral[]): Promise<AvisoCentral[]> {
   return avisos.filter((a) => !dispensas.some((d) => d.chave === a.chave && dispensaVale(d, a, agora)));
 }
 
-async function comunicadosAbertos(setores: Setor[]): Promise<Comunicado[]> {
+/**
+ * Comunicados abertos dos setores. `autor`: também os que essa pessoa criou, de qualquer setor ("para mim", decisão do
+ * coordenador: quem criou vê e resolve).
+ */
+async function comunicadosAbertos(setores: Setor[], autor: string | null): Promise<Comunicado[]> {
+  const destino: SQL | undefined = autor ? or(inArray(avisosComunicados.setor, setores), eq(avisosComunicados.criadoPor, autor)) : inArray(avisosComunicados.setor, setores);
   const linhas = await db
     .select({
       id: avisosComunicados.id,
@@ -100,19 +105,20 @@ async function comunicadosAbertos(setores: Setor[]): Promise<Comunicado[]> {
     })
     .from(avisosComunicados)
     .innerJoin(usuarios, eq(usuarios.id, avisosComunicados.criadoPor))
-    .where(and(isNull(avisosComunicados.resolvidoEm), inArray(avisosComunicados.setor, setores)))
+    .where(and(isNull(avisosComunicados.resolvidoEm), destino))
     .orderBy(desc(avisosComunicados.criadoEm), desc(avisosComunicados.id));
   return linhas.map((l) => ({ ...l, setor: l.setor as Setor }));
 }
 
 /**
- * Avisos abertos e comunicados da central. "Para mim" (os setores do perfil) por padrão; o Diretor pode pedir um setor
- * ou "todos". Os cinco perfis.
+ * Avisos abertos e comunicados da central. "Para mim" (os setores do perfil e os comunicados que a pessoa criou) por
+ * padrão; o Diretor pode pedir um setor (só o setor, sem os comunicados dele de outro setor) ou "todos". Os cinco perfis.
  */
 export async function avisosDaCentral(filtro: FiltroAvisos = {}): Promise<{ abertos: AvisoCentral[]; comunicados: Comunicado[] }> {
   const usuario = await exigirPerfil();
   const setores = setoresDaVisao(usuario.perfil, filtro);
-  const [abertos, comunicados] = await Promise.all([automaticos(setores).then(semDispensados), comunicadosAbertos(setores)]);
+  const umSetor = usuario.perfil === "diretor" && !!filtro.setor && filtro.setor !== "todos";
+  const [abertos, comunicados] = await Promise.all([automaticos(setores).then(semDispensados), comunicadosAbertos(setores, umSetor ? null : usuario.id)]);
   return { abertos, comunicados };
 }
 

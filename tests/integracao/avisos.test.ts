@@ -9,18 +9,22 @@ import type { Perfil } from "@/domain/perfis";
 import { somarDias } from "@/domain/venda";
 import { contarAvisos, criarComunicado, desfazerDispensa, dispensarAviso, resolverComunicado } from "@/server/actions/avisos";
 import { confirmarCaixa, salvarCaixa } from "@/server/actions/caixa-experiencia";
+import { enviarParaAprovacao } from "@/server/actions/aprovacoes";
+import { salvarCliente } from "@/server/actions/clientes";
 import { gerarDaily } from "@/server/actions/dailies";
 import { registrarEntrada, salvarProduto } from "@/server/actions/estoque";
 import { criarLancamento } from "@/server/actions/financeiro";
 import { marcarPedido, registrarReembolso } from "@/server/actions/reembolsos";
 import { aprovarRoteiro, criarRoteiro } from "@/server/actions/roteiros";
+import { criarOrcamento } from "@/server/actions/viagens";
+import { obterCliente } from "@/server/queries/clientes";
 import { concluirTarefa, criarTarefa } from "@/server/actions/tarefas";
 import { avisosComerciais, avisosDaCentral, avisosDeEstoque, avisosDeReembolsos, avisosDispensados, avisosOperacionais } from "@/server/avisos";
 import { ErroAcesso } from "@/server/auth";
 import { db } from "@/server/db/client";
 import { auditoria, avisosComunicados, dailies, avisosDispensados as tabelaDispensados, categoriasFinanceiras, parcelasReceber, pessoas, reembolsos, viagemPassageiros, viagens } from "@/server/db/schema";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
-import { vendida, type Fixture } from "../helpers/venda";
+import { cotacao, item, souza, vendida, type Fixture } from "../helpers/venda";
 
 const HOJE = hojeEmCuiaba();
 const AMANHA = somarDias(HOJE, 1);
@@ -110,6 +114,17 @@ async function caixaNegativo(fin: string) {
   );
 }
 
+/** Um orçamento novo enviado para aprovação (um pedido aguardando). */
+async function pedidoAguardando(uid: string) {
+  const c = await comSessao(uid, () => salvarCliente(souza));
+  if (!c.ok) throw new Error(c.erro);
+  const passageiros = (await comSessao(uid, () => obterCliente(c.id)))!.pessoas.map((p) => p.id);
+  const o = await comSessao(uid, () => criarOrcamento({ clienteId: c.id, destino: "Portugal", inicio: "2027-05-01", fim: "2027-05-10", passageiros }));
+  if (!o.ok) throw new Error(o.erro);
+  await cotacao(uid, await item(uid, o.id, { servico: "Belém", cidade: "Lisboa" }), { valor: "900,00" });
+  ok(await comSessao(uid, () => enviarParaAprovacao(o.id, { forma: { tipo: "pix", parcelas: 1 }, alteracao: "Primeira versão" })));
+}
+
 const reembolso = (x: Fixture, extra: Record<string, unknown> = {}) => ({
   viagemId: x.viagemId,
   contaPagarId: x.hotel.id,
@@ -190,8 +205,8 @@ describe("avisos novos da central", () => {
     ok(await comSessao(us.operacional.id, () => aprovarRoteiro(r.id)));
     let avisos = await doTipo(us.operacional.id, "daily_a_gerar");
     expect(avisos.map((a) => [a.chave, a.titulo, a.detalhe, a.href, a.passo, a.setor])).toEqual([
-      [`daily_a_gerar:${x.viagemId}:${HOJE}`, "Daily de hoje a gerar na ECL-0001-01", `Família Souza (Itália): daily de ${br(HOJE)}`, `/viagens/${x.viagemId}/dailies`, "Gerar o daily", "Operacional"],
-      [`daily_a_gerar:${x.viagemId}:${AMANHA}`, "Daily de amanhã a gerar na ECL-0001-01", `Família Souza (Itália): daily de ${br(AMANHA)}`, `/viagens/${x.viagemId}/dailies`, "Gerar o daily", "Operacional"],
+      [`daily_a_gerar:${x.viagemId}:${HOJE}`, `Daily de ${br(HOJE)} a gerar na ECL-0001-01`, `Família Souza (Itália): daily de ${br(HOJE)}`, `/viagens/${x.viagemId}/dailies`, "Gerar o daily", "Operacional"],
+      [`daily_a_gerar:${x.viagemId}:${AMANHA}`, `Daily de ${br(AMANHA)} a gerar na ECL-0001-01`, `Família Souza (Itália): daily de ${br(AMANHA)}`, `/viagens/${x.viagemId}/dailies`, "Gerar o daily", "Operacional"],
     ]);
     // Linha de amanhã pendente (sem texto) continua a gerar.
     await db.insert(dailies).values({ roteiroId: r.id, data: AMANHA, estado: "pendente" });
@@ -418,6 +433,24 @@ describe("dispensa", () => {
     expect(await chaves(x.fin.id)).toContain("parcela");
   }, 60_000);
 
+  it("dispensa vale por título e detalhe: aprovação com 1 pedido dispensada volta com 2 pedidos", async () => {
+    await pedidoAguardando(x.u.id);
+    const [aprovacao] = await doTipo(us.diretor.id, "aprovacao");
+    expect(aprovacao).toMatchObject({ chave: "aprovacao", titulo: "1 pedido aguardando aprovação", detalhe: "Decidir em Aprovações" });
+    ok(await comSessao(us.diretor.id, () => dispensarAviso("aprovacao", JUSTIFICATIVA)));
+    expect(await doTipo(us.diretor.id, "aprovacao")).toEqual([]);
+    await pedidoAguardando(x.u.id);
+    expect((await doTipo(us.diretor.id, "aprovacao")).map((a) => a.titulo)).toEqual(["2 pedidos aguardando aprovação"]);
+  }, 60_000);
+
+  it("aba Dispensados: só os últimos 90 dias", async () => {
+    ok(await comSessao(x.fin.id, () => dispensarAviso("parcela", JUSTIFICATIVA)));
+    await db.update(tabelaDispensados).set({ criadoEm: new Date(Date.now() - 89 * DIA_MS) });
+    expect(await comSessao(x.fin.id, () => avisosDispensados())).toHaveLength(1);
+    await db.update(tabelaDispensados).set({ criadoEm: new Date(Date.now() - 91 * DIA_MS) });
+    expect(await comSessao(x.fin.id, () => avisosDispensados())).toEqual([]);
+  }, 60_000);
+
   it("desfazer: quem dispensou ou o Diretor; outra pessoa é recusada", async () => {
     ok(await comSessao(x.fin.id, () => dispensarAviso("parcela", JUSTIFICATIVA)));
     let [d] = await db.select().from(tabelaDispensados);
@@ -478,10 +511,15 @@ describe("comunicados e contador", () => {
     expect(auds.map((a) => a.acao)).toEqual(["criar", "alterar"]);
   }, 60_000);
 
-  it("quem criou resolve mesmo sem receber o setor", async () => {
+  it("quem criou vê e resolve mesmo sem receber o setor", async () => {
     ok(await comSessao(x.u.id, () => criarComunicado({ setor: "Financeiro", texto: "Nota fiscal do hotel chegou" })));
     const [c] = await db.select().from(avisosComunicados);
-    expect((await central(x.u.id)).comunicados).toEqual([]);
+    // "Para mim" do consultor inclui o que ele criou, mesmo sendo do Financeiro (e conta no contador).
+    expect((await central(x.u.id)).comunicados.map((k) => k.id)).toEqual([c.id]);
+    expect(await comSessao(x.u.id, () => contarAvisos())).toBe(1);
+    // Com o Diretor filtrando um setor, só o setor: o comunicado dele de outro setor não entra.
+    ok(await comSessao(us.diretor.id, () => criarComunicado({ setor: "Financeiro", texto: "Reunião de fechamento" })));
+    expect((await central(us.diretor.id, { setor: "Operacional" })).comunicados).toEqual([]);
     expect(await comSessao(us.operacional.id, () => resolverComunicado(c.id))).toEqual({ ok: false, erro: "Aviso não encontrado" });
     expect(await comSessao(x.u.id, () => resolverComunicado(c.id))).toEqual({ ok: true });
   }, 60_000);
