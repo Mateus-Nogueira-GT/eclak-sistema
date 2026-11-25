@@ -47,11 +47,14 @@ export function CaixaExperiencia({
   somenteLeitura: boolean;
 }) {
   const situacao = caixa?.situacao ?? null;
+  const estoque = estoqueDe(caixa?.filial ?? filial);
+  // Recusa da confirmação: fica aqui, fora do editor, para sobreviver ao refresh que mostra o rascunho gravado.
+  const [recusa, setRecusa] = useState<string | null>(null);
   return (
     <Card id="caixa-experiencia" className="mb-6 pb-2">
       <CardHeader
         title="Caixa de experiência"
-        eyebrow={`Os itens saem do ${estoqueDe(caixa?.filial ?? filial)} quando a caixa é confirmada.`}
+        eyebrow={situacao === "confirmada" ? `Os itens já saíram do ${estoque}.` : somenteLeitura ? undefined : `Os itens saem do ${estoque} quando a caixa é confirmada.`}
         right={situacao === "confirmada" ? <Badge tom="agua">Confirmada</Badge> : situacao === "rascunho" ? <Badge tom="ouro">Rascunho</Badge> : <Badge>Sem caixa</Badge>}
       />
       {caixa?.situacao === "confirmada" || (somenteLeitura && caixa) ? (
@@ -60,7 +63,7 @@ export function CaixaExperiencia({
         <p className="px-6 pb-4 pt-3 text-[14px] text-cinza">Viagem conciliada sem caixa de experiência.</p>
       ) : (
         // A chave refaz o editor com o que o servidor gravou (o `router.refresh` não zera o estado local).
-        <Editor key={JSON.stringify(caixa?.itens.map((i) => [i.produtoId, i.quantidade]) ?? null)} viagemId={viagemId} filial={filial} caixa={caixa} produtos={produtos} />
+        <Editor key={JSON.stringify(caixa?.itens.map((i) => [i.produtoId, i.quantidade]) ?? null)} viagemId={viagemId} filial={filial} caixa={caixa} produtos={produtos} recusa={recusa} setRecusa={setRecusa} />
       )}
     </Card>
   );
@@ -88,7 +91,7 @@ function Confirmada({ viagemId, caixa, somenteLeitura }: { viagemId: string; cai
       {caixa.situacao === "confirmada" && (
         <p className="px-6 pt-3 text-[13.5px] text-cinza">
           Confirmada{caixa.confirmadaEm ? ` em ${dataHora(caixa.confirmadaEm)}` : ""}
-          {caixa.confirmadaPor ? ` por ${caixa.confirmadaPor}` : ""}. Os itens já saíram do {estoqueDe(caixa.filial)}.
+          {caixa.confirmadaPor ? ` por ${caixa.confirmadaPor}` : ""}.
           {!somenteLeitura && " Para mudar, cancele e monte outra."}
         </p>
       )}
@@ -128,8 +131,28 @@ function Confirmada({ viagemId, caixa, somenteLeitura }: { viagemId: string; cai
   );
 }
 
-function Editor({ viagemId, filial, caixa, produtos }: { viagemId: string; filial: Centro; caixa: CaixaDaViagem | null; produtos: ProdutoParaCaixa[] }) {
+function Editor({
+  viagemId,
+  filial,
+  caixa,
+  produtos,
+  recusa,
+  setRecusa,
+}: {
+  viagemId: string;
+  filial: Centro;
+  caixa: CaixaDaViagem | null;
+  produtos: ProdutoParaCaixa[];
+  /** Mensagem da última confirmação recusada (o rascunho já foi gravado). */
+  recusa: string | null;
+  setRecusa: (m: string | null) => void;
+}) {
   const acao = useAcao();
+  /** Toda ação do editor limpa a recusa anterior. */
+  const executar: Acao["executar"] = (fn) => {
+    setRecusa(null);
+    acao.executar(fn);
+  };
   const [aberto, setAberto] = useState(caixa !== null);
   const inicial = Object.fromEntries((caixa?.itens ?? []).map((i) => [i.produtoId, i.quantidade]));
   const [qtd, setQtd] = useState<Record<string, number>>(inicial);
@@ -145,6 +168,7 @@ function Editor({ viagemId, filial, caixa, produtos }: { viagemId: string; filia
   const total = valores ? linhas.reduce((t, l) => t + BigInt(qtd[l.id] ?? 0) * (l.custoMedio ?? 0n), 0n) : null;
   const mudar = (l: Linha, d: number) => {
     acao.limparCampo("itens");
+    setRecusa(null);
     setQtd((q) => ({ ...q, [l.id]: Math.max(0, (q[l.id] ?? 0) + d) }));
   };
 
@@ -215,6 +239,11 @@ function Editor({ viagemId, filial, caixa, produtos }: { viagemId: string; filia
         </ul>
       )}
       <MsgAcao acao={acao} />
+      {recusa && !acao.erro && (
+        <p role="alert" className="mx-6 mt-4 rounded-[5px] border border-ouro bg-ouro/15 px-3 py-2 text-[13px] text-texto">
+          {recusa}. O rascunho ficou gravado com estas quantidades.
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 pb-4 pt-4">
         <p className="text-[13.5px] text-cinza">
           {pecas === 0 ? "Nenhum item escolhido." : `${pecas} ${pecas === 1 ? "item" : "itens"}`}
@@ -227,18 +256,22 @@ function Editor({ viagemId, filial, caixa, produtos }: { viagemId: string; filia
         </p>
         <div className="flex flex-wrap gap-2">
           {caixa ? (
-            <Botao variante="fantasma" disabled={acao.pendente} onClick={() => acao.executar(() => cancelarCaixa(viagemId, ""))}>Descartar rascunho</Botao>
+            <Botao variante="fantasma" disabled={acao.pendente} onClick={() => executar(() => cancelarCaixa(viagemId, ""))}>Descartar rascunho</Botao>
           ) : (
             <Botao variante="fantasma" onClick={() => { setQtd({}); setAberto(false); }}>Fechar</Botao>
           )}
-          <Botao variante="secundario" disabled={acao.pendente} onClick={() => acao.executar(() => salvarCaixa(viagemId, itens))}>Salvar rascunho</Botao>
+          <Botao variante="secundario" disabled={acao.pendente} onClick={() => executar(() => salvarCaixa(viagemId, itens))}>Salvar rascunho</Botao>
           <Botao
             disabled={acao.pendente || pecas === 0}
             onClick={() =>
-              // Grava o que está na tela e confirma esse rascunho.
-              acao.executar(async () => {
+              // Grava o que está na tela e confirma esse rascunho. Se a confirmação é recusada, o rascunho já está
+              // gravado: a recusa sobe para o bloco e o sucesso do `useAcao` faz o refresh que mostra o rascunho.
+              executar(async () => {
                 const r = await salvarCaixa(viagemId, itens);
-                return r.ok ? confirmarCaixa(viagemId) : r;
+                if (!r.ok) return r;
+                const c = await confirmarCaixa(viagemId);
+                if (!c.ok) setRecusa(c.erro);
+                return { ok: true };
               })
             }
           >
