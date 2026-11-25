@@ -169,6 +169,9 @@ describe("RLS: anon não lê nada", () => {
               values (${prod.id}, 'MT', 'entrada', 3, 1500, 0, ${u.id})`;
     const [cx] = await sql<{ id: string }[]>`insert into caixas_experiencia (viagem_id, filial, criado_por) values (${v.id}, 'MT', ${u.id}) returning id`;
     await sql`insert into caixa_itens (caixa_id, produto_id, quantidade) values (${cx.id}, ${prod.id}, 1)`;
+    // Reembolsos (fatia 5b).
+    await sql`insert into reembolsos (viagem_id, servico, ocorrido_em, ocorrido, valor_cobrar, valor_devolver, forma_devolucao, prazo_cliente, previsto_fornecedor, criado_por)
+              values (${v.id}, 'Hotel', '2027-01-05', 'O hotel cancelou a reserva.', 10000, 8000, 'pix', '2027-01-20', '2027-01-30', ${u.id})`;
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from lancamentos_financeiros`;
     expect(n).toBeGreaterThan(0);
   });
@@ -211,6 +214,7 @@ describe("RLS: anon não lê nada", () => {
     "estoque_movimentos",
     "caixas_experiencia",
     "caixa_itens",
+    "reembolsos",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
@@ -240,7 +244,7 @@ describe("RLS: anon não lê nada", () => {
   });
 
   it("tabelas do estoque e da caixa com RLS ligado", async () => {
-    const tabelas = ["produtos_estoque", "estoque_saldos", "estoque_movimentos", "caixas_experiencia", "caixa_itens"];
+    const tabelas = ["produtos_estoque", "estoque_saldos", "estoque_movimentos", "caixas_experiencia", "caixa_itens", "reembolsos"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());

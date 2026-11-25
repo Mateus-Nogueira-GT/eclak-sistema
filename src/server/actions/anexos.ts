@@ -8,7 +8,7 @@ import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import { comPerfil, ehUuid } from "@/server/acesso";
 import { registrarAuditoria } from "@/server/auditoria";
 import { db, type Transacao } from "@/server/db/client";
-import { anexos, comissoes, faturasCartao, lancamentos, notasFiscais, pagamentosFornecedor, parcelasReceber } from "@/server/db/schema";
+import { anexos, comissoes, faturasCartao, lancamentos, notasFiscais, pagamentosFornecedor, parcelasReceber, reembolsos } from "@/server/db/schema";
 import { linkAssinado, removerObjeto, subirObjeto } from "@/server/storage";
 
 // Só as Server Actions são exportadas (todo export de um arquivo "use server" vira endpoint).
@@ -22,6 +22,7 @@ const falha = (erro: string): Falha => ({ ok: false, erro });
 const DONO_NAO_ENCONTRADO = falha("Lançamento não encontrado");
 const NOTA_NAO_ENCONTRADA = falha("Nota fiscal não encontrada");
 const FATURA_CARTAO_NAO_ENCONTRADA = falha("Fatura do cartão não encontrada");
+const REEMBOLSO_NAO_ENCONTRADO = falha("Reembolso não encontrado");
 const ANEXO_NAO_ENCONTRADO = falha("Anexo não encontrado");
 const FALHA_ENVIO = falha("Não foi possível enviar o arquivo. Tente de novo.");
 
@@ -46,6 +47,8 @@ async function donoExiste(tipo: DonoAnexo, id: string, origem: typeof db | Trans
       return (await origem.select({ id: notasFiscais.id }).from(notasFiscais).where(eq(notasFiscais.id, id))).length > 0;
     case "fatura_cartao":
       return (await origem.select({ id: faturasCartao.id }).from(faturasCartao).where(eq(faturasCartao.id, id))).length > 0;
+    case "reembolso":
+      return (await origem.select({ id: reembolsos.id }).from(reembolsos).where(eq(reembolsos.id, id))).length > 0;
     default:
       return false;
   }
@@ -69,7 +72,13 @@ export async function enviarAnexo(formData: FormData) {
     const donoId = formData.get("donoId");
     if (!ehDono(donoTipo) || typeof donoId !== "string" || !ehUuid(donoId)) return DONO_NAO_ENCONTRADO;
     const falhaDono = () =>
-      donoTipo === "nota_fiscal" ? NOTA_NAO_ENCONTRADA : donoTipo === "fatura_cartao" ? FATURA_CARTAO_NAO_ENCONTRADA : DONO_NAO_ENCONTRADO;
+      donoTipo === "nota_fiscal"
+        ? NOTA_NAO_ENCONTRADA
+        : donoTipo === "fatura_cartao"
+          ? FATURA_CARTAO_NAO_ENCONTRADA
+          : donoTipo === "reembolso"
+            ? REEMBOLSO_NAO_ENCONTRADO
+            : DONO_NAO_ENCONTRADO;
     if (!(await donoExiste(donoTipo, donoId))) return falhaDono();
 
     const arquivo = formData.get("arquivo");

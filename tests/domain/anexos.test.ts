@@ -31,7 +31,7 @@ describe("anexos: tipo pelos bytes iniciais", () => {
 
   it("limite de 10 MB e donos", () => {
     expect(TAMANHO_MAXIMO_ANEXO).toBe(10 * 1024 * 1024);
-    expect(DONOS_ANEXO).toEqual(["manual", "parcela", "pagamento", "comissao", "fatura_cartao", "nota_fiscal"]);
+    expect(DONOS_ANEXO).toEqual(["manual", "parcela", "pagamento", "comissao", "fatura_cartao", "nota_fiscal", "reembolso"]);
   });
 
   it("tamanho legível em pt-BR", () => {

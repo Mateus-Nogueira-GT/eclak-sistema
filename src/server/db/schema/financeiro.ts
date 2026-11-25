@@ -24,6 +24,7 @@ import { clientes } from "./clientes";
 import { centroCustoEnum, formaFinanceiroEnum, ladoFinanceiroEnum, statusLancamentoEnum } from "./financeiro-enums";
 import { estoqueMovimentos } from "./estoque";
 import { fornecedores } from "./fornecedores";
+import { reembolsos } from "./reembolsos";
 import { usuarios } from "./usuarios";
 import { vendas } from "./vendas";
 
@@ -107,8 +108,8 @@ export const lancamentos = pgTable(
     faturaCartaoId: uuid("fatura_cartao_id"),
     /** Entrada de estoque que originou a conta (fatia 5b): na lista única só se baixa, não se edita nem cancela. */
     estoqueMovimentoId: uuid("estoque_movimento_id").references((): AnyPgColumn => estoqueMovimentos.id, { onDelete: "restrict" }),
-    /** Caso de reembolso que originou a conta (fatia 5b): na lista única só se baixa. A FK entra com a tabela `reembolsos`. */
-    reembolsoId: uuid("reembolso_id"),
+    /** Caso de reembolso que originou a conta (fatia 5b): na lista única só se baixa. */
+    reembolsoId: uuid("reembolso_id").references((): AnyPgColumn => reembolsos.id, { onDelete: "restrict" }),
     criadoPor: uuid("criado_por")
       .notNull()
       .references(() => usuarios.id),
