@@ -18,7 +18,6 @@ import {
 } from "@/domain/financeiro-entrada";
 import { PERFIS_FINANCEIRO } from "@/domain/perfis";
 import {
-  MSG_DESFACA_FATURA_CARTAO,
   MSG_FORNECEDOR_CARTAO,
   MSG_MOTIVO,
   baixaPagamentoSchema,
@@ -33,7 +32,6 @@ import { db, type Transacao } from "@/server/db/client";
 import {
   categoriasFinanceiras,
   contasBancarias,
-  faturasCartao,
   lancamentos,
   lancamentosFinanceiros,
   pagamentosFornecedor,
@@ -52,16 +50,21 @@ import {
   registrarComissaoNa,
   type Feito,
 } from "@/server/financeiro/baixas-viagem";
-import { type EntradaFatura, type Vinculo } from "@/server/financeiro/cartoes";
 import {
   Desfazer,
   LANCAMENTO_NAO_ENCONTRADO,
   SEM_CARTAO,
   baixarLancamentoNa,
   camposComuns,
+  cancelarLinhasNa,
   conferirReferencias,
   criarLancamentosNa,
+  desfazerBaixaLancamentoNa,
   falha,
+  planoDoCartao,
+  recusaDaEdicao,
+  recusaDoCancelamento,
+  recusaDoVinculo,
   travarFaturas,
   type Falha,
   type LancamentoLinha,
@@ -87,7 +90,6 @@ const USO_DA_CATEGORIA: Partial<Record<CategoriaSistema, string>> = {
 };
 const msgCategoriaSistema = (sistema: CategoriaSistema, acao: string) =>
   `Categoria usada ${USO_DA_CATEGORIA[sistema] ?? "pelas viagens"}: não pode ${acao}`;
-const MSG_DESFACA_BAIXA = "Desfaça a baixa para editar";
 /** Erro de banco inesperado: loga só o código (sem parâmetros) e relança genérico. */
 function erroDeBanco(mensagem: string, e: unknown): Error {
   const x = e as { code?: string; cause?: { code?: string } } | null;
@@ -243,18 +245,8 @@ export async function desativarContaBancaria(id: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Lançamentos manuais (núcleo de criar e baixar em `@/server/financeiro/lancamentos`)
+// Lançamentos manuais (núcleo de criar, baixar, desfazer a baixa e cancelar em `@/server/financeiro/lancamentos`)
 // ---------------------------------------------------------------------------
-
-/**
- * O que muda no cartão da linha `l` editada (compra na data `dataCompra`): mesma compra (mesmo cartão, mesma data, já
- * vinculada) fica na fatura em que está (`fica`); senão sai da fatura atual (se houver) e, com cartão, entra na do
- * ciclo da data (cartão desativado só é aceito se já era o da compra).
- */
-function planoDoCartao(l: LancamentoLinha, cartaoId: string | null, dataCompra: string): { fica: Vinculo } | { sai: string | null; entra: EntradaFatura | null } {
-  if (cartaoId && cartaoId === l.cartaoId && l.faturaCartaoId && dataCompra === l.vencimento) return { fica: { cartaoId, faturaCartaoId: l.faturaCartaoId } };
-  return { sai: l.faturaCartaoId, entra: cartaoId ? { cartaoId, dataCompra, exigeAtivo: cartaoId !== l.cartaoId } : null };
-}
 
 export async function criarLancamento(dados: unknown) {
   return comPerfil(FINANCEIRO, async (u): Promise<(Ok & { ids: string[] }) | Falha> => {
@@ -300,6 +292,15 @@ async function travarAlcance(tx: Transacao, id: string, alcance: Alcance): Promi
   return { alvo, afetadas: todos.filter((l) => l.id === id || l.status === "em_aberto") };
 }
 
+/** Conta de entrada de estoque ou de reembolso (a alvo ou outra do alcance) não é editada nem cancelada pela lista. */
+function recusaNaLista(afetadas: LancamentoLinha[]): Falha | null {
+  for (const l of afetadas) {
+    const r = recusaDoVinculo(l);
+    if (r) return r;
+  }
+  return null;
+}
+
 export async function editarLancamento(id: string, dados: unknown, alcance: Alcance) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
     const p = lancamentoSchema.safeParse(dados);
@@ -309,8 +310,8 @@ export async function editarLancamento(id: string, dados: unknown, alcance: Alca
     const r = await transacao("Falha ao editar o lançamento", async (tx) => {
       const t = await travarAlcance(tx, id, alcance);
       if (!t) return LANCAMENTO_NAO_ENCONTRADO;
-      if (t.alvo.status === "baixado") return falha(MSG_DESFACA_BAIXA);
-      if (t.alvo.status === "cancelado") return falha("Lançamento cancelado não pode ser editado");
+      const recusa = recusaNaLista(t.afetadas) ?? recusaDaEdicao(t.alvo);
+      if (recusa) return recusa;
       await conferirReferencias(tx, v);
       const { valor, ...semValor } = camposComuns(v);
       // "repeticao" não se aplica à edição. As datas só mudam na linha escolhida: cada parcela mantém as suas. O
@@ -341,23 +342,6 @@ export async function editarLancamento(id: string, dados: unknown, alcance: Alca
   });
 }
 
-/** Desfaz a baixa do lançamento manual na transação `tx`. */
-async function desfazerBaixaLancamentoNa(tx: Transacao, usuarioId: string, id: string): Promise<Ok | Falha> {
-  const [l] = await tx.select().from(lancamentos).where(eq(lancamentos.id, id)).for("update");
-  if (!l) return LANCAMENTO_NAO_ENCONTRADO;
-  if (l.status !== "baixado") return falha("Este lançamento não foi baixado");
-  // Baixada pela fatura do cartão: volta só desfazendo a baixa da fatura (a fatura é lida depois da trava da compra,
-  // a mesma ordem da baixa da fatura).
-  if (l.faturaCartaoId) {
-    const [f] = await tx.select({ status: faturasCartao.status }).from(faturasCartao).where(eq(faturasCartao.id, l.faturaCartaoId));
-    if (f?.status === "baixado") return falha(MSG_DESFACA_FATURA_CARTAO);
-  }
-  const depois = { status: "em_aberto" as const, baixadoEm: null, valorPago: null, juros: null, desconto: null, baixaContaBancariaId: null };
-  await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, id));
-  await auditarAlteracao(tx, usuarioId, "lancamentos", l, depois);
-  return { ok: true, id };
-}
-
 export async function baixarLancamento(id: string, dados: unknown) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
     const p = baixaLancamentoSchema(hojeEmCuiaba()).safeParse(dados);
@@ -386,16 +370,9 @@ export async function cancelarLancamento(id: string, motivo: unknown, alcance: A
     const r = await transacao("Falha ao cancelar o lançamento", async (tx) => {
       const t = await travarAlcance(tx, id, alcance);
       if (!t) return LANCAMENTO_NAO_ENCONTRADO;
-      if (t.alvo.status === "baixado") return falha("Desfaça a baixa para cancelar");
-      if (t.alvo.status === "cancelado") return falha("Lançamento já cancelado");
-      // Compra no cartão sai da fatura (o cartão fica registrado na linha); as faturas travadas juntas, em ordem única.
-      await travarFaturas(tx, u.id, t.afetadas.map((l) => l.faturaCartaoId), []);
-      for (const l of t.afetadas) {
-        const depois = { status: "cancelado" as const, motivoCancelamento: m.data, ...(l.faturaCartaoId ? { faturaCartaoId: null } : {}) };
-        await tx.update(lancamentos).set(depois).where(eq(lancamentos.id, l.id));
-        await auditarAlteracao(tx, u.id, "lancamentos", l, depois);
-      }
-      return { ok: true, ids: t.afetadas.map((l) => l.id) };
+      const recusa = recusaNaLista(t.afetadas) ?? recusaDoCancelamento(t.alvo);
+      if (recusa) return recusa;
+      return cancelarLinhasNa(tx, u.id, t.afetadas, m.data);
     });
     if (r.ok) revalidar();
     return r;

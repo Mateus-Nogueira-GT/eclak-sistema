@@ -8,6 +8,7 @@ import { comprasEstrangeirasDasFaturas, listarCartoesAtivos } from "@/server/que
 import { listarClientes } from "@/server/queries/clientes";
 import { listarCategorias, listarContasBancarias, listarLancamentos, obterLancamento } from "@/server/queries/financeiro";
 import { listarFornecedores } from "@/server/queries/fornecedores";
+import { vinculoDoLancamento } from "@/server/financeiro/lancamentos";
 import { ListaLancamentos } from "./lista";
 import type { LancamentoForm } from "./formulario";
 
@@ -44,7 +45,8 @@ export default async function Pagina({ searchParams }: { searchParams: Promise<P
     lista.linhas.filter((l) => l.origem === "fatura_cartao" && l.statusBase === "em_aberto" && l.exigeIndividual).map((l) => l.id),
   );
   const lancamento: LancamentoForm | null =
-    edicao && edicao.status === "em_aberto"
+    // Conta de estoque ou de reembolso não abre o formulário (editar e cancelar são recusados pela action).
+    edicao && edicao.status === "em_aberto" && vinculoDoLancamento(edicao) === null
       ? {
           id: edicao.id,
           lado: edicao.lado,

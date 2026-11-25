@@ -107,6 +107,8 @@ export const lancamentos = pgTable(
     faturaCartaoId: uuid("fatura_cartao_id"),
     /** Entrada de estoque que originou a conta (fatia 5b): na lista única só se baixa, não se edita nem cancela. */
     estoqueMovimentoId: uuid("estoque_movimento_id").references((): AnyPgColumn => estoqueMovimentos.id, { onDelete: "restrict" }),
+    /** Caso de reembolso que originou a conta (fatia 5b): na lista única só se baixa. A FK entra com a tabela `reembolsos`. */
+    reembolsoId: uuid("reembolso_id"),
     criadoPor: uuid("criado_por")
       .notNull()
       .references(() => usuarios.id),
@@ -136,6 +138,7 @@ export const lancamentos = pgTable(
     foreignKey({ name: "lancamentos_fatura_cartao_fk", columns: [t.faturaCartaoId, t.cartaoId], foreignColumns: [faturasCartao.id, faturasCartao.cartaoId] }).onDelete("restrict"),
     index("lancamentos_fatura_cartao_idx").on(t.faturaCartaoId),
     index("lancamentos_estoque_movimento_idx").on(t.estoqueMovimentoId),
+    index("lancamentos_reembolso_idx").on(t.reembolsoId),
     index("lancamentos_em_aberto_vencimento_idx").on(t.vencimento).where(sql`${t.status} = 'em_aberto'`),
     index("lancamentos_grupo_idx").on(t.grupoId),
     index("lancamentos_categoria_idx").on(t.categoriaId),
@@ -204,7 +207,7 @@ export const faturasVersoes = pgTable(
 /**
  * Lista única (spec §6.1): lançamentos manuais, parcelas, pagamentos a fornecedor, comissões e faturas do cartão
  * corporativo, normalizados. Criada na migração custom 0021_view_lancamentos.sql; a versão vigente é a
- * 0033_view_fatura_cartao.sql. `forma` vem em slug (o rótulo é mapeado em TS).
+ * 0051_view_vinculos.sql. `forma` vem em slug (o rótulo é mapeado em TS).
  */
 export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
   origem: text("origem").$type<Origem>().notNull(),
@@ -242,4 +245,7 @@ export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
    * mostra a fatura). Nulo nas demais linhas e na própria linha da fatura (0033).
    */
   faturaCartaoId: uuid("fatura_cartao_id"),
+  /** Vínculo da conta manual (0051): entrada de estoque ou caso de reembolso; nulos nas outras origens. */
+  estoqueMovimentoId: uuid("estoque_movimento_id"),
+  reembolsoId: uuid("reembolso_id"),
 }).existing();

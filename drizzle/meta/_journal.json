@@ -351,6 +351,20 @@
       "when": 1795633159230,
       "tag": "0049_categorias_estoque_reembolso",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795633688303,
+      "tag": "0050_lancamentos_reembolso",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1795633697995,
+      "tag": "0051_view_vinculos",
+      "breakpoints": true
     }
   ]
 }

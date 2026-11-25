@@ -57,6 +57,9 @@ function periodos(hoje: string): { id: string; rotulo: string; de: string; ate: 
   ];
 }
 
+/** Etiqueta da conta com vínculo (só se baixa pela lista: edita e cancela pelo Estoque ou pelo caso de reembolso). */
+const ROTULO_VINCULO: Record<NonNullable<LinhaLancamento["vinculo"]>, string> = { estoque: "Estoque", reembolso: "Reembolso" };
+
 const TOM: Record<Situacao, "ouro" | "verde" | "cinza" | "agua"> = { vencida: "ouro", vence_hoje: "verde", a_vencer: "cinza", baixada: "agua", cancelada: "cinza" };
 
 const emReais = (c: bigint) => reaisParaCampo(c < 0n ? -c : c);
@@ -411,13 +414,18 @@ export function ListaLancamentos(p: Props) {
                         <Link href={`/financeiro/cartoes?fatura=${l.id}`} className="font-semibold text-verde hover:underline">Compras do cartão</Link>
                       ) : l.faturaCartaoId && l.statusBase !== "cancelado" ? (
                         <Link href={`/financeiro/cartoes?fatura=${l.faturaCartaoId}`} className="font-semibold text-verde hover:underline">Na fatura do cartão</Link>
-                      ) : (
+                      ) : l.vinculo ? null : (
                         <span className="text-cinza">Lançado à mão</span>
+                      )}
+                      {l.vinculo && (
+                        <span className="block">
+                          <Badge tom="verde">{ROTULO_VINCULO[l.vinculo]}</Badge>
+                        </span>
                       )}
                     </td>
                     <td className="whitespace-nowrap px-3 py-3">
                       <div className="flex items-center justify-end gap-2">
-                        {l.origem === "manual" && l.statusBase === "em_aberto" && (
+                        {l.origem === "manual" && l.statusBase === "em_aberto" && !l.vinculo && (
                           <button onClick={() => ir({ pagina: f.pagina, editar: l.id })} className="cursor-pointer px-1.5 text-[13px] font-semibold text-verde hover:underline">
                             Editar
                           </button>

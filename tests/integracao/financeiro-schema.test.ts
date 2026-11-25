@@ -392,10 +392,11 @@ describe("view lancamentos_financeiros", () => {
       valorCaixaBaixado: null,
       dataCaixa: x.parcelas[0].vencimento,
     });
-    // Mesmo número de colunas que a view do banco (24 + 3 de caixa + fatura do cartão, da 4b): nenhuma coluna esquecida.
+    // Mesmo número de colunas que a view do banco (24 + 3 de caixa + fatura do cartão, da 4b, + os dois vínculos, da
+    // 5b): nenhuma coluna esquecida.
     const [cru] = await sql`select * from lancamentos_financeiros limit 1`;
     expect(Object.keys(p)).toHaveLength(Object.keys(cru).length);
-    expect(Object.keys(cru)).toHaveLength(28);
+    expect(Object.keys(cru)).toHaveLength(30);
   });
 
     it("manual: os campos do lançamento", async () => {
