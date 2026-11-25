@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 vi.mock("@/server/supabase", async () => (await import("../helpers/db")).mockSupabase());
 import { hojeEmCuiaba } from "@/domain/clientes";
@@ -19,9 +19,9 @@ import {
 } from "@/server/actions/reembolsos";
 import { ErroAcesso } from "@/server/auth";
 import { db } from "@/server/db/client";
-import { auditoria, categoriasFinanceiras, clientes, lancamentos, reembolsos, vendas, viagens } from "@/server/db/schema";
+import { auditoria, categoriasFinanceiras, clientes, contasPagar, lancamentos, reembolsos, vendas, viagens } from "@/server/db/schema";
 import { relatorioDre } from "@/server/queries/paineis";
-import { listarReembolsos, reembolsosDaViagem, servicosDaViagem, type ReembolsoCaso } from "@/server/queries/reembolsos";
+import { listarReembolsos, reembolsosDaViagem, servicosDaViagem, viagensParaReembolso, type ReembolsoCaso } from "@/server/queries/reembolsos";
 import { ajustesDaViagem, margensVendidas } from "@/server/queries/vendas";
 import type { MargemReal } from "@/domain/venda";
 import { comSessao, criarUsuarioTeste, limparBanco } from "../helpers/db";
@@ -165,6 +165,28 @@ describe("reembolsos", () => {
     const servicos = await comSessao(x.fin.id, () => servicosDaViagem(x.viagemId));
     expect(servicos).toContainEqual({ contaId: x.hotel.id, servico: x.hotel.descricao, fornecedor: "Palazzo Hotels" });
     expect(servicos.map((s) => s.contaId)).not.toContain(outra.hotel.id);
+  });
+
+  it("servicosDaViagem lista exatamente as contas que o registro aceita: as ativas da viagem; a excluída sai e é recusada", async () => {
+    const ativas = async () =>
+      (await db.select({ id: contasPagar.id }).from(contasPagar).where(and(eq(contasPagar.viagemId, x.viagemId), isNull(contasPagar.excluidoEm)))).map((c) => c.id).sort();
+    const listadas = async () => (await comSessao(x.fin.id, () => servicosDaViagem(x.viagemId))).map((s) => s.contaId).sort();
+    expect(await listadas()).toEqual(await ativas());
+    await db.update(contasPagar).set({ excluidoEm: new Date() }).where(eq(contasPagar.id, x.hotel.id));
+    expect(await listadas()).toEqual(await ativas());
+    expect(await listadas()).not.toContain(x.hotel.id);
+    const r = await comSessao(x.fin.id, () => registrarReembolso(entrada()));
+    expect(r).toMatchObject({ ok: false, campos: { contaPagarId: expect.any(String) } });
+  });
+
+  it("viagensParaReembolso lista as vendidas e deixa de fora a excluída", async () => {
+    const outra = await vendida();
+    let ids = (await comSessao(x.fin.id, () => viagensParaReembolso())).map((v) => v.id);
+    expect(ids).toEqual(expect.arrayContaining([x.viagemId, outra.viagemId]));
+    await db.update(viagens).set({ excluidoEm: new Date() }).where(eq(viagens.id, outra.viagemId));
+    ids = (await comSessao(x.fin.id, () => viagensParaReembolso())).map((v) => v.id);
+    expect(ids).toContain(x.viagemId);
+    expect(ids).not.toContain(outra.viagemId);
   });
 
   it("fornecedorPagou baixa a conta a receber e a situação muda; valor diferente sem observação é recusado no campo", async () => {
@@ -377,6 +399,7 @@ describe("reembolsos", () => {
       await expect(comSessao(u, () => listarReembolsos("abertos"))).rejects.toBeInstanceOf(ErroAcesso);
       await expect(comSessao(u, () => reembolsosDaViagem(x.viagemId))).rejects.toBeInstanceOf(ErroAcesso);
       await expect(comSessao(u, () => servicosDaViagem(x.viagemId))).rejects.toBeInstanceOf(ErroAcesso);
+      await expect(comSessao(u, () => viagensParaReembolso())).rejects.toBeInstanceOf(ErroAcesso);
     }
     expect({ caso: await linhaDoCaso(id), contas: await contasDo(id) }).toEqual(antes);
     expect(await comSessao(x.d.id, () => reembolsosDaViagem(x.viagemId))).toHaveLength(1);

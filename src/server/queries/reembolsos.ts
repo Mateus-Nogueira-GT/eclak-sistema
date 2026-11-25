@@ -160,15 +160,31 @@ export async function reembolsosDaViagem(viagemId: string): Promise<ReembolsoCas
   return casos(eq(reembolsos.viagemId, viagemId), [desc(reembolsos.criadoEm), desc(reembolsos.id)]);
 }
 
-/** Os serviços da viagem para escolher no registro: as contas de fornecedor ativas, na ordem dos itens. */
+/**
+ * Os serviços da viagem para escolher no registro: as contas de fornecedor ativas (as mesmas que o registro aceita),
+ * na ordem dos itens. `leftJoin` nos itens para não depender deles: o rótulo é a descrição da conta.
+ */
 export async function servicosDaViagem(viagemId: string): Promise<{ contaId: string; servico: string; fornecedor: string | null }[]> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
   if (!ehUuid(viagemId)) return [];
   return db
     .select({ contaId: contasPagar.id, servico: contasPagar.descricao, fornecedor: fornecedores.nome })
     .from(contasPagar)
-    .innerJoin(itensViagem, eq(itensViagem.id, contasPagar.itemId))
+    .leftJoin(itensViagem, eq(itensViagem.id, contasPagar.itemId))
     .leftJoin(fornecedores, eq(fornecedores.id, contasPagar.fornecedorId))
     .where(and(eq(contasPagar.viagemId, viagemId), isNull(contasPagar.excluidoEm)))
     .orderBy(asc(itensViagem.ordem), asc(contasPagar.id));
+}
+
+/** As viagens vendidas (conciliadas ou não) para escolher no registro, as de início mais recente primeiro. */
+export async function viagensParaReembolso(): Promise<{ id: string; rotulo: string }[]> {
+  await exigirPerfil(...PERFIS_FINANCEIRO);
+  const rs = await db
+    .select({ id: viagens.id, seq: viagens.seq, destino: viagens.destino, codigoCliente: clientes.codigo, grupo: clientes.grupo })
+    .from(viagens)
+    .innerJoin(clientes, eq(clientes.id, viagens.clienteId))
+    .where(and(eq(viagens.status, "vendida"), isNull(viagens.excluidoEm)))
+    .orderBy(desc(viagens.inicio), asc(viagens.id))
+    .limit(500);
+  return rs.map((r) => ({ id: r.id, rotulo: `${formatarCodigoViagem(r.codigoCliente, r.seq)} · ${r.grupo} · ${r.destino}` }));
 }

@@ -11,8 +11,10 @@ import { listarContasBancarias } from "@/server/queries/financeiro";
 import { listarFornecedores } from "@/server/queries/fornecedores";
 import { regrasVigentes } from "@/server/queries/regras";
 import { cabecalhoDaViagem } from "@/server/queries/operacao";
+import { reembolsosDaViagem } from "@/server/queries/reembolsos";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { obterPrecificacao } from "@/server/queries/viagens";
+import { ReembolsosDaViagem } from "../../financeiro/reembolsos/reembolsos";
 import { CaixaExperiencia } from "./caixa-experiencia";
 import { Painel, type Extras } from "./painel";
 import { Trilha } from "./trilha";
@@ -64,6 +66,10 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
       const conciliada = vendida.conciliadaEm !== null;
       const caixa = await caixaDaViagem(id);
       const produtos = conciliada ? [] : await produtosParaCaixa(caixa?.filial ?? vendida.filial);
+      // Reembolsos: só Diretor e financeiros. Caso registrado depois da conciliação muda a margem real da conciliada.
+      const reembolsos = estrategico ? await reembolsosDaViagem(id) : [];
+      const margemAlteradaPorReembolso =
+        conciliada && reembolsos.some((r) => !r.canceladoEm && vendida.conciliadaEm !== null && r.criadoEm > vendida.conciliadaEm);
       return (
         <div className="mx-auto max-w-[1240px]">
           <BlocoEmbarque avisos={avisos} />
@@ -78,6 +84,8 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
             contasBancarias={contas}
             cartoes={cartoes}
             caixa={<CaixaExperiencia viagemId={id} filial={vendida.filial} caixa={caixa} produtos={produtos} somenteLeitura={conciliada} />}
+            reembolsos={estrategico ? <ReembolsosDaViagem viagemId={id} casos={reembolsos} /> : null}
+            margemAlteradaPorReembolso={margemAlteradaPorReembolso}
           />
         </div>
       );
