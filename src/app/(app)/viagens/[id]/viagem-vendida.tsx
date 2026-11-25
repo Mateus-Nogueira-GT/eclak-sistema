@@ -583,6 +583,7 @@ export function ViagemVendidaView({
   hoje,
   contasBancarias,
   cartoes = [],
+  caixa,
 }: {
   v: ViagemVendida;
   ficha: FichaPrecificacao | null;
@@ -597,6 +598,8 @@ export function ViagemVendidaView({
   contasBancarias: ContaBancariaOpcao[];
   /** Cartões corporativos ativos para a forma "cartão corporativo" (vazio para quem não age). */
   cartoes?: CartaoOpcao[];
+  /** Bloco da caixa de experiência (montado pela página), acima das abas. */
+  caixa?: ReactNode;
 }) {
   const [aba, setAba] = useState<Aba>("entradas");
   const [painel, setPainel] = useState<Painel | null>(null);
@@ -687,6 +690,8 @@ export function ViagemVendidaView({
           {ehDiretor && <span className="ml-3 inline-block align-middle"><AcaoDireta rotulo="Desfazer conciliação" mini executar={() => desfazerConciliacao(v.id)} /></span>}
         </p>
       )}
+
+      {caixa}
 
       <div className="mb-4">
         <Tabs value={aba} onChange={(a) => { setAba(a); setPainel(null); }} options={abas} />

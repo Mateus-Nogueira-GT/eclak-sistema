@@ -131,6 +131,7 @@ export async function confirmarCaixa(viagemId: string): Promise<Ok | Falha> {
       for (const i of itens) {
         const produto = produtos.get(i.produtoId)!;
         if (!produto.ativo) throw new Desfazer(falha(`Produto desativado: ${produto.nome}`));
+        if (produto.uso !== "caixa_experiencia") throw new Desfazer(falha(`Produto não é mais de caixa de experiência: ${produto.nome}`));
         const s = await travarSaldo(tx, u.id, i.produtoId, caixa.filial);
         const novo = aposSaida(saldoDe(s), i.quantidade);
         if (!novo) throw new Desfazer(falha(`Estoque insuficiente de ${produto.nome} em ${caixa.filial}: há ${s.quantidade}`));

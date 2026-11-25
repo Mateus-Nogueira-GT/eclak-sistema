@@ -195,6 +195,15 @@ describe("caixa de experiência", () => {
     expect(await foto()).toEqual(antes2);
   });
 
+  it("produto que deixou de ser de caixa de experiência depois do rascunho: confirmar é recusado e nada gravado", async () => {
+    const { p1, p2 } = await doisProdutos(x.fin.id);
+    ok(await comSessao(x.u.id, () => salvarCaixa(x.viagemId, [{ produtoId: p1, quantidade: 1 }, { produtoId: p2, quantidade: 1 }])));
+    ok(await comSessao(x.fin.id, () => salvarProduto({ nome: "Necessaire", uso: "papelaria", minimoMt: 0, minimoRs: 0 }, p2)));
+    const antes = await foto();
+    expect(await comSessao(x.u.id, () => confirmarCaixa(x.viagemId))).toEqual({ ok: false, erro: "Produto não é mais de caixa de experiência: Necessaire" });
+    expect(await foto()).toEqual(antes);
+  });
+
   it("caixa vazia não confirma; sem caixa, confirmar e cancelar são recusados", async () => {
     expect((await comSessao(x.u.id, () => confirmarCaixa(x.viagemId))).ok).toBe(false);
     expect((await comSessao(x.u.id, () => cancelarCaixa(x.viagemId, "Engano"))).ok).toBe(false);
@@ -335,5 +344,9 @@ describe("caixa de experiência", () => {
 
     ok(await comSessao(x.u.id, () => salvarCaixa(x.viagemId, [])));
     expect((await comSessao(x.d.id, () => caixasProximas()))[0].situacao).toBe("rascunho");
+
+    // Conciliada sai da lista.
+    await db.update(viagens).set({ conciliadaEm: new Date() }).where(eq(viagens.id, x.viagemId));
+    expect(await comSessao(x.fin.id, () => caixasProximas())).toEqual([]);
   });
 });

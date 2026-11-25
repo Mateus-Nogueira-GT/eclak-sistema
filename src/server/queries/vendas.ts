@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { rotuloForma, type ResultadoVersao, type Snapshot } from "@/domain/aprovacoes";
 import type { Moeda } from "@/domain/cambio";
 import { hojeEmCuiaba } from "@/domain/clientes";
+import { centroDaFilial, type Centro } from "@/domain/financeiro";
 import { veCamadaEstrategica } from "@/domain/perfis";
 import type { FormaPagamento } from "@/domain/precificacao";
 import {
@@ -326,6 +327,8 @@ export type ViagemVendida = {
   rotuloStatus: string;
   vendidaEm: Date | null;
   conciliadaEm: Date | null;
+  /** Centro da viagem (MT ou RS): de onde sai a caixa de experiência. */
+  filial: Centro;
   venda: {
     id: string;
     aceiteEm: string;
@@ -788,6 +791,7 @@ export async function obterViagemVendida(viagemId: string): Promise<ViagemVendid
     rotuloStatus: ROTULO_STATUS_VIAGEM[status],
     vendidaEm: v.vendidaEm,
     conciliadaEm: v.conciliadaEm,
+    filial: centroDaFilial(v.filial),
     venda: {
       id: venda.id,
       aceiteEm: venda.aceiteEm,

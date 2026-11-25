@@ -4,6 +4,7 @@ import { alertasDoCliente, hojeEmCuiaba } from "@/domain/clientes";
 import { margemDaAprovacao, FORMA_REFERENCIA, FORMAS_SIMULADOR, resultadoDoPreco } from "@/domain/precificacao";
 import { podeAcessar, veCamadaEstrategica } from "@/domain/perfis";
 import { exigirPerfil } from "@/server/auth";
+import { caixaDaViagem, produtosParaCaixa } from "@/server/queries/caixa-experiencia";
 import { obterCliente } from "@/server/queries/clientes";
 import { listarCartoesAtivos } from "@/server/queries/cartoes";
 import { listarContasBancarias } from "@/server/queries/financeiro";
@@ -12,6 +13,7 @@ import { regrasVigentes } from "@/server/queries/regras";
 import { cabecalhoDaViagem } from "@/server/queries/operacao";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { obterPrecificacao } from "@/server/queries/viagens";
+import { CaixaExperiencia } from "./caixa-experiencia";
 import { Painel, type Extras } from "./painel";
 import { Trilha } from "./trilha";
 import { ViagemVendidaView } from "./viagem-vendida";
@@ -58,6 +60,10 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
       // Só quem age (Diretor e financeiros) recebe as contas bancárias das baixas.
       const contas = estrategico ? (await listarContasBancarias({ ativas: true })).map((c) => ({ id: c.id, nome: c.nome })) : [];
       const cartoes = estrategico ? await listarCartoesAtivos() : [];
+      // Caixa de experiência: os cinco perfis; conciliada fica só leitura (sem a lista de produtos).
+      const conciliada = vendida.conciliadaEm !== null;
+      const caixa = await caixaDaViagem(id);
+      const produtos = conciliada ? [] : await produtosParaCaixa(caixa?.filial ?? vendida.filial);
       return (
         <div className="mx-auto max-w-[1240px]">
           <BlocoEmbarque avisos={avisos} />
@@ -71,6 +77,7 @@ export default async function Pagina({ params }: { params: Promise<{ id: string 
             hoje={hojeEmCuiaba()}
             contasBancarias={contas}
             cartoes={cartoes}
+            caixa={<CaixaExperiencia viagemId={id} filial={vendida.filial} caixa={caixa} produtos={produtos} somenteLeitura={conciliada} />}
           />
         </div>
       );
