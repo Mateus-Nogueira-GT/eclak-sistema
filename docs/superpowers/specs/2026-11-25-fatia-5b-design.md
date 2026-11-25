@@ -235,7 +235,7 @@ Nomes internos, a divisão em arquivos seguindo o padrão das fatias 4 e 5 (`src
 - `ponteDaMargem` também recebe os ajustes e ganha as duas linhas; a soma das linhas continua fechando com `real.final − planejada.final`.
 
 **Estoque**
-- "Desfazer entrada" só quando ela é o **último movimento** daquele produto naquela filial (assim o inverso do custo médio é exato). Depois de qualquer outro movimento: "Faça um ajuste de estoque."
+- Todo movimento grava `custo_medio_antes` (o custo médio da filial antes dele). "Desfazer entrada" só quando ela é o **último movimento** daquele produto naquela filial, e volta o saldo ao `custo_medio_antes` gravado (a fórmula inversa perderia centavos no arredondamento). Depois de qualquer outro movimento: "Faça um ajuste de estoque."
 - Conciliar a viagem é recusado com a caixa em rascunho ("Confirme ou cancele a caixa de experiência antes"). Reembolso aberto não impede a conciliação.
 - **Valores da caixa:** consultor e operacional veem itens, quantidades e o disponível na filial, **sem valores** (custo é camada estratégica no HANDOFF §4). Valor por item e total aparecem só para Diretor e financeiros.
 
