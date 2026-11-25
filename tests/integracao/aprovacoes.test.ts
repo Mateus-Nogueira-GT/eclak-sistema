@@ -141,11 +141,11 @@ describe("envio para aprovação", () => {
     expect(await comSessao(u.id, () => salvarItem(viagemId, { tipo: "Passeio", servico: "Novo" }))).toEqual({ ok: false, erro: AGUARDANDO });
   });
 
-  it("preço informado em reais; forma validada pelos Parâmetros", async () => {
-    const { u, viagemId } = await cenario();
+  it("preço informado em reais (só a camada estratégica); forma validada pelos Parâmetros", async () => {
+    const { u, d, viagemId } = await cenario();
     await cotado(u.id, viagemId);
-    const e = (x: Partial<Parameters<typeof enviarParaAprovacao>[1]>) =>
-      comSessao(u.id, () => enviarParaAprovacao(viagemId, { forma: CREDITO6, alteracao: "", ...x } as Parameters<typeof enviarParaAprovacao>[1]));
+    const e = (x: Partial<Parameters<typeof enviarParaAprovacao>[1]>, uid = d.id) =>
+      comSessao(uid, () => enviarParaAprovacao(viagemId, { forma: CREDITO6, alteracao: "", ...x } as Parameters<typeof enviarParaAprovacao>[1]));
     expect(await e({ forma: { tipo: "credito", parcelas: 11 } })).toMatchObject({ ok: false, erro: "Parcelas inválidas" });
     expect(await e({ forma: { tipo: "pix", parcelas: 3 } })).toMatchObject({ ok: false, erro: "Parcelas inválidas" });
     expect(await e({ preco: "abc" })).toMatchObject({ ok: false, erro: "Valor inválido" });
@@ -154,6 +154,18 @@ describe("envio para aprovação", () => {
     expect(r.ok).toBe(true);
     const [v] = await versoesDa(viagemId);
     expect(v).toMatchObject({ preco: 5000000n, forma: { tipo: "boleto", parcelas: 4 }, alteracao: null });
+  });
+
+  it("consultor: o preço informado é ignorado e vale o calculado pela fórmula", async () => {
+    const { u, viagemId } = await cenario();
+    await cotado(u.id, viagemId);
+    const r = await comSessao(u.id, () =>
+      enviarParaAprovacao(viagemId, { forma: { tipo: "boleto", parcelas: 4 }, preco: "50.000,00", alteracao: "" } as Parameters<typeof enviarParaAprovacao>[1]),
+    );
+    expect(r.ok).toBe(true);
+    const [v] = await versoesDa(viagemId);
+    expect(v.preco).not.toBe(5000000n);
+    expect(v.preco).toBeGreaterThan(0n);
   });
 
   it("Review Focus 4: dois envios simultâneos geram uma só versão", async () => {
