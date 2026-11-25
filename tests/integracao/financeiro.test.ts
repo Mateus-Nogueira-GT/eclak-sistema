@@ -666,14 +666,23 @@ describe("repasse do cartão direto no fornecedor", () => {
     expect((await parcela(x.parcelas[0].id)).status).toBe("a_receber");
   });
 
-  it("residual B: o repasse recebido fica gravado; atualizar o previsto do fornecedor depois não muda o Recebidos", async () => {
+  it("residual B: o repasse recebido fica gravado; aumentar o previsto do fornecedor depois é recusado e não muda o Recebidos", async () => {
     const x = await cartao();
     const esperado = (await linhaDaView(x.parcelas[0].id)).valorPrevisto;
     expect(await repasse(x, reais(esperado - 10000n))).toEqual({ ok: true });
     expect((await parcela(x.parcelas[0].id)).valorRepassado).toBe(esperado - 10000n);
     const linhasHotel = await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.hotel.id));
     const previstoHotel = linhasHotel.reduce((a, l) => a + l.valorBrlPrevisto, 0n);
-    expect((await comSessao(x.fin.id, () => atualizarPrevisto(x.hotel.id, reais(previstoHotel + 50000n), "Fornecedor reajustou"))).ok).toBe(true);
+    const contaAntes = (await db.select().from(contasPagar).where(eq(contasPagar.id, x.hotel.id)))[0];
+    // Sem a recusa, o aumento viraria uma linha em aberto que não tem como ser paga (nem banco, nem cartão corporativo).
+    expect(await comSessao(x.fin.id, () => atualizarPrevisto(x.hotel.id, reais(previstoHotel + 50000n), "Fornecedor reajustou"))).toMatchObject({
+      ok: false,
+      erro: "Conta quitada pelo repasse do cartão: desfaça o repasse antes de aumentar o previsto",
+    });
+    // A recusa desfaz tudo: o previsto da conta e as linhas ficam como estavam.
+    expect((await db.select().from(contasPagar).where(eq(contasPagar.id, x.hotel.id)))[0]).toEqual(contaAntes);
+    const porId = (ls: (typeof linhasHotel)[number][]) => [...ls].sort((a, b) => a.id.localeCompare(b.id));
+    expect(porId(await db.select().from(pagamentosFornecedor).where(eq(pagamentosFornecedor.contaId, x.hotel.id)))).toEqual(porId(linhasHotel));
     expect(await linhaDaView(x.parcelas[0].id)).toMatchObject({ statusBase: "baixado", valorPrevisto: esperado, valorBaixado: esperado - 10000n });
     const lista = await comSessao(x.fin.id, () => listarLancamentos({ lado: "todos", de: "2000-01-01", ate: "2099-12-31", base: "vencimento", pagina: 1 }));
     expect(lista.totais.receber.baixados).toBe(esperado - 10000n);

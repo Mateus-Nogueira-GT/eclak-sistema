@@ -104,6 +104,8 @@ export function mockSupabase() {
           if (!sessaoDeTeste) return { data: { user: null }, error: { message: "sem sessão" } };
           return adminClient().auth.admin.updateUserById(sessaoDeTeste, { password });
         },
+        // `definirSenha` revoga as outras sessões depois da troca; sem cookies não há o que revogar aqui.
+        signOut: async () => ({ error: null }),
       },
     }),
     supabaseAdmin: () => adminClient(),
