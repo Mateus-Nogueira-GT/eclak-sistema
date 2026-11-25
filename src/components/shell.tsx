@@ -47,6 +47,7 @@ const areas: { titulo: string; itens: Item[] }[] = [
       { href: "/financeiro/contas-bancarias", label: "Contas bancárias" },
       { href: "/financeiro/conciliacao", label: "Conciliação" },
       { href: "/financeiro/cartoes", label: "Cartões corporativos" },
+      { href: "/financeiro/estoque", label: "Estoque" },
     ],
   },
   {

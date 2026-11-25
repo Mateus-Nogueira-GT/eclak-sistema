@@ -27,17 +27,14 @@ export type ProdutoLinha = {
 export type FiltroEstoque = { uso?: UsoEstoque; filial?: Centro; soAbaixo?: boolean };
 
 /**
- * Produtos (ativos primeiro, por nome) com o saldo das duas filiais. O filtro de filial restringe o valor, o "abaixo
- * do mínimo" e o "só abaixo" a ela. `valorTotal` e `abaixoDoMinimo` (produtos ativos com alguma filial considerada
- * abaixo) valem para o uso e a filial filtrados, antes do "só abaixo". Produto desativado nunca conta como abaixo.
+ * Produtos (ativos primeiro, por nome) com o saldo das duas filiais. Os filtros valem só para as linhas: uso; filial
+ * (restringe o valor da linha, o "abaixo do mínimo" e o "só abaixo" a ela). Os cartões `valorTotal` e `abaixoDoMinimo`
+ * (produtos ativos com alguma filial abaixo) somam sempre as duas filiais e todos os usos, com qualquer filtro.
+ * Produto desativado nunca conta como abaixo.
  */
 export async function listarEstoque(f: FiltroEstoque): Promise<{ produtos: ProdutoLinha[]; valorTotal: bigint; abaixoDoMinimo: number }> {
   await exigirPerfil(...PERFIS_FINANCEIRO);
-  const produtos = await db
-    .select()
-    .from(produtosEstoque)
-    .where(f.uso ? eq(produtosEstoque.uso, f.uso) : undefined)
-    .orderBy(desc(produtosEstoque.ativo), asc(produtosEstoque.nome));
+  const produtos = await db.select().from(produtosEstoque).orderBy(desc(produtosEstoque.ativo), asc(produtosEstoque.nome));
   const saldos = await db.select().from(estoqueSaldos);
   const porPar = new Map(saldos.map((s) => [`${s.produtoId}:${s.filial}`, s]));
   const filiais: Centro[] = f.filial ? [f.filial] : ["MT", "RS"];
@@ -60,14 +57,16 @@ export async function listarEstoque(f: FiltroEstoque): Promise<{ produtos: Produ
       custoMedioRs: rs?.custoMedio ?? 0n,
       valor: 0n,
     };
-    linha.valor = filiais.reduce((soma, c) => {
+    const valorDe = (c: Centro) => {
       const s = c === "MT" ? mt : rs;
-      return soma + (s ? BigInt(s.quantidade) * s.custoMedio : 0n);
-    }, 0n);
-    const estaAbaixo = filiais.some((c) => (c === "MT" ? linha.mt : linha.rs).abaixo);
-    valorTotal += linha.valor;
-    if (estaAbaixo) abaixo += 1;
-    if (!f.soAbaixo || estaAbaixo) linhas.push(linha);
+      return s ? BigInt(s.quantidade) * s.custoMedio : 0n;
+    };
+    const abaixoEm = (c: Centro) => (c === "MT" ? linha.mt : linha.rs).abaixo;
+    valorTotal += valorDe("MT") + valorDe("RS");
+    if (abaixoEm("MT") || abaixoEm("RS")) abaixo += 1;
+    if (f.uso && p.uso !== f.uso) continue;
+    linha.valor = filiais.reduce((soma, c) => soma + valorDe(c), 0n);
+    if (!f.soAbaixo || filiais.some(abaixoEm)) linhas.push(linha);
   }
   return { produtos: linhas, valorTotal, abaixoDoMinimo: abaixo };
 }

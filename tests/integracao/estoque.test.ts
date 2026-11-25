@@ -14,7 +14,7 @@ import {
 } from "@/server/actions/estoque";
 import { baixarLinha } from "@/server/actions/financeiro";
 import { ErroAcesso } from "@/server/auth";
-import { db } from "@/server/db/client";
+import { db, sql } from "@/server/db/client";
 import {
   auditoria,
   categoriasFinanceiras,
@@ -302,6 +302,36 @@ describe("estoque: actions e queries", () => {
       expect(await desfazer(m)).toEqual({ ok: false, erro: MSG_DESFACA_FATURA });
       expect(await foto(p)).toEqual(antes);
     });
+
+    it("lê a conta com trava: fatura paga enquanto o desfazer espera é vista com o cartão e recusada pedindo a fatura", async () => {
+      const k = await novoCartao();
+      const p = await novoProduto();
+      const m = await entrada(p, { forma: "Cartão de crédito", cartaoId: k, vencimento: "2026-09-10", quantidade: 2 });
+      const conta = await lancamento((await movimento(m)).lancamentoId!);
+      // Outra transação trava a conta e paga a fatura (como a baixa da fatura); o desfazer começa no meio.
+      let soltar!: () => void;
+      const segurando = new Promise<void>((r) => (soltar = r));
+      let travou!: () => void;
+      const travada = new Promise<void>((r) => (travou = r));
+      const pagamento = sql.begin(async (t) => {
+        await t`select id from lancamentos where id = ${conta.id} for update`;
+        travou();
+        await segurando;
+        await t`update lancamentos set status = 'baixado', baixado_em = ${HOJE}, valor_pago = ${conta.valor.toString()}, juros = 0, desconto = 0, baixa_conta_bancaria_id = ${c.conta} where id = ${conta.id}`;
+        await t`update faturas_cartao set status = 'baixado', pago_em = ${HOJE}, valor_pago = ${conta.valor.toString()}, conta_bancaria_id = ${c.conta} where id = ${conta.faturaCartaoId!}`;
+      });
+      await travada;
+      const desfeito = desfazer(m);
+      for (let i = 0; i < 100; i++) {
+        const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from pg_stat_activity where wait_event_type = 'Lock' and datname = current_database()`;
+        if (n >= 1) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      soltar();
+      await pagamento;
+      expect(await desfeito).toEqual({ ok: false, erro: MSG_DESFACA_FATURA });
+      expect(await saldo(p)).toMatchObject({ quantidade: 2 });
+    });
   });
 
   describe("saída e ajuste", () => {
@@ -337,6 +367,21 @@ describe("estoque: actions e queries", () => {
       expect(await movimento(a3)).toMatchObject({ quantidade: 3, custoUnitario: 0n });
       expect(await saldo(p, "RS")).toMatchObject({ quantidade: 3, custoMedio: 0n });
       expect(await db.select().from(lancamentos)).toHaveLength(1);
+    });
+
+    it("ajuste positivo em filial com saldo 0 entra ao custo médio da outra filial (passar itens de uma para a outra)", async () => {
+      const p = await novoProduto();
+      await entrada(p, { quantidade: 5, valorUnitario: "40,00" });
+      const a = id(await ajuste(p, 2, "RS"));
+      expect(await movimento(a)).toMatchObject({ filial: "RS", quantidade: 2, custoUnitario: 4000n, custoMedioAntes: 0n });
+      expect(await saldo(p, "RS")).toMatchObject({ quantidade: 2, custoMedio: 4000n });
+      // A outra metade da passagem: MT baixa ao seu custo médio, que não muda.
+      await ajuste(p, 3, "MT");
+      expect(await saldo(p, "MT")).toMatchObject({ quantidade: 3, custoMedio: 4000n });
+      // Com saldo na filial, o ajuste positivo fica no custo médio dela, não no da outra.
+      await entrada(p, { filial: "RS", quantidade: 2, valorUnitario: "50,00" });
+      await ajuste(p, 5, "RS");
+      expect(await saldo(p, "RS")).toMatchObject({ quantidade: 5, custoMedio: 4500n });
     });
 
     it("duas saídas simultâneas do último item: uma passa, a outra é recusada; saldo nunca negativo", async () => {
@@ -386,8 +431,11 @@ describe("estoque: actions e queries", () => {
 
       expect((await comSessao(c.fin, () => listarEstoque({ soAbaixo: true }))).produtos.map((x) => x.id)).toEqual([caderno]);
       expect((await comSessao(c.fin, () => listarEstoque({ uso: "papelaria" }))).produtos.map((x) => x.id)).toEqual([caneta]);
+      // Os cartões somam sempre as duas filiais e todos os usos, com qualquer filtro.
       const rs = await comSessao(c.fin, () => listarEstoque({ filial: "RS" }));
-      expect(rs).toMatchObject({ valorTotal: 4400n, abaixoDoMinimo: 0 });
+      expect(rs).toMatchObject({ valorTotal: 8400n, abaixoDoMinimo: 1 });
+      expect(await comSessao(c.fin, () => listarEstoque({ uso: "papelaria" }))).toMatchObject({ valorTotal: 8400n, abaixoDoMinimo: 1 });
+      expect(await comSessao(c.fin, () => listarEstoque({ uso: "papelaria", filial: "MT", soAbaixo: true }))).toMatchObject({ produtos: [], valorTotal: 8400n, abaixoDoMinimo: 1 });
       expect(rs.produtos.find((x) => x.id === caderno)?.valor).toBe(2400n);
       expect((await comSessao(c.fin, () => listarEstoque({ filial: "RS", soAbaixo: true }))).produtos).toHaveLength(0);
     });

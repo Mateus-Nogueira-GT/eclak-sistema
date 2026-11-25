@@ -258,8 +258,13 @@ export async function desfazerEntradaDeEstoque(movimentoId: string) {
       if (!novo) throw new Desfazer(falha(MSG_FACA_AJUSTE));
       // A conta primeiro: a recusa do núcleo volta antes de qualquer escrita.
       if (mov.lancamentoId) {
-        // Compra no cartão já paga pela fatura: volta só desfazendo a baixa da fatura.
-        const [conta] = await tx.select({ status: lancamentos.status, faturaCartaoId: lancamentos.faturaCartaoId }).from(lancamentos).where(eq(lancamentos.id, mov.lancamentoId));
+        // Compra no cartão já paga pela fatura: volta só desfazendo a baixa da fatura. Lida com trava: uma baixa em
+        // curso termina antes da conferência.
+        const [conta] = await tx
+          .select({ status: lancamentos.status, faturaCartaoId: lancamentos.faturaCartaoId })
+          .from(lancamentos)
+          .where(eq(lancamentos.id, mov.lancamentoId))
+          .for("update");
         if (conta?.status === "baixado" && conta.faturaCartaoId) throw new Desfazer(falha(MSG_DESFACA_FATURA_CARTAO));
         const r = await cancelarLancamentoNa(tx, u.id, mov.lancamentoId, "Entrada de estoque desfeita");
         if (!r.ok) throw new Desfazer(r);
@@ -289,7 +294,12 @@ export async function registrarSaida(dados: unknown) {
   });
 }
 
-/** Contagem: a quantidade nova da filial; o movimento guarda a diferença ao custo médio; não gera lançamento. */
+/**
+ * Contagem: a quantidade nova da filial; o movimento guarda a diferença ao custo médio; não gera lançamento. Ajuste
+ * positivo numa filial com saldo 0 entra ao custo médio da outra filial (se > 0; senão a 0): passar itens de uma
+ * filial para a outra por dois ajustes não zera o custo. A outra filial só é lida (sem trava: dois ajustes cruzados
+ * não se esperam).
+ */
 export async function ajustarEstoque(dados: unknown) {
   return comPerfil(FINANCEIRO, async (u): Promise<Ok | Falha> => {
     const p = ajusteSchema.safeParse(dados);
@@ -300,8 +310,17 @@ export async function ajustarEstoque(dados: unknown) {
       const s = await travarSaldo(tx, u.id, v.produtoId, v.filial);
       const diferenca = v.quantidadeNova - s.quantidade;
       if (diferenca === 0) throw new Desfazer(falha("A quantidade da filial já é essa", "quantidadeNova"));
-      const mov = await gravarMovimento(tx, u.id, s, { tipo: "ajuste", quantidade: diferenca, custoUnitario: s.custoMedio, motivo: v.motivo });
-      await gravarSaldo(tx, u.id, s, { quantidade: v.quantidadeNova, custoMedio: v.quantidadeNova === 0 ? 0n : s.custoMedio });
+      let custo = s.custoMedio;
+      if (s.quantidade === 0 && diferenca > 0) {
+        const outra: Centro = v.filial === "MT" ? "RS" : "MT";
+        const [o] = await tx
+          .select({ custoMedio: estoqueSaldos.custoMedio })
+          .from(estoqueSaldos)
+          .where(and(eq(estoqueSaldos.produtoId, v.produtoId), eq(estoqueSaldos.filial, outra)));
+        custo = o && o.custoMedio > 0n ? o.custoMedio : 0n;
+      }
+      const mov = await gravarMovimento(tx, u.id, s, { tipo: "ajuste", quantidade: diferenca, custoUnitario: custo, motivo: v.motivo });
+      await gravarSaldo(tx, u.id, s, { quantidade: v.quantidadeNova, custoMedio: v.quantidadeNova === 0 ? 0n : custo });
       return { ok: true, id: mov.id };
     });
   });
