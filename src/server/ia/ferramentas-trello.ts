@@ -60,6 +60,98 @@ export const FERRAMENTAS_LEITURA_TRELLO: FerramentaIA[] = [
   },
 ];
 
+export const FERRAMENTAS_ACAO_TRELLO: FerramentaIA[] = [
+  {
+    name: "trello_comentar",
+    description:
+      "Propõe publicar um comentário num cartão de viagem do sistema no Trello (a pessoa confirma na tela antes de publicar). Nunca inclua custo, margem ou comissão.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cartao: { type: "string", description: "Código da viagem (ECL-0001-01) ou id do cartão de viagem." },
+        texto: { type: "string", description: "Texto do comentário (1 a 2.000 caracteres)." },
+      },
+      required: ["cartao", "texto"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "trello_marcar_item",
+    description: "Propõe marcar ou desmarcar um item de checklist de um cartão de viagem no Trello.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cartao: { type: "string", description: "Código da viagem ou id do cartão de viagem." },
+        item: { type: "string", description: "Id do item do checklist." },
+        feito: { type: "boolean", description: "true para marcar concluído, false para desmarcar." },
+      },
+      required: ["cartao", "item", "feito"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "trello_adicionar_item",
+    description: "Propõe adicionar um novo item a um checklist de um cartão de viagem no Trello.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cartao: { type: "string", description: "Código da viagem ou id do cartão de viagem." },
+        checklist: { type: "string", description: "Id do checklist no cartão." },
+        nome: { type: "string", description: "Nome do novo item (1 a 200 caracteres)." },
+      },
+      required: ["cartao", "checklist", "nome"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "trello_mover_cartao",
+    description: "Propõe mover um cartão de viagem para outra lista aberta do mesmo quadro no Trello.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cartao: { type: "string", description: "Código da viagem ou id do cartão de viagem." },
+        lista: { type: "string", description: "Id da lista de destino no quadro." },
+      },
+      required: ["cartao", "lista"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "trello_definir_prazo",
+    description: 'Propõe definir ou remover o prazo de um cartão de viagem no Trello. Passe "AAAA-MM-DD" ou "" para remover.',
+    input_schema: {
+      type: "object",
+      properties: {
+        cartao: { type: "string", description: "Código da viagem ou id do cartão de viagem." },
+        prazo: { type: "string", description: 'Data no formato AAAA-MM-DD ou "" para remover o prazo.' },
+      },
+      required: ["cartao", "prazo"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "trello_criar_cartao",
+    description:
+      'Propõe criar um cartão avulso em qualquer lista aberta do quadro configurado no Trello. Passe lista "" para usar a lista padrão.',
+    input_schema: {
+      type: "object",
+      properties: {
+        lista: { type: "string", description: 'Id da lista ou "" para a lista configurada.' },
+        nome: { type: "string", description: "Título do cartão (1 a 200 caracteres)." },
+        descricao: { type: "string", description: 'Descrição do cartão (até 2.000 caracteres) ou "".' },
+      },
+      required: ["lista", "nome", "descricao"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+];
+
 const ENTRADAS = {
   trello_listas: z.object({}).strict(),
   trello_buscar_cartoes: z

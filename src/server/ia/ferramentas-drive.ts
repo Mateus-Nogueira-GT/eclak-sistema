@@ -72,6 +72,69 @@ export const FERRAMENTAS_LEITURA_DRIVE: FerramentaIA[] = [
   },
 ];
 
+export const FERRAMENTAS_ACAO_DRIVE: FerramentaIA[] = [
+  {
+    name: "drive_enviar_arquivo",
+    description:
+      'Propõe guardar um arquivo anexado no chat dentro da pasta de uma viagem no Google Drive. Passe nome "" para manter o nome original.',
+    input_schema: {
+      type: "object",
+      properties: {
+        viagem: { type: "string", description: "Código da viagem (ECL-0001-01)." },
+        anexo: { type: "string", description: "Referência (id) do arquivo anexado no chat." },
+        destino: { type: "string", description: '"publico", "interno" ou id de uma subpasta da viagem.' },
+        nome: { type: "string", description: 'Nome opcional para salvar no Drive ou "" para manter o nome original.' },
+      },
+      required: ["viagem", "anexo", "destino", "nome"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "drive_criar_pasta",
+    description: "Propõe criar uma subpasta dentro da pasta de uma viagem no Google Drive.",
+    input_schema: {
+      type: "object",
+      properties: {
+        viagem: { type: "string", description: "Código da viagem (ECL-0001-01)." },
+        dentroDe: { type: "string", description: '"publico", "interno", "raiz_da_viagem" ou id de subpasta da viagem.' },
+        nome: { type: "string", description: "Nome da nova pasta (1 a 120 caracteres, sem barras)." },
+      },
+      required: ["viagem", "dentroDe", "nome"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "drive_renomear",
+    description: "Propõe renomear um arquivo ou subpasta dentro da pasta de uma viagem no Google Drive.",
+    input_schema: {
+      type: "object",
+      properties: {
+        arquivo: { type: "string", description: "Id do arquivo ou subpasta no Google Drive." },
+        nome: { type: "string", description: "Novo nome (1 a 200 caracteres, sem barras)." },
+      },
+      required: ["arquivo", "nome"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+  {
+    name: "drive_mover",
+    description: "Propõe mover um arquivo ou subpasta para outra pasta da mesma viagem no Google Drive.",
+    input_schema: {
+      type: "object",
+      properties: {
+        arquivo: { type: "string", description: "Id do arquivo ou subpasta no Google Drive." },
+        destino: { type: "string", description: '"publico", "interno" ou id de uma subpasta da mesma viagem.' },
+      },
+      required: ["arquivo", "destino"],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+];
+
 const ENTRADAS = {
   drive_listar: z.object({ pasta: z.string().trim().max(200) }).strict(),
   drive_buscar: z.object({ texto: z.string().trim().min(1).max(100) }).strict(),

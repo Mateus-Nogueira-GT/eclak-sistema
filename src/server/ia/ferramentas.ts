@@ -16,8 +16,9 @@ import type { FerramentaIA } from "@/server/integracoes/ia";
 import { cabecalhoDaViagem, listarDailies, listarTarefas, tarefasDaViagem } from "@/server/queries/operacao";
 import { obterViagemVendida } from "@/server/queries/vendas";
 import { listarOrcamentos, obterPrecificacao, type OrcamentoLista } from "@/server/queries/viagens";
-import { ehLeituraDrive, executarLeituraDrive, FERRAMENTAS_LEITURA_DRIVE } from "./ferramentas-drive";
-import { ehLeituraTrello, executarLeituraTrello, FERRAMENTAS_LEITURA_TRELLO } from "./ferramentas-trello";
+import { ehLeituraDrive, executarLeituraDrive, FERRAMENTAS_ACAO_DRIVE, FERRAMENTAS_LEITURA_DRIVE } from "./ferramentas-drive";
+import { ehLeituraTrello, executarLeituraTrello, FERRAMENTAS_ACAO_TRELLO, FERRAMENTAS_LEITURA_TRELLO } from "./ferramentas-trello";
+import { ehTipoAcaoChat, MSG_PROPOSTA_REGISTRADA, proporAcao } from "./acoes";
 
 // Ferramentas do chat: as 4 do sistema (sempre só de leitura, R-C6) + leitura do Trello (se configTrello) + leitura
 // do Drive (se configDrive), seguindo R-A1. Cada ferramenta do sistema chama as queries existentes (com `exigirPerfil`);
@@ -95,8 +96,8 @@ export const FERRAMENTAS_CHAT: FerramentaIA[] = [
 /** Lista de ferramentas enviadas ao modelo na pergunta atual (R-A1: Trello e Drive só entram se configurados). */
 export function ferramentasDoChat(): FerramentaIA[] {
   const lista: FerramentaIA[] = [...FERRAMENTAS_CHAT];
-  if (configTrello()) lista.push(...FERRAMENTAS_LEITURA_TRELLO);
-  if (configDrive()) lista.push(...FERRAMENTAS_LEITURA_DRIVE);
+  if (configTrello()) lista.push(...FERRAMENTAS_LEITURA_TRELLO, ...FERRAMENTAS_ACAO_TRELLO);
+  if (configDrive()) lista.push(...FERRAMENTAS_LEITURA_DRIVE, ...FERRAMENTAS_ACAO_DRIVE);
   return lista;
 }
 
@@ -287,6 +288,11 @@ export async function executarFerramenta(
 ): Promise<ResultadoExecucaoFerramenta> {
   if (ehLeituraTrello(nome)) return executarLeituraTrello(nome, entrada, ctx);
   if (ehLeituraDrive(nome)) return executarLeituraDrive(nome, entrada, ctx);
+  if (ehTipoAcaoChat(nome)) {
+    const r = await proporAcao(ctx, nome, entrada);
+    if ("erro" in r) return { conteudo: r.erro, erro: true };
+    return { conteudo: MSG_PROPOSTA_REGISTRADA, erro: false, proposta: r.proposta };
+  }
   if (!(nome in ENTRADAS)) return { conteudo: `Ferramenta ${nome} não existe.`, erro: true };
 
   const n = nome as Nome;
