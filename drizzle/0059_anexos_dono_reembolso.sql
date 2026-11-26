@@ -1,0 +1,2 @@
+ALTER TABLE "anexos" DROP CONSTRAINT "anexos_dono_tipo";--> statement-breakpoint
+ALTER TABLE "anexos" ADD CONSTRAINT "anexos_dono_tipo" CHECK ("anexos"."dono_tipo" IN ('manual', 'parcela', 'pagamento', 'comissao', 'fatura_cartao', 'nota_fiscal', 'reembolso'));

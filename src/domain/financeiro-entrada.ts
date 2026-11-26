@@ -19,9 +19,9 @@ const MSG_COMPETENCIA = "Competência inválida";
 const MSG_ID = "Identificador inválido";
 const MSG_FINAL = "Informe os 4 últimos dígitos do cartão";
 
-const uuid = z.string({ error: MSG_ID }).uuid(MSG_ID);
+export const uuid = z.string({ error: MSG_ID }).uuid(MSG_ID);
 /** Select vazio de formulário chega como "" e vale null. */
-const uuidOpcional = z.preprocess(
+export const uuidOpcional = z.preprocess(
   (v) => (v === "" ? null : v),
   z
     .string({ error: MSG_ID })
@@ -63,7 +63,7 @@ const repeticao = z.discriminatedUnion(
 );
 
 /** Lançamento a pagar no cartão de crédito: compra no cartão corporativo (vai para a fatura do ciclo). */
-const ehCompraNoCartao = (v: { lado: string; forma: string }) => v.lado === "pagar" && v.forma === "Cartão de crédito";
+export const ehCompraNoCartao = (v: { lado: string; forma: string }) => v.lado === "pagar" && v.forma === "Cartão de crédito";
 
 export const lancamentoSchema = z
   .strictObject({

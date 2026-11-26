@@ -10,6 +10,7 @@ import { exigirPerfil } from "@/server/auth";
 import { contarAnexosDe } from "@/server/queries/anexos";
 import { saldoAtualSql } from "@/server/queries/caixa";
 import { db } from "@/server/db/client";
+import { vinculoDoLancamento, type VinculoLancamento } from "@/server/financeiro/lancamentos";
 import { categoriasFinanceiras, contasBancarias, contasPagar, lancamentos, lancamentosFinanceiros as lf, pagamentosFornecedor } from "@/server/db/schema";
 
 export type CategoriaItem = {
@@ -98,6 +99,8 @@ export type LinhaLancamento = {
   repasse: boolean;
   /** Compra numa fatura do cartão corporativo (só aparece cancelada ou com `compras = "incluir"`: senão sai pela linha da fatura). */
   faturaCartaoId: string | null;
+  /** Conta manual de uma entrada de estoque ou de um caso de reembolso: na lista só se baixa (sem editar nem cancelar). */
+  vinculo: VinculoLancamento | null;
   situacao: Situacao;
   categoria: { grupo: string; nome: string };
   contaBancaria: string | null;
@@ -210,6 +213,8 @@ export async function listarLancamentos(filtro: FiltroLancamentos): Promise<List
         exigeIndividual: lf.exigeIndividual,
         repasse: lf.repasse,
         faturaCartaoId: lf.faturaCartaoId,
+        estoqueMovimentoId: lf.estoqueMovimentoId,
+        reembolsoId: lf.reembolsoId,
         situacao,
         grupo: categoriasFinanceiras.grupo,
         categoriaNome: categoriasFinanceiras.nome,
@@ -253,8 +258,9 @@ export async function listarLancamentos(filtro: FiltroLancamentos): Promise<List
   // Anexos da página: uma consulta agrupada para as linhas mostradas.
   const anexosPorLinha = await contarAnexosDe(linhas.map((l) => ({ donoTipo: l.origem, donoId: l.id })));
   return {
-    linhas: linhas.map(({ grupo, categoriaNome, ...l }) => ({
+    linhas: linhas.map(({ grupo, categoriaNome, estoqueMovimentoId, reembolsoId, ...l }) => ({
       ...l,
+      vinculo: vinculoDoLancamento({ estoqueMovimentoId, reembolsoId }),
       categoria: { grupo, nome: categoriaNome },
       anexos: anexosPorLinha.get(`${l.origem}:${l.id}`) ?? 0,
     })),

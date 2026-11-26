@@ -4696,7 +4696,7 @@
       "name": "filial",
       "schema": "public",
       "values": [
-        "Rondonópolis",
+        "Rondon\u00f3polis",
         "RS"
       ]
     },
@@ -4732,7 +4732,7 @@
         "Seguro",
         "Restaurante",
         "Operadora",
-        "Aéreo",
+        "A\u00e9reo",
         "Taxa",
         "Outro"
       ]
@@ -4792,7 +4792,7 @@
         "Seguro",
         "Outro",
         "Taxa",
-        "Aéreo"
+        "A\u00e9reo"
       ]
     },
     "public.comissao_tipo": {

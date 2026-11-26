@@ -1,0 +1,6494 @@
+{
+  "id": "1da3d27d-6fec-4dd1-a6e2-34b559f2df37",
+  "prevId": "a96085fe-28b3-4480-aca7-c2bcac9dd7c6",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.anexos": {
+      "name": "anexos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "dono_tipo": {
+          "name": "dono_tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dono_id": {
+          "name": "dono_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "caminho": {
+          "name": "caminho",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime": {
+          "name": "mime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tamanho": {
+          "name": "tamanho",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enviado_por": {
+          "name": "enviado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enviado_em": {
+          "name": "enviado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "excluido_em": {
+          "name": "excluido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "anexos_dono_idx": {
+          "name": "anexos_dono_idx",
+          "columns": [
+            {
+              "expression": "dono_tipo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "dono_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"anexos\".\"excluido_em\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "anexos_enviado_por_usuarios_id_fk": {
+          "name": "anexos_enviado_por_usuarios_id_fk",
+          "tableFrom": "anexos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "enviado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "anexos_caminho_unique": {
+          "name": "anexos_caminho_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "caminho"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "anexos_dono_tipo": {
+          "name": "anexos_dono_tipo",
+          "value": "\"anexos\".\"dono_tipo\" IN ('manual', 'parcela', 'pagamento', 'comissao', 'fatura_cartao', 'nota_fiscal', 'reembolso')"
+        },
+        "anexos_tamanho": {
+          "name": "anexos_tamanho",
+          "value": "\"anexos\".\"tamanho\" BETWEEN 1 AND 10485760"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.auditoria": {
+      "name": "auditoria",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigserial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "usuario_id": {
+          "name": "usuario_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "em": {
+          "name": "em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "tabela": {
+          "name": "tabela",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "registro_id": {
+          "name": "registro_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "acao": {
+          "name": "acao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "antes": {
+          "name": "antes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "depois": {
+          "name": "depois",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.caixa_itens": {
+      "name": "caixa_itens",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "caixa_id": {
+          "name": "caixa_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "produto_id": {
+          "name": "produto_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantidade": {
+          "name": "quantidade",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "custo_unitario": {
+          "name": "custo_unitario",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "caixa_itens_caixa_id_caixas_experiencia_id_fk": {
+          "name": "caixa_itens_caixa_id_caixas_experiencia_id_fk",
+          "tableFrom": "caixa_itens",
+          "tableTo": "caixas_experiencia",
+          "columnsFrom": [
+            "caixa_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "caixa_itens_produto_id_produtos_estoque_id_fk": {
+          "name": "caixa_itens_produto_id_produtos_estoque_id_fk",
+          "tableFrom": "caixa_itens",
+          "tableTo": "produtos_estoque",
+          "columnsFrom": [
+            "produto_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "caixa_itens_caixa_produto_unico": {
+          "name": "caixa_itens_caixa_produto_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "caixa_id",
+            "produto_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "caixa_itens_quantidade": {
+          "name": "caixa_itens_quantidade",
+          "value": "\"caixa_itens\".\"quantidade\" >= 1"
+        },
+        "caixa_itens_custo_unitario": {
+          "name": "caixa_itens_custo_unitario",
+          "value": "\"caixa_itens\".\"custo_unitario\" IS NULL OR \"caixa_itens\".\"custo_unitario\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.caixas_experiencia": {
+      "name": "caixas_experiencia",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filial": {
+          "name": "filial",
+          "type": "centro_custo",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "situacao": {
+          "name": "situacao",
+          "type": "situacao_caixa",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'rascunho'"
+        },
+        "custo_total": {
+          "name": "custo_total",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmada_em": {
+          "name": "confirmada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmada_por": {
+          "name": "confirmada_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelada_em": {
+          "name": "cancelada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelada_por": {
+          "name": "cancelada_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "motivo_cancelamento": {
+          "name": "motivo_cancelamento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_por": {
+          "name": "criado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "caixas_experiencia_viagem_ativa_unico": {
+          "name": "caixas_experiencia_viagem_ativa_unico",
+          "columns": [
+            {
+              "expression": "viagem_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"caixas_experiencia\".\"situacao\" <> 'cancelada'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "caixas_experiencia_viagem_id_viagens_id_fk": {
+          "name": "caixas_experiencia_viagem_id_viagens_id_fk",
+          "tableFrom": "caixas_experiencia",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "caixas_experiencia_confirmada_por_usuarios_id_fk": {
+          "name": "caixas_experiencia_confirmada_por_usuarios_id_fk",
+          "tableFrom": "caixas_experiencia",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "confirmada_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "caixas_experiencia_cancelada_por_usuarios_id_fk": {
+          "name": "caixas_experiencia_cancelada_por_usuarios_id_fk",
+          "tableFrom": "caixas_experiencia",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "cancelada_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "caixas_experiencia_criado_por_usuarios_id_fk": {
+          "name": "caixas_experiencia_criado_por_usuarios_id_fk",
+          "tableFrom": "caixas_experiencia",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "criado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "caixas_experiencia_custo_total": {
+          "name": "caixas_experiencia_custo_total",
+          "value": "\"caixas_experiencia\".\"custo_total\" IS NULL OR \"caixas_experiencia\".\"custo_total\" >= 0"
+        },
+        "caixas_experiencia_confirmacao": {
+          "name": "caixas_experiencia_confirmacao",
+          "value": "(\"caixas_experiencia\".\"situacao\" = 'confirmada' AND \"caixas_experiencia\".\"custo_total\" IS NOT NULL AND \"caixas_experiencia\".\"confirmada_em\" IS NOT NULL AND \"caixas_experiencia\".\"confirmada_por\" IS NOT NULL)\n        OR (\"caixas_experiencia\".\"situacao\" = 'rascunho' AND \"caixas_experiencia\".\"custo_total\" IS NULL AND \"caixas_experiencia\".\"confirmada_em\" IS NULL AND \"caixas_experiencia\".\"confirmada_por\" IS NULL)\n        OR \"caixas_experiencia\".\"situacao\" = 'cancelada'"
+        },
+        "caixas_experiencia_cancelamento": {
+          "name": "caixas_experiencia_cancelamento",
+          "value": "(\"caixas_experiencia\".\"situacao\" = 'cancelada' AND \"caixas_experiencia\".\"cancelada_em\" IS NOT NULL AND \"caixas_experiencia\".\"cancelada_por\" IS NOT NULL AND \"caixas_experiencia\".\"motivo_cancelamento\" IS NOT NULL)\n        OR (\"caixas_experiencia\".\"situacao\" <> 'cancelada' AND \"caixas_experiencia\".\"cancelada_em\" IS NULL AND \"caixas_experiencia\".\"cancelada_por\" IS NULL AND \"caixas_experiencia\".\"motivo_cancelamento\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.cartoes_corporativos": {
+      "name": "cartoes_corporativos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "final": {
+          "name": "final",
+          "type": "char(4)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dia_fechamento": {
+          "name": "dia_fechamento",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dia_vencimento": {
+          "name": "dia_vencimento",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conta_bancaria_id": {
+          "name": "conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "centro": {
+          "name": "centro",
+          "type": "centro_custo",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ativo": {
+          "name": "ativo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "cartoes_corporativos_nome_ativo_unico": {
+          "name": "cartoes_corporativos_nome_ativo_unico",
+          "columns": [
+            {
+              "expression": "nome",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"cartoes_corporativos\".\"ativo\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "cartoes_corporativos_conta_bancaria_id_contas_bancarias_id_fk": {
+          "name": "cartoes_corporativos_conta_bancaria_id_contas_bancarias_id_fk",
+          "tableFrom": "cartoes_corporativos",
+          "tableTo": "contas_bancarias",
+          "columnsFrom": [
+            "conta_bancaria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "cartoes_corporativos_final": {
+          "name": "cartoes_corporativos_final",
+          "value": "\"cartoes_corporativos\".\"final\" ~ '^[0-9]{4}$'"
+        },
+        "cartoes_corporativos_dias": {
+          "name": "cartoes_corporativos_dias",
+          "value": "\"cartoes_corporativos\".\"dia_fechamento\" BETWEEN 1 AND 28 AND \"cartoes_corporativos\".\"dia_vencimento\" BETWEEN 1 AND 28"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.categorias_financeiras": {
+      "name": "categorias_financeiras",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "lado": {
+          "name": "lado",
+          "type": "lado_financeiro",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "grupo": {
+          "name": "grupo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ativa": {
+          "name": "ativa",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "sistema": {
+          "name": "sistema",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "categorias_financeiras_nome_unico": {
+          "name": "categorias_financeiras_nome_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "lado",
+            "grupo",
+            "nome"
+          ]
+        },
+        "categorias_financeiras_sistema_unico": {
+          "name": "categorias_financeiras_sistema_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sistema"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "categorias_financeiras_sistema": {
+          "name": "categorias_financeiras_sistema",
+          "value": "\"categorias_financeiras\".\"sistema\" IS NULL OR \"categorias_financeiras\".\"sistema\" IN ('vendas_viagem', 'fornecedores_viagem', 'comissoes_hotel', 'comissoes_operadora', 'cartao_corporativo', 'reembolso_cliente', 'reembolso_fornecedor', 'caixa_experiencia', 'papelaria')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.chat_acoes": {
+      "name": "chat_acoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "usuario_id": {
+          "name": "usuario_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alvo": {
+          "name": "alvo",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dados": {
+          "name": "dados",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "situacao": {
+          "name": "situacao",
+          "type": "situacao_chat_acao",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendente'"
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expira_em": {
+          "name": "expira_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decidido_em": {
+          "name": "decidido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tomado_em": {
+          "name": "tomado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resultado": {
+          "name": "resultado",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "chat_acoes_usuario_situacao_idx": {
+          "name": "chat_acoes_usuario_situacao_idx",
+          "columns": [
+            {
+              "expression": "usuario_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "situacao",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "chat_acoes_situacao_expira_idx": {
+          "name": "chat_acoes_situacao_expira_idx",
+          "columns": [
+            {
+              "expression": "situacao",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expira_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "chat_acoes_usuario_id_usuarios_id_fk": {
+          "name": "chat_acoes_usuario_id_usuarios_id_fk",
+          "tableFrom": "chat_acoes",
+          "columnsFrom": [
+            "usuario_id"
+          ],
+          "tableTo": "usuarios",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        },
+        "chat_acoes_viagem_id_viagens_id_fk": {
+          "name": "chat_acoes_viagem_id_viagens_id_fk",
+          "tableFrom": "chat_acoes",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "tableTo": "viagens",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "chat_acoes_tipo": {
+          "name": "chat_acoes_tipo",
+          "value": "\"chat_acoes\".\"tipo\" IN ('trello_comentar', 'trello_marcar_item', 'trello_adicionar_item', 'trello_mover_cartao', 'trello_definir_prazo', 'trello_criar_cartao', 'drive_enviar_arquivo', 'drive_criar_pasta', 'drive_renomear', 'drive_mover')"
+        },
+        "chat_acoes_viagem_coerente": {
+          "name": "chat_acoes_viagem_coerente",
+          "value": "(\"chat_acoes\".\"tipo\" = 'trello_criar_cartao') = (\"chat_acoes\".\"viagem_id\" IS NULL)"
+        },
+        "chat_acoes_executando_coerente": {
+          "name": "chat_acoes_executando_coerente",
+          "value": "\"chat_acoes\".\"situacao\" <> 'executando' OR \"chat_acoes\".\"tomado_em\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.chat_anexos": {
+      "name": "chat_anexos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "usuario_id": {
+          "name": "usuario_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime": {
+          "name": "mime",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tamanho": {
+          "name": "tamanho",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "caminho": {
+          "name": "caminho",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expira_em": {
+          "name": "expira_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "usado_em": {
+          "name": "usado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "chat_anexos_usuario_expira_idx": {
+          "name": "chat_anexos_usuario_expira_idx",
+          "columns": [
+            {
+              "expression": "usuario_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expira_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "chat_anexos_usuario_id_usuarios_id_fk": {
+          "name": "chat_anexos_usuario_id_usuarios_id_fk",
+          "tableFrom": "chat_anexos",
+          "columnsFrom": [
+            "usuario_id"
+          ],
+          "tableTo": "usuarios",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "chat_anexos_caminho_unique": {
+          "name": "chat_anexos_caminho_unique",
+          "columns": [
+            "caminho"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "chat_anexos_tamanho": {
+          "name": "chat_anexos_tamanho",
+          "value": "\"chat_anexos\".\"tamanho\" BETWEEN 1 AND 5242880"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.clientes": {
+      "name": "clientes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "codigo": {
+          "name": "codigo",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "nextval('cliente_codigo_seq')"
+        },
+        "grupo": {
+          "name": "grupo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_cliente",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filial": {
+          "name": "filial",
+          "type": "filial",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "telefone": {
+          "name": "telefone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pref_quarto": {
+          "name": "pref_quarto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pref_alimentacao": {
+          "name": "pref_alimentacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pref_assento": {
+          "name": "pref_assento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observacoes": {
+          "name": "observacoes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "proxima_viagem": {
+          "name": "proxima_viagem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "cliente_desde": {
+          "name": "cliente_desde",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "current_date"
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "excluido_em": {
+          "name": "excluido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "clientes_codigo_unique": {
+          "name": "clientes_codigo_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "codigo"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.comissoes": {
+      "name": "comissoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conta_id": {
+          "name": "conta_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fornecedor_id": {
+          "name": "fornecedor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "base_brl": {
+          "name": "base_brl",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pct": {
+          "name": "pct",
+          "type": "numeric(6, 3)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_previsto": {
+          "name": "valor_previsto",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prevista_para": {
+          "name": "prevista_para",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_comissao",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'prevista'"
+        },
+        "recebida_em": {
+          "name": "recebida_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_recebido": {
+          "name": "valor_recebido",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "motivo": {
+          "name": "motivo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conta_bancaria_id": {
+          "name": "conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "comissoes_prevista_para_idx": {
+          "name": "comissoes_prevista_para_idx",
+          "columns": [
+            {
+              "expression": "prevista_para",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"comissoes\".\"status\" = 'prevista'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "comissoes_viagem_id_viagens_id_fk": {
+          "name": "comissoes_viagem_id_viagens_id_fk",
+          "tableFrom": "comissoes",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "comissoes_conta_id_contas_pagar_id_fk": {
+          "name": "comissoes_conta_id_contas_pagar_id_fk",
+          "tableFrom": "comissoes",
+          "tableTo": "contas_pagar",
+          "columnsFrom": [
+            "conta_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "comissoes_fornecedor_id_fornecedores_id_fk": {
+          "name": "comissoes_fornecedor_id_fornecedores_id_fk",
+          "tableFrom": "comissoes",
+          "tableTo": "fornecedores",
+          "columnsFrom": [
+            "fornecedor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "comissoes_conta_bancaria_id_contas_bancarias_id_fk": {
+          "name": "comissoes_conta_bancaria_id_contas_bancarias_id_fk",
+          "tableFrom": "comissoes",
+          "tableTo": "contas_bancarias",
+          "columnsFrom": [
+            "conta_bancaria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "comissoes_conta_unico": {
+          "name": "comissoes_conta_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "conta_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "comissoes_valores": {
+          "name": "comissoes_valores",
+          "value": "\"comissoes\".\"base_brl\" >= 0 AND \"comissoes\".\"valor_previsto\" >= 0 AND (\"comissoes\".\"valor_recebido\" IS NULL OR \"comissoes\".\"valor_recebido\" >= 0)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.contas_bancarias": {
+      "name": "contas_bancarias",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "banco": {
+          "name": "banco",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "saldo_inicial": {
+          "name": "saldo_inicial",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "saldo_inicial_em": {
+          "name": "saldo_inicial_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ativa": {
+          "name": "ativa",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "excluido_em": {
+          "name": "excluido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "contas_bancarias_nome_ativa_unico": {
+          "name": "contas_bancarias_nome_ativa_unico",
+          "columns": [
+            {
+              "expression": "nome",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"contas_bancarias\".\"ativa\" AND \"contas_bancarias\".\"excluido_em\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.contas_pagar": {
+      "name": "contas_pagar",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cotacao_id": {
+          "name": "cotacao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fornecedor_id": {
+          "name": "fornecedor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "descricao": {
+          "name": "descricao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "aereo": {
+          "name": "aereo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "moeda": {
+          "name": "moeda",
+          "type": "moeda",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_original": {
+          "name": "valor_original",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cambio_aplicado": {
+          "name": "cambio_aplicado",
+          "type": "numeric(10, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "previsto_venda_brl": {
+          "name": "previsto_venda_brl",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "previsto_brl": {
+          "name": "previsto_brl",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "comissao_pct": {
+          "name": "comissao_pct",
+          "type": "numeric(6, 3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "comissao_tipo": {
+          "name": "comissao_tipo",
+          "type": "comissao_tipo",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "comissao_tipo_venda": {
+          "name": "comissao_tipo_venda",
+          "type": "comissao_tipo",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "desconto_a_vista_pct": {
+          "name": "desconto_a_vista_pct",
+          "type": "numeric(6, 3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "forma": {
+          "name": "forma",
+          "type": "forma_pagamento_fornecedor",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "status_conta",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'a_pagar'"
+        },
+        "contestacao": {
+          "name": "contestacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contestada_em": {
+          "name": "contestada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "motivo_previsto": {
+          "name": "motivo_previsto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "excluido_em": {
+          "name": "excluido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "contas_pagar_viagem_item_ativa_unico": {
+          "name": "contas_pagar_viagem_item_ativa_unico",
+          "columns": [
+            {
+              "expression": "viagem_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "item_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"contas_pagar\".\"excluido_em\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "contas_pagar_viagem_id_viagens_id_fk": {
+          "name": "contas_pagar_viagem_id_viagens_id_fk",
+          "tableFrom": "contas_pagar",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "contas_pagar_item_id_itens_viagem_id_fk": {
+          "name": "contas_pagar_item_id_itens_viagem_id_fk",
+          "tableFrom": "contas_pagar",
+          "tableTo": "itens_viagem",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "contas_pagar_cotacao_id_cotacoes_id_fk": {
+          "name": "contas_pagar_cotacao_id_cotacoes_id_fk",
+          "tableFrom": "contas_pagar",
+          "tableTo": "cotacoes",
+          "columnsFrom": [
+            "cotacao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "contas_pagar_fornecedor_id_fornecedores_id_fk": {
+          "name": "contas_pagar_fornecedor_id_fornecedores_id_fk",
+          "tableFrom": "contas_pagar",
+          "tableTo": "fornecedores",
+          "columnsFrom": [
+            "fornecedor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "contas_pagar_valores": {
+          "name": "contas_pagar_valores",
+          "value": "\"contas_pagar\".\"valor_original\" >= 0 AND \"contas_pagar\".\"previsto_venda_brl\" >= 0 AND \"contas_pagar\".\"previsto_brl\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.cotacoes": {
+      "name": "cotacoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fornecedor_id": {
+          "name": "fornecedor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "moeda": {
+          "name": "moeda",
+          "type": "moeda",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'BRL'"
+        },
+        "valor_original": {
+          "name": "valor_original",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cambio_comercial": {
+          "name": "cambio_comercial",
+          "type": "numeric(10, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cambio_aplicado": {
+          "name": "cambio_aplicado",
+          "type": "numeric(10, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cambio_data": {
+          "name": "cambio_data",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_brl": {
+          "name": "valor_brl",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "comissao_pct": {
+          "name": "comissao_pct",
+          "type": "numeric(6, 3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "desconto_a_vista_pct": {
+          "name": "desconto_a_vista_pct",
+          "type": "numeric(6, 3)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tarifa_fixa": {
+          "name": "tarifa_fixa",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "escolhida": {
+          "name": "escolhida",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "excluido_em": {
+          "name": "excluido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "cotacoes_item_id_itens_viagem_id_fk": {
+          "name": "cotacoes_item_id_itens_viagem_id_fk",
+          "tableFrom": "cotacoes",
+          "tableTo": "itens_viagem",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "cotacoes_fornecedor_id_fornecedores_id_fk": {
+          "name": "cotacoes_fornecedor_id_fornecedores_id_fk",
+          "tableFrom": "cotacoes",
+          "tableTo": "fornecedores",
+          "columnsFrom": [
+            "fornecedor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.dailies": {
+      "name": "dailies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "roteiro_id": {
+          "name": "roteiro_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estado": {
+          "name": "estado",
+          "type": "estado_daily",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendente'"
+        },
+        "texto": {
+          "name": "texto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gerado_em": {
+          "name": "gerado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gerado_por": {
+          "name": "gerado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revisado_em": {
+          "name": "revisado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revisado_por": {
+          "name": "revisado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enviado_em": {
+          "name": "enviado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enviado_por": {
+          "name": "enviado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "plantao_id": {
+          "name": "plantao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "interno": {
+          "name": "interno",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "dailies_roteiro_id_roteiros_id_fk": {
+          "name": "dailies_roteiro_id_roteiros_id_fk",
+          "tableFrom": "dailies",
+          "tableTo": "roteiros",
+          "columnsFrom": [
+            "roteiro_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "dailies_gerado_por_usuarios_id_fk": {
+          "name": "dailies_gerado_por_usuarios_id_fk",
+          "tableFrom": "dailies",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "gerado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "dailies_revisado_por_usuarios_id_fk": {
+          "name": "dailies_revisado_por_usuarios_id_fk",
+          "tableFrom": "dailies",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "revisado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "dailies_enviado_por_usuarios_id_fk": {
+          "name": "dailies_enviado_por_usuarios_id_fk",
+          "tableFrom": "dailies",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "enviado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "dailies_plantao_id_usuarios_id_fk": {
+          "name": "dailies_plantao_id_usuarios_id_fk",
+          "tableFrom": "dailies",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "plantao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "dailies_roteiro_data_unico": {
+          "name": "dailies_roteiro_data_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "roteiro_id",
+            "data"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.estoque_movimentos": {
+      "name": "estoque_movimentos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "produto_id": {
+          "name": "produto_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filial": {
+          "name": "filial",
+          "type": "centro_custo",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_movimento_estoque",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantidade": {
+          "name": "quantidade",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "custo_unitario": {
+          "name": "custo_unitario",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "custo_medio_antes": {
+          "name": "custo_medio_antes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fornecedor_id": {
+          "name": "fornecedor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fornecedor_texto": {
+          "name": "fornecedor_texto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lancamento_id": {
+          "name": "lancamento_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "caixa_id": {
+          "name": "caixa_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "motivo": {
+          "name": "motivo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "usuario_id": {
+          "name": "usuario_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "estoque_movimentos_produto_filial_idx": {
+          "name": "estoque_movimentos_produto_filial_idx",
+          "columns": [
+            {
+              "expression": "produto_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "filial",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "criado_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "estoque_movimentos_caixa_idx": {
+          "name": "estoque_movimentos_caixa_idx",
+          "columns": [
+            {
+              "expression": "caixa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "estoque_movimentos_produto_id_produtos_estoque_id_fk": {
+          "name": "estoque_movimentos_produto_id_produtos_estoque_id_fk",
+          "tableFrom": "estoque_movimentos",
+          "tableTo": "produtos_estoque",
+          "columnsFrom": [
+            "produto_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "estoque_movimentos_fornecedor_id_fornecedores_id_fk": {
+          "name": "estoque_movimentos_fornecedor_id_fornecedores_id_fk",
+          "tableFrom": "estoque_movimentos",
+          "tableTo": "fornecedores",
+          "columnsFrom": [
+            "fornecedor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "estoque_movimentos_lancamento_id_lancamentos_id_fk": {
+          "name": "estoque_movimentos_lancamento_id_lancamentos_id_fk",
+          "tableFrom": "estoque_movimentos",
+          "tableTo": "lancamentos",
+          "columnsFrom": [
+            "lancamento_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "estoque_movimentos_caixa_id_caixas_experiencia_id_fk": {
+          "name": "estoque_movimentos_caixa_id_caixas_experiencia_id_fk",
+          "tableFrom": "estoque_movimentos",
+          "tableTo": "caixas_experiencia",
+          "columnsFrom": [
+            "caixa_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "estoque_movimentos_usuario_id_usuarios_id_fk": {
+          "name": "estoque_movimentos_usuario_id_usuarios_id_fk",
+          "tableFrom": "estoque_movimentos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "usuario_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "estoque_movimentos_quantidade": {
+          "name": "estoque_movimentos_quantidade",
+          "value": "\"estoque_movimentos\".\"quantidade\" <> 0"
+        },
+        "estoque_movimentos_sinal": {
+          "name": "estoque_movimentos_sinal",
+          "value": "(\"estoque_movimentos\".\"tipo\" IN ('entrada', 'devolucao_caixa') AND \"estoque_movimentos\".\"quantidade\" > 0) OR (\"estoque_movimentos\".\"tipo\" IN ('saida', 'caixa') AND \"estoque_movimentos\".\"quantidade\" < 0) OR \"estoque_movimentos\".\"tipo\" = 'ajuste'"
+        },
+        "estoque_movimentos_custos": {
+          "name": "estoque_movimentos_custos",
+          "value": "\"estoque_movimentos\".\"custo_unitario\" >= 0 AND \"estoque_movimentos\".\"custo_medio_antes\" >= 0"
+        },
+        "estoque_movimentos_um_fornecedor": {
+          "name": "estoque_movimentos_um_fornecedor",
+          "value": "num_nonnulls(\"estoque_movimentos\".\"fornecedor_id\", \"estoque_movimentos\".\"fornecedor_texto\") <= 1"
+        },
+        "estoque_movimentos_fornecedor_so_entrada": {
+          "name": "estoque_movimentos_fornecedor_so_entrada",
+          "value": "\"estoque_movimentos\".\"tipo\" = 'entrada' OR num_nonnulls(\"estoque_movimentos\".\"fornecedor_id\", \"estoque_movimentos\".\"fornecedor_texto\") = 0"
+        },
+        "estoque_movimentos_motivo": {
+          "name": "estoque_movimentos_motivo",
+          "value": "\"estoque_movimentos\".\"tipo\" NOT IN ('saida', 'ajuste') OR (\"estoque_movimentos\".\"motivo\" IS NOT NULL AND char_length(\"estoque_movimentos\".\"motivo\") BETWEEN 5 AND 200)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.estoque_saldos": {
+      "name": "estoque_saldos",
+      "schema": "",
+      "columns": {
+        "produto_id": {
+          "name": "produto_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filial": {
+          "name": "filial",
+          "type": "centro_custo",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "quantidade": {
+          "name": "quantidade",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "custo_medio": {
+          "name": "custo_medio",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "estoque_saldos_produto_id_produtos_estoque_id_fk": {
+          "name": "estoque_saldos_produto_id_produtos_estoque_id_fk",
+          "tableFrom": "estoque_saldos",
+          "tableTo": "produtos_estoque",
+          "columnsFrom": [
+            "produto_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "estoque_saldos_pk": {
+          "name": "estoque_saldos_pk",
+          "columns": [
+            "produto_id",
+            "filial"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "estoque_saldos_quantidade": {
+          "name": "estoque_saldos_quantidade",
+          "value": "\"estoque_saldos\".\"quantidade\" >= 0"
+        },
+        "estoque_saldos_custo_medio": {
+          "name": "estoque_saldos_custo_medio",
+          "value": "\"estoque_saldos\".\"custo_medio\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.extrato_transacoes": {
+      "name": "extrato_transacoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "extrato_id": {
+          "name": "extrato_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conta_bancaria_id": {
+          "name": "conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fitid": {
+          "name": "fitid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor": {
+          "name": "valor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "descricao": {
+          "name": "descricao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "situacao": {
+          "name": "situacao",
+          "type": "situacao_extrato",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendente'"
+        },
+        "linha_origem": {
+          "name": "linha_origem",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linha_id": {
+          "name": "linha_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conciliada_por": {
+          "name": "conciliada_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conciliada_em": {
+          "name": "conciliada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ignorada_motivo": {
+          "name": "ignorada_motivo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ignorada_por": {
+          "name": "ignorada_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ignorada_em": {
+          "name": "ignorada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "extrato_transacoes_linha_unica": {
+          "name": "extrato_transacoes_linha_unica",
+          "columns": [
+            {
+              "expression": "linha_origem",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "linha_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"extrato_transacoes\".\"situacao\" = 'conciliada'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "extrato_transacoes_conta_data_idx": {
+          "name": "extrato_transacoes_conta_data_idx",
+          "columns": [
+            {
+              "expression": "conta_bancaria_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "data",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "extrato_transacoes_extrato_idx": {
+          "name": "extrato_transacoes_extrato_idx",
+          "columns": [
+            {
+              "expression": "extrato_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "extrato_transacoes_extrato_id_extratos_id_fk": {
+          "name": "extrato_transacoes_extrato_id_extratos_id_fk",
+          "tableFrom": "extrato_transacoes",
+          "tableTo": "extratos",
+          "columnsFrom": [
+            "extrato_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "extrato_transacoes_conta_bancaria_id_contas_bancarias_id_fk": {
+          "name": "extrato_transacoes_conta_bancaria_id_contas_bancarias_id_fk",
+          "tableFrom": "extrato_transacoes",
+          "tableTo": "contas_bancarias",
+          "columnsFrom": [
+            "conta_bancaria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "extrato_transacoes_conciliada_por_usuarios_id_fk": {
+          "name": "extrato_transacoes_conciliada_por_usuarios_id_fk",
+          "tableFrom": "extrato_transacoes",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "conciliada_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "extrato_transacoes_ignorada_por_usuarios_id_fk": {
+          "name": "extrato_transacoes_ignorada_por_usuarios_id_fk",
+          "tableFrom": "extrato_transacoes",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "ignorada_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "extrato_transacoes_conta_fitid_unico": {
+          "name": "extrato_transacoes_conta_fitid_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "conta_bancaria_id",
+            "fitid"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "extrato_transacoes_linha_origem": {
+          "name": "extrato_transacoes_linha_origem",
+          "value": "\"extrato_transacoes\".\"linha_origem\" IS NULL OR \"extrato_transacoes\".\"linha_origem\" IN ('manual', 'parcela', 'pagamento', 'comissao', 'fatura_cartao')"
+        },
+        "extrato_transacoes_conciliada_coerente": {
+          "name": "extrato_transacoes_conciliada_coerente",
+          "value": "(\"extrato_transacoes\".\"situacao\" = 'conciliada') = (\"extrato_transacoes\".\"linha_origem\" IS NOT NULL AND \"extrato_transacoes\".\"linha_id\" IS NOT NULL AND \"extrato_transacoes\".\"conciliada_por\" IS NOT NULL AND \"extrato_transacoes\".\"conciliada_em\" IS NOT NULL)\n        AND (\"extrato_transacoes\".\"situacao\" = 'conciliada' OR (\"extrato_transacoes\".\"linha_origem\" IS NULL AND \"extrato_transacoes\".\"linha_id\" IS NULL AND \"extrato_transacoes\".\"conciliada_por\" IS NULL AND \"extrato_transacoes\".\"conciliada_em\" IS NULL))"
+        },
+        "extrato_transacoes_ignorada_coerente": {
+          "name": "extrato_transacoes_ignorada_coerente",
+          "value": "(\"extrato_transacoes\".\"situacao\" = 'ignorada') = (\"extrato_transacoes\".\"ignorada_motivo\" IS NOT NULL AND length(btrim(\"extrato_transacoes\".\"ignorada_motivo\")) > 0 AND \"extrato_transacoes\".\"ignorada_por\" IS NOT NULL AND \"extrato_transacoes\".\"ignorada_em\" IS NOT NULL)\n        AND (\"extrato_transacoes\".\"situacao\" = 'ignorada' OR (\"extrato_transacoes\".\"ignorada_motivo\" IS NULL AND \"extrato_transacoes\".\"ignorada_por\" IS NULL AND \"extrato_transacoes\".\"ignorada_em\" IS NULL))"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.extratos": {
+      "name": "extratos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "conta_bancaria_id": {
+          "name": "conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arquivo_nome": {
+          "name": "arquivo_nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arquivo_hash": {
+          "name": "arquivo_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "banco_ofx": {
+          "name": "banco_ofx",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conta_ofx": {
+          "name": "conta_ofx",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "inicio": {
+          "name": "inicio",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fim": {
+          "name": "fim",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transacoes": {
+          "name": "transacoes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "repetidas": {
+          "name": "repetidas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "importado_por": {
+          "name": "importado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "importado_em": {
+          "name": "importado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "extratos_conta_bancaria_id_contas_bancarias_id_fk": {
+          "name": "extratos_conta_bancaria_id_contas_bancarias_id_fk",
+          "tableFrom": "extratos",
+          "tableTo": "contas_bancarias",
+          "columnsFrom": [
+            "conta_bancaria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "extratos_importado_por_usuarios_id_fk": {
+          "name": "extratos_importado_por_usuarios_id_fk",
+          "tableFrom": "extratos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "importado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "extratos_conta_hash_unico": {
+          "name": "extratos_conta_hash_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "conta_bancaria_id",
+            "arquivo_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "extratos_contagens": {
+          "name": "extratos_contagens",
+          "value": "\"extratos\".\"transacoes\" >= 0 AND \"extratos\".\"repetidas\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.faturas": {
+      "name": "faturas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "venda_id": {
+          "name": "venda_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "numero": {
+          "name": "numero",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "emitida_em": {
+          "name": "emitida_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "emitida_por": {
+          "name": "emitida_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "faturas_venda_id_vendas_id_fk": {
+          "name": "faturas_venda_id_vendas_id_fk",
+          "tableFrom": "faturas",
+          "tableTo": "vendas",
+          "columnsFrom": [
+            "venda_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "faturas_emitida_por_usuarios_id_fk": {
+          "name": "faturas_emitida_por_usuarios_id_fk",
+          "tableFrom": "faturas",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "emitida_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "faturas_venda_unico": {
+          "name": "faturas_venda_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "venda_id"
+          ]
+        },
+        "faturas_numero_unico": {
+          "name": "faturas_numero_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "numero"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.faturas_cartao": {
+      "name": "faturas_cartao",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "cartao_id": {
+          "name": "cartao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fechamento": {
+          "name": "fechamento",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vencimento": {
+          "name": "vencimento",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_lancamento",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'em_aberto'"
+        },
+        "pago_em": {
+          "name": "pago_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_pago": {
+          "name": "valor_pago",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conta_bancaria_id": {
+          "name": "conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "faturas_cartao_cartao_id_cartoes_corporativos_id_fk": {
+          "name": "faturas_cartao_cartao_id_cartoes_corporativos_id_fk",
+          "tableFrom": "faturas_cartao",
+          "tableTo": "cartoes_corporativos",
+          "columnsFrom": [
+            "cartao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "faturas_cartao_conta_bancaria_id_contas_bancarias_id_fk": {
+          "name": "faturas_cartao_conta_bancaria_id_contas_bancarias_id_fk",
+          "tableFrom": "faturas_cartao",
+          "tableTo": "contas_bancarias",
+          "columnsFrom": [
+            "conta_bancaria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "faturas_cartao_cartao_fechamento_unico": {
+          "name": "faturas_cartao_cartao_fechamento_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "cartao_id",
+            "fechamento"
+          ]
+        },
+        "faturas_cartao_id_cartao_unico": {
+          "name": "faturas_cartao_id_cartao_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "cartao_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "faturas_cartao_valor_pago": {
+          "name": "faturas_cartao_valor_pago",
+          "value": "\"faturas_cartao\".\"valor_pago\" IS NULL OR \"faturas_cartao\".\"valor_pago\" >= 0"
+        },
+        "faturas_cartao_baixa": {
+          "name": "faturas_cartao_baixa",
+          "value": "(\"faturas_cartao\".\"status\" = 'baixado' AND \"faturas_cartao\".\"pago_em\" IS NOT NULL AND \"faturas_cartao\".\"valor_pago\" IS NOT NULL AND \"faturas_cartao\".\"conta_bancaria_id\" IS NOT NULL)\n        OR (\"faturas_cartao\".\"status\" <> 'baixado' AND \"faturas_cartao\".\"pago_em\" IS NULL AND \"faturas_cartao\".\"valor_pago\" IS NULL AND \"faturas_cartao\".\"conta_bancaria_id\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.faturas_contador": {
+      "name": "faturas_contador",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "smallint",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "proximo": {
+          "name": "proximo",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "faturas_contador_uma_linha": {
+          "name": "faturas_contador_uma_linha",
+          "value": "\"faturas_contador\".\"id\" = 1"
+        },
+        "faturas_contador_proximo": {
+          "name": "faturas_contador_proximo",
+          "value": "\"faturas_contador\".\"proximo\" >= 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.faturas_versoes": {
+      "name": "faturas_versoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "fatura_id": {
+          "name": "fatura_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "versao": {
+          "name": "versao",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "emitida_em": {
+          "name": "emitida_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "emitida_por": {
+          "name": "emitida_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dados": {
+          "name": "dados",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "faturas_versoes_fatura_id_faturas_id_fk": {
+          "name": "faturas_versoes_fatura_id_faturas_id_fk",
+          "tableFrom": "faturas_versoes",
+          "tableTo": "faturas",
+          "columnsFrom": [
+            "fatura_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "faturas_versoes_emitida_por_usuarios_id_fk": {
+          "name": "faturas_versoes_emitida_por_usuarios_id_fk",
+          "tableFrom": "faturas_versoes",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "emitida_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "faturas_versoes_fatura_versao_unico": {
+          "name": "faturas_versoes_fatura_versao_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "fatura_id",
+            "versao"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.fornecedores": {
+      "name": "fornecedores",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipos": {
+          "name": "tipos",
+          "type": "tipo_servico[]",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cidade": {
+          "name": "cidade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modalidade": {
+          "name": "modalidade",
+          "type": "modalidade_fornecedor",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "comissao_pct": {
+          "name": "comissao_pct",
+          "type": "numeric(6, 3)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "tarifa_fixa": {
+          "name": "tarifa_fixa",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "desconto_a_vista": {
+          "name": "desconto_a_vista",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "operacao_financeira_operadora": {
+          "name": "operacao_financeira_operadora",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contato_nome": {
+          "name": "contato_nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contato_telefone": {
+          "name": "contato_telefone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "contato_email": {
+          "name": "contato_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "plantao": {
+          "name": "plantao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observacoes": {
+          "name": "observacoes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "excluido_em": {
+          "name": "excluido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ia_usos": {
+      "name": "ia_usos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "usuario_id": {
+          "name": "usuario_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "em": {
+          "name": "em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "recurso": {
+          "name": "recurso",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modelo": {
+          "name": "modelo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tokens_entrada": {
+          "name": "tokens_entrada",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tokens_saida": {
+          "name": "tokens_saida",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "ia_usos_em_idx": {
+          "name": "ia_usos_em_idx",
+          "columns": [
+            {
+              "expression": "em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "ia_usos_usuario_id_usuarios_id_fk": {
+          "name": "ia_usos_usuario_id_usuarios_id_fk",
+          "tableFrom": "ia_usos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "usuario_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ia_usos_tokens": {
+          "name": "ia_usos_tokens",
+          "value": "\"ia_usos\".\"tokens_entrada\" >= 0 AND \"ia_usos\".\"tokens_saida\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.integracao_envios": {
+      "name": "integracao_envios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "integracao": {
+          "name": "integracao",
+          "type": "integracao_fila",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chave": {
+          "name": "chave",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "situacao": {
+          "name": "situacao",
+          "type": "situacao_envio",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendente'"
+        },
+        "tentativas": {
+          "name": "tentativas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "proxima_em": {
+          "name": "proxima_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "tomado_em": {
+          "name": "tomado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ultimo_erro": {
+          "name": "ultimo_erro",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resultado": {
+          "name": "resultado",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "enviado_em": {
+          "name": "enviado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "integracao_envios_situacao_proxima_idx": {
+          "name": "integracao_envios_situacao_proxima_idx",
+          "columns": [
+            {
+              "expression": "situacao",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "proxima_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "integracao_envios_viagem_id_viagens_id_fk": {
+          "name": "integracao_envios_viagem_id_viagens_id_fk",
+          "tableFrom": "integracao_envios",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "integracao_envios_chave_unica": {
+          "name": "integracao_envios_chave_unica",
+          "nullsNotDistinct": false,
+          "columns": [
+            "integracao",
+            "chave"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "integracao_envios_tentativas": {
+          "name": "integracao_envios_tentativas",
+          "value": "\"integracao_envios\".\"tentativas\" >= 0"
+        },
+        "integracao_envios_enviado_coerente": {
+          "name": "integracao_envios_enviado_coerente",
+          "value": "(\"integracao_envios\".\"situacao\" = 'enviado') = (\"integracao_envios\".\"enviado_em\" IS NOT NULL)"
+        },
+        "integracao_envios_enviando_coerente": {
+          "name": "integracao_envios_enviando_coerente",
+          "value": "\"integracao_envios\".\"situacao\" <> 'enviando' OR \"integracao_envios\".\"tomado_em\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.itens_viagem": {
+      "name": "itens_viagem",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_item",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cidade": {
+          "name": "cidade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "servico": {
+          "name": "servico",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "checkin": {
+          "name": "checkin",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checkout": {
+          "name": "checkout",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "diarias": {
+          "name": "diarias",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "automatico": {
+          "name": "automatico",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "excluido_em": {
+          "name": "excluido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "itens_viagem_viagem_id_viagens_id_fk": {
+          "name": "itens_viagem_viagem_id_viagens_id_fk",
+          "tableFrom": "itens_viagem",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.lancamentos": {
+      "name": "lancamentos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "lado": {
+          "name": "lado",
+          "type": "lado_financeiro",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descricao": {
+          "name": "descricao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fornecedor_id": {
+          "name": "fornecedor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cliente_id": {
+          "name": "cliente_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pessoa_texto": {
+          "name": "pessoa_texto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "categoria_id": {
+          "name": "categoria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "centro": {
+          "name": "centro",
+          "type": "centro_custo",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "competencia": {
+          "name": "competencia",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "emissao": {
+          "name": "emissao",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vencimento": {
+          "name": "vencimento",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor": {
+          "name": "valor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forma": {
+          "name": "forma",
+          "type": "forma_financeiro",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conta_bancaria_id": {
+          "name": "conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observacao": {
+          "name": "observacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "grupo_id": {
+          "name": "grupo_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parcela_numero": {
+          "name": "parcela_numero",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parcela_total": {
+          "name": "parcela_total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "status_lancamento",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'em_aberto'"
+        },
+        "baixado_em": {
+          "name": "baixado_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_pago": {
+          "name": "valor_pago",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "juros": {
+          "name": "juros",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "desconto": {
+          "name": "desconto",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "baixa_conta_bancaria_id": {
+          "name": "baixa_conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "motivo_cancelamento": {
+          "name": "motivo_cancelamento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cartao_id": {
+          "name": "cartao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fatura_cartao_id": {
+          "name": "fatura_cartao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estoque_movimento_id": {
+          "name": "estoque_movimento_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reembolso_id": {
+          "name": "reembolso_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_por": {
+          "name": "criado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "lancamentos_fatura_cartao_idx": {
+          "name": "lancamentos_fatura_cartao_idx",
+          "columns": [
+            {
+              "expression": "fatura_cartao_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lancamentos_estoque_movimento_idx": {
+          "name": "lancamentos_estoque_movimento_idx",
+          "columns": [
+            {
+              "expression": "estoque_movimento_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lancamentos_reembolso_idx": {
+          "name": "lancamentos_reembolso_idx",
+          "columns": [
+            {
+              "expression": "reembolso_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lancamentos_em_aberto_vencimento_idx": {
+          "name": "lancamentos_em_aberto_vencimento_idx",
+          "columns": [
+            {
+              "expression": "vencimento",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"lancamentos\".\"status\" = 'em_aberto'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lancamentos_grupo_idx": {
+          "name": "lancamentos_grupo_idx",
+          "columns": [
+            {
+              "expression": "grupo_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "lancamentos_categoria_idx": {
+          "name": "lancamentos_categoria_idx",
+          "columns": [
+            {
+              "expression": "categoria_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "lancamentos_fornecedor_id_fornecedores_id_fk": {
+          "name": "lancamentos_fornecedor_id_fornecedores_id_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "fornecedores",
+          "columnsFrom": [
+            "fornecedor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "lancamentos_cliente_id_clientes_id_fk": {
+          "name": "lancamentos_cliente_id_clientes_id_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "clientes",
+          "columnsFrom": [
+            "cliente_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "lancamentos_categoria_id_categorias_financeiras_id_fk": {
+          "name": "lancamentos_categoria_id_categorias_financeiras_id_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "categorias_financeiras",
+          "columnsFrom": [
+            "categoria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "lancamentos_conta_bancaria_id_contas_bancarias_id_fk": {
+          "name": "lancamentos_conta_bancaria_id_contas_bancarias_id_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "contas_bancarias",
+          "columnsFrom": [
+            "conta_bancaria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "lancamentos_baixa_conta_bancaria_id_contas_bancarias_id_fk": {
+          "name": "lancamentos_baixa_conta_bancaria_id_contas_bancarias_id_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "contas_bancarias",
+          "columnsFrom": [
+            "baixa_conta_bancaria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "lancamentos_cartao_id_cartoes_corporativos_id_fk": {
+          "name": "lancamentos_cartao_id_cartoes_corporativos_id_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "cartoes_corporativos",
+          "columnsFrom": [
+            "cartao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "lancamentos_estoque_movimento_id_estoque_movimentos_id_fk": {
+          "name": "lancamentos_estoque_movimento_id_estoque_movimentos_id_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "estoque_movimentos",
+          "columnsFrom": [
+            "estoque_movimento_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "lancamentos_reembolso_id_reembolsos_id_fk": {
+          "name": "lancamentos_reembolso_id_reembolsos_id_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "reembolsos",
+          "columnsFrom": [
+            "reembolso_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "lancamentos_criado_por_usuarios_id_fk": {
+          "name": "lancamentos_criado_por_usuarios_id_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "criado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "lancamentos_fatura_cartao_fk": {
+          "name": "lancamentos_fatura_cartao_fk",
+          "tableFrom": "lancamentos",
+          "tableTo": "faturas_cartao",
+          "columnsFrom": [
+            "fatura_cartao_id",
+            "cartao_id"
+          ],
+          "columnsTo": [
+            "id",
+            "cartao_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "lancamentos_uma_pessoa": {
+          "name": "lancamentos_uma_pessoa",
+          "value": "num_nonnulls(\"lancamentos\".\"fornecedor_id\", \"lancamentos\".\"cliente_id\", \"lancamentos\".\"pessoa_texto\") <= 1"
+        },
+        "lancamentos_competencia": {
+          "name": "lancamentos_competencia",
+          "value": "\"lancamentos\".\"competencia\" ~ '^\\d{4}-(0[1-9]|1[0-2])$'"
+        },
+        "lancamentos_valor": {
+          "name": "lancamentos_valor",
+          "value": "\"lancamentos\".\"valor\" > 0"
+        },
+        "lancamentos_valores_baixa": {
+          "name": "lancamentos_valores_baixa",
+          "value": "(\"lancamentos\".\"valor_pago\" IS NULL OR \"lancamentos\".\"valor_pago\" >= 0) AND (\"lancamentos\".\"juros\" IS NULL OR \"lancamentos\".\"juros\" >= 0) AND (\"lancamentos\".\"desconto\" IS NULL OR \"lancamentos\".\"desconto\" >= 0)"
+        },
+        "lancamentos_baixa": {
+          "name": "lancamentos_baixa",
+          "value": "(\"lancamentos\".\"status\" = 'baixado' AND \"lancamentos\".\"baixado_em\" IS NOT NULL AND \"lancamentos\".\"valor_pago\" IS NOT NULL AND \"lancamentos\".\"baixa_conta_bancaria_id\" IS NOT NULL)\n        OR (\"lancamentos\".\"status\" <> 'baixado' AND \"lancamentos\".\"baixado_em\" IS NULL AND \"lancamentos\".\"valor_pago\" IS NULL AND \"lancamentos\".\"baixa_conta_bancaria_id\" IS NULL)"
+        },
+        "lancamentos_parcela": {
+          "name": "lancamentos_parcela",
+          "value": "num_nonnulls(\"lancamentos\".\"parcela_numero\", \"lancamentos\".\"parcela_total\") IN (0, 2) AND (\"lancamentos\".\"parcela_numero\" IS NULL OR (\"lancamentos\".\"parcela_numero\" >= 1 AND \"lancamentos\".\"parcela_total\" >= \"lancamentos\".\"parcela_numero\"))"
+        },
+        "lancamentos_fatura_com_cartao": {
+          "name": "lancamentos_fatura_com_cartao",
+          "value": "\"lancamentos\".\"fatura_cartao_id\" IS NULL OR \"lancamentos\".\"cartao_id\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.notas_fiscais": {
+      "name": "notas_fiscais",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "numero": {
+          "name": "numero",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "emitida_em": {
+          "name": "emitida_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "competencia": {
+          "name": "competencia",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor": {
+          "name": "valor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destinatario": {
+          "name": "destinatario",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "documento": {
+          "name": "documento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fornecedor_id": {
+          "name": "fornecedor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cliente_id": {
+          "name": "cliente_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observacao": {
+          "name": "observacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'emitida'"
+        },
+        "motivo_cancelamento": {
+          "name": "motivo_cancelamento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_por": {
+          "name": "criado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "notas_fiscais_numero_unico": {
+          "name": "notas_fiscais_numero_unico",
+          "columns": [
+            {
+              "expression": "numero",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"notas_fiscais\".\"status\" <> 'cancelada'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "notas_fiscais_emitida_idx": {
+          "name": "notas_fiscais_emitida_idx",
+          "columns": [
+            {
+              "expression": "emitida_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "notas_fiscais_fornecedor_id_fornecedores_id_fk": {
+          "name": "notas_fiscais_fornecedor_id_fornecedores_id_fk",
+          "tableFrom": "notas_fiscais",
+          "tableTo": "fornecedores",
+          "columnsFrom": [
+            "fornecedor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "notas_fiscais_cliente_id_clientes_id_fk": {
+          "name": "notas_fiscais_cliente_id_clientes_id_fk",
+          "tableFrom": "notas_fiscais",
+          "tableTo": "clientes",
+          "columnsFrom": [
+            "cliente_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "notas_fiscais_viagem_id_viagens_id_fk": {
+          "name": "notas_fiscais_viagem_id_viagens_id_fk",
+          "tableFrom": "notas_fiscais",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "notas_fiscais_criado_por_usuarios_id_fk": {
+          "name": "notas_fiscais_criado_por_usuarios_id_fk",
+          "tableFrom": "notas_fiscais",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "criado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "notas_fiscais_valor": {
+          "name": "notas_fiscais_valor",
+          "value": "\"notas_fiscais\".\"valor\" > 0"
+        },
+        "notas_fiscais_documento": {
+          "name": "notas_fiscais_documento",
+          "value": "\"notas_fiscais\".\"documento\" IS NULL OR \"notas_fiscais\".\"documento\" ~ '^([0-9]{11}|[0-9]{14})$'"
+        },
+        "notas_fiscais_competencia": {
+          "name": "notas_fiscais_competencia",
+          "value": "\"notas_fiscais\".\"competencia\" ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'"
+        },
+        "notas_fiscais_status": {
+          "name": "notas_fiscais_status",
+          "value": "\"notas_fiscais\".\"status\" IN ('emitida', 'cancelada')"
+        },
+        "notas_fiscais_pessoa": {
+          "name": "notas_fiscais_pessoa",
+          "value": "\"notas_fiscais\".\"fornecedor_id\" IS NULL OR \"notas_fiscais\".\"cliente_id\" IS NULL"
+        },
+        "notas_fiscais_motivo": {
+          "name": "notas_fiscais_motivo",
+          "value": "(\"notas_fiscais\".\"status\" = 'cancelada') = (\"notas_fiscais\".\"motivo_cancelamento\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.pagamentos_fornecedor": {
+      "name": "pagamentos_fornecedor",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "conta_id": {
+          "name": "conta_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "numero": {
+          "name": "numero",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vencimento": {
+          "name": "vencimento",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_original": {
+          "name": "valor_original",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_brl_previsto": {
+          "name": "valor_brl_previsto",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_pagamento",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'a_pagar'"
+        },
+        "pago_em": {
+          "name": "pago_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_original_pago": {
+          "name": "valor_original_pago",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cambio_efetivo": {
+          "name": "cambio_efetivo",
+          "type": "numeric(10, 4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_brl_pago": {
+          "name": "valor_brl_pago",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conta_bancaria_id": {
+          "name": "conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "repasse_parcela_id": {
+          "name": "repasse_parcela_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cartao_id": {
+          "name": "cartao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fatura_cartao_id": {
+          "name": "fatura_cartao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "pagamentos_fornecedor_fatura_cartao_idx": {
+          "name": "pagamentos_fornecedor_fatura_cartao_idx",
+          "columns": [
+            {
+              "expression": "fatura_cartao_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pagamentos_fornecedor_a_pagar_vencimento_idx": {
+          "name": "pagamentos_fornecedor_a_pagar_vencimento_idx",
+          "columns": [
+            {
+              "expression": "vencimento",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"pagamentos_fornecedor\".\"status\" = 'a_pagar'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "pagamentos_fornecedor_conta_id_contas_pagar_id_fk": {
+          "name": "pagamentos_fornecedor_conta_id_contas_pagar_id_fk",
+          "tableFrom": "pagamentos_fornecedor",
+          "tableTo": "contas_pagar",
+          "columnsFrom": [
+            "conta_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "pagamentos_fornecedor_conta_bancaria_id_contas_bancarias_id_fk": {
+          "name": "pagamentos_fornecedor_conta_bancaria_id_contas_bancarias_id_fk",
+          "tableFrom": "pagamentos_fornecedor",
+          "tableTo": "contas_bancarias",
+          "columnsFrom": [
+            "conta_bancaria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "pagamentos_fornecedor_repasse_parcela_id_parcelas_receber_id_fk": {
+          "name": "pagamentos_fornecedor_repasse_parcela_id_parcelas_receber_id_fk",
+          "tableFrom": "pagamentos_fornecedor",
+          "tableTo": "parcelas_receber",
+          "columnsFrom": [
+            "repasse_parcela_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "pagamentos_fornecedor_cartao_id_cartoes_corporativos_id_fk": {
+          "name": "pagamentos_fornecedor_cartao_id_cartoes_corporativos_id_fk",
+          "tableFrom": "pagamentos_fornecedor",
+          "tableTo": "cartoes_corporativos",
+          "columnsFrom": [
+            "cartao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "pagamentos_fornecedor_fatura_cartao_fk": {
+          "name": "pagamentos_fornecedor_fatura_cartao_fk",
+          "tableFrom": "pagamentos_fornecedor",
+          "tableTo": "faturas_cartao",
+          "columnsFrom": [
+            "fatura_cartao_id",
+            "cartao_id"
+          ],
+          "columnsTo": [
+            "id",
+            "cartao_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "pagamentos_fornecedor_conta_numero_unico": {
+          "name": "pagamentos_fornecedor_conta_numero_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "conta_id",
+            "numero"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "pagamentos_fornecedor_valores": {
+          "name": "pagamentos_fornecedor_valores",
+          "value": "\"pagamentos_fornecedor\".\"valor_original\" >= 0 AND \"pagamentos_fornecedor\".\"valor_brl_previsto\" >= 0 AND (\"pagamentos_fornecedor\".\"valor_original_pago\" IS NULL OR \"pagamentos_fornecedor\".\"valor_original_pago\" >= 0) AND (\"pagamentos_fornecedor\".\"valor_brl_pago\" IS NULL OR \"pagamentos_fornecedor\".\"valor_brl_pago\" >= 0)"
+        },
+        "pagamentos_fornecedor_fatura_com_cartao": {
+          "name": "pagamentos_fornecedor_fatura_com_cartao",
+          "value": "\"pagamentos_fornecedor\".\"fatura_cartao_id\" IS NULL OR \"pagamentos_fornecedor\".\"cartao_id\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.parcelas_receber": {
+      "name": "parcelas_receber",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "venda_id": {
+          "name": "venda_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "numero": {
+          "name": "numero",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_parcelas": {
+          "name": "total_parcelas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vencimento": {
+          "name": "vencimento",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor": {
+          "name": "valor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "meio": {
+          "name": "meio",
+          "type": "meio_recebimento",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "taxa_prevista": {
+          "name": "taxa_prevista",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "status": {
+          "name": "status",
+          "type": "status_parcela",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'a_receber'"
+        },
+        "recebida_em": {
+          "name": "recebida_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_recebido": {
+          "name": "valor_recebido",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "taxa_efetiva": {
+          "name": "taxa_efetiva",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_repassado": {
+          "name": "valor_repassado",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observacao": {
+          "name": "observacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conta_bancaria_id": {
+          "name": "conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "parcelas_receber_a_receber_vencimento_idx": {
+          "name": "parcelas_receber_a_receber_vencimento_idx",
+          "columns": [
+            {
+              "expression": "vencimento",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"parcelas_receber\".\"status\" = 'a_receber'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "parcelas_receber_viagem_id_viagens_id_fk": {
+          "name": "parcelas_receber_viagem_id_viagens_id_fk",
+          "tableFrom": "parcelas_receber",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "parcelas_receber_venda_id_vendas_id_fk": {
+          "name": "parcelas_receber_venda_id_vendas_id_fk",
+          "tableFrom": "parcelas_receber",
+          "tableTo": "vendas",
+          "columnsFrom": [
+            "venda_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "parcelas_receber_conta_bancaria_id_contas_bancarias_id_fk": {
+          "name": "parcelas_receber_conta_bancaria_id_contas_bancarias_id_fk",
+          "tableFrom": "parcelas_receber",
+          "tableTo": "contas_bancarias",
+          "columnsFrom": [
+            "conta_bancaria_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "parcelas_receber_venda_numero_unico": {
+          "name": "parcelas_receber_venda_numero_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "venda_id",
+            "numero"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "parcelas_receber_valores": {
+          "name": "parcelas_receber_valores",
+          "value": "\"parcelas_receber\".\"valor\" >= 0 AND \"parcelas_receber\".\"taxa_prevista\" >= 0 AND (\"parcelas_receber\".\"valor_recebido\" IS NULL OR \"parcelas_receber\".\"valor_recebido\" >= 0) AND (\"parcelas_receber\".\"taxa_efetiva\" IS NULL OR \"parcelas_receber\".\"taxa_efetiva\" >= 0) AND (\"parcelas_receber\".\"valor_repassado\" IS NULL OR \"parcelas_receber\".\"valor_repassado\" >= 0)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.pessoas": {
+      "name": "pessoas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "cliente_id": {
+          "name": "cliente_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "titular": {
+          "name": "titular",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parentesco": {
+          "name": "parentesco",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nascimento": {
+          "name": "nascimento",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cpf": {
+          "name": "cpf",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "passaporte": {
+          "name": "passaporte",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "validade_passaporte": {
+          "name": "validade_passaporte",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "removido_em": {
+          "name": "removido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "pessoas_cliente_id_clientes_id_fk": {
+          "name": "pessoas_cliente_id_clientes_id_fk",
+          "tableFrom": "pessoas",
+          "tableTo": "clientes",
+          "columnsFrom": [
+            "cliente_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.produtos_estoque": {
+      "name": "produtos_estoque",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "uso": {
+          "name": "uso",
+          "type": "uso_estoque",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "minimo_mt": {
+          "name": "minimo_mt",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "minimo_rs": {
+          "name": "minimo_rs",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ativo": {
+          "name": "ativo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "produtos_estoque_nome_ativo_unico": {
+          "name": "produtos_estoque_nome_ativo_unico",
+          "columns": [
+            {
+              "expression": "lower(\"nome\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"produtos_estoque\".\"ativo\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "produtos_estoque_minimos": {
+          "name": "produtos_estoque_minimos",
+          "value": "\"produtos_estoque\".\"minimo_mt\" >= 0 AND \"produtos_estoque\".\"minimo_rs\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.reembolsos": {
+      "name": "reembolsos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conta_pagar_id": {
+          "name": "conta_pagar_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "servico": {
+          "name": "servico",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fornecedor_id": {
+          "name": "fornecedor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ocorrido_em": {
+          "name": "ocorrido_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ocorrido": {
+          "name": "ocorrido",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_cobrar": {
+          "name": "valor_cobrar",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_devolver": {
+          "name": "valor_devolver",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forma_devolucao": {
+          "name": "forma_devolucao",
+          "type": "forma_devolucao",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prazo_cliente": {
+          "name": "prazo_cliente",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "previsto_fornecedor": {
+          "name": "previsto_fornecedor",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pedido_em": {
+          "name": "pedido_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "protocolo": {
+          "name": "protocolo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reembolsado_em": {
+          "name": "reembolsado_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelado_em": {
+          "name": "cancelado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cancelado_por": {
+          "name": "cancelado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "motivo_cancelamento": {
+          "name": "motivo_cancelamento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_por": {
+          "name": "criado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "reembolsos_viagem_id_viagens_id_fk": {
+          "name": "reembolsos_viagem_id_viagens_id_fk",
+          "tableFrom": "reembolsos",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "reembolsos_conta_pagar_id_contas_pagar_id_fk": {
+          "name": "reembolsos_conta_pagar_id_contas_pagar_id_fk",
+          "tableFrom": "reembolsos",
+          "tableTo": "contas_pagar",
+          "columnsFrom": [
+            "conta_pagar_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "reembolsos_fornecedor_id_fornecedores_id_fk": {
+          "name": "reembolsos_fornecedor_id_fornecedores_id_fk",
+          "tableFrom": "reembolsos",
+          "tableTo": "fornecedores",
+          "columnsFrom": [
+            "fornecedor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "reembolsos_cancelado_por_usuarios_id_fk": {
+          "name": "reembolsos_cancelado_por_usuarios_id_fk",
+          "tableFrom": "reembolsos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "cancelado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "reembolsos_criado_por_usuarios_id_fk": {
+          "name": "reembolsos_criado_por_usuarios_id_fk",
+          "tableFrom": "reembolsos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "criado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "reembolsos_valores": {
+          "name": "reembolsos_valores",
+          "value": "\"reembolsos\".\"valor_cobrar\" >= 0 AND \"reembolsos\".\"valor_devolver\" >= 0 AND (\"reembolsos\".\"valor_cobrar\" > 0 OR \"reembolsos\".\"valor_devolver\" > 0)"
+        },
+        "reembolsos_previsto": {
+          "name": "reembolsos_previsto",
+          "value": "\"reembolsos\".\"valor_cobrar\" = 0 OR \"reembolsos\".\"previsto_fornecedor\" IS NOT NULL"
+        },
+        "reembolsos_ocorrido": {
+          "name": "reembolsos_ocorrido",
+          "value": "char_length(\"reembolsos\".\"ocorrido\") BETWEEN 10 AND 1000"
+        },
+        "reembolsos_cancelamento": {
+          "name": "reembolsos_cancelamento",
+          "value": "(\"reembolsos\".\"cancelado_em\" IS NULL AND \"reembolsos\".\"cancelado_por\" IS NULL AND \"reembolsos\".\"motivo_cancelamento\" IS NULL)\n        OR (\"reembolsos\".\"cancelado_em\" IS NOT NULL AND \"reembolsos\".\"cancelado_por\" IS NOT NULL AND \"reembolsos\".\"motivo_cancelamento\" IS NOT NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.regras_versoes": {
+      "name": "regras_versoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigserial",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vigente_desde": {
+          "name": "vigente_desde",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "clock_timestamp()"
+        },
+        "criado_por": {
+          "name": "criado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valores": {
+          "name": "valores",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "regras_versoes_criado_por_usuarios_id_fk": {
+          "name": "regras_versoes_criado_por_usuarios_id_fk",
+          "tableFrom": "regras_versoes",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "criado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.roteiros": {
+      "name": "roteiros",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_roteiro",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'rascunho'"
+        },
+        "idioma": {
+          "name": "idioma",
+          "type": "idioma_destino",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fuso": {
+          "name": "fuso",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "abertura": {
+          "name": "abertura",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "conteudo": {
+          "name": "conteudo",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enviado_cliente_em": {
+          "name": "enviado_cliente_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enviado_cliente_por": {
+          "name": "enviado_cliente_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "aprovado_em": {
+          "name": "aprovado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "aprovado_por": {
+          "name": "aprovado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_por": {
+          "name": "criado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "roteiros_viagem_id_viagens_id_fk": {
+          "name": "roteiros_viagem_id_viagens_id_fk",
+          "tableFrom": "roteiros",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "roteiros_enviado_cliente_por_usuarios_id_fk": {
+          "name": "roteiros_enviado_cliente_por_usuarios_id_fk",
+          "tableFrom": "roteiros",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "enviado_cliente_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "roteiros_aprovado_por_usuarios_id_fk": {
+          "name": "roteiros_aprovado_por_usuarios_id_fk",
+          "tableFrom": "roteiros",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "aprovado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "roteiros_criado_por_usuarios_id_fk": {
+          "name": "roteiros_criado_por_usuarios_id_fk",
+          "tableFrom": "roteiros",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "criado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "roteiros_viagem_id_unique": {
+          "name": "roteiros_viagem_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "viagem_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tarefas": {
+      "name": "tarefas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "categoria": {
+          "name": "categoria",
+          "type": "categoria_tarefa",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dia": {
+          "name": "dia",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item": {
+          "name": "item",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fazer": {
+          "name": "fazer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "prazo_tipo": {
+          "name": "prazo_tipo",
+          "type": "prazo_tarefa",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prazo_data": {
+          "name": "prazo_data",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "prazo_dias": {
+          "name": "prazo_dias",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "responsavel_id": {
+          "name": "responsavel_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "customer_care": {
+          "name": "customer_care",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "observacao": {
+          "name": "observacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origem": {
+          "name": "origem",
+          "type": "origem_tarefa",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'manual'"
+        },
+        "chave": {
+          "name": "chave",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "concluida_em": {
+          "name": "concluida_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "concluida_por": {
+          "name": "concluida_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_por": {
+          "name": "criado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "excluido_em": {
+          "name": "excluido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tarefas_viagem_id_viagens_id_fk": {
+          "name": "tarefas_viagem_id_viagens_id_fk",
+          "tableFrom": "tarefas",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "tarefas_responsavel_id_usuarios_id_fk": {
+          "name": "tarefas_responsavel_id_usuarios_id_fk",
+          "tableFrom": "tarefas",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "responsavel_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tarefas_concluida_por_usuarios_id_fk": {
+          "name": "tarefas_concluida_por_usuarios_id_fk",
+          "tableFrom": "tarefas",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "concluida_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tarefas_criado_por_usuarios_id_fk": {
+          "name": "tarefas_criado_por_usuarios_id_fk",
+          "tableFrom": "tarefas",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "criado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.usuarios": {
+      "name": "usuarios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "perfil": {
+          "name": "perfil",
+          "type": "perfil_usuario",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filial": {
+          "name": "filial",
+          "type": "filial",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ativo": {
+          "name": "ativo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "usuarios_email_unique": {
+          "name": "usuarios_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.vendas": {
+      "name": "vendas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "versao_id": {
+          "name": "versao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "aceite_em": {
+          "name": "aceite_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forma": {
+          "name": "forma",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parcelas": {
+          "name": "parcelas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "primeiro_vencimento": {
+          "name": "primeiro_vencimento",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total": {
+          "name": "total",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fatura_nome": {
+          "name": "fatura_nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fatura_documento": {
+          "name": "fatura_documento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "comprovante": {
+          "name": "comprovante",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observacao": {
+          "name": "observacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fornecedor_cartao_id": {
+          "name": "fornecedor_cartao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_por": {
+          "name": "criado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "vendas_viagem_id_viagens_id_fk": {
+          "name": "vendas_viagem_id_viagens_id_fk",
+          "tableFrom": "vendas",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "vendas_versao_id_versoes_precificacao_id_fk": {
+          "name": "vendas_versao_id_versoes_precificacao_id_fk",
+          "tableFrom": "vendas",
+          "tableTo": "versoes_precificacao",
+          "columnsFrom": [
+            "versao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "vendas_fornecedor_cartao_id_fornecedores_id_fk": {
+          "name": "vendas_fornecedor_cartao_id_fornecedores_id_fk",
+          "tableFrom": "vendas",
+          "tableTo": "fornecedores",
+          "columnsFrom": [
+            "fornecedor_cartao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "vendas_criado_por_usuarios_id_fk": {
+          "name": "vendas_criado_por_usuarios_id_fk",
+          "tableFrom": "vendas",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "criado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "vendas_viagem_unico": {
+          "name": "vendas_viagem_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "viagem_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "vendas_total_nao_negativo": {
+          "name": "vendas_total_nao_negativo",
+          "value": "\"vendas\".\"total\" >= 0"
+        },
+        "vendas_parcelas_positivas": {
+          "name": "vendas_parcelas_positivas",
+          "value": "\"vendas\".\"parcelas\" >= 1"
+        },
+        "vendas_fatura_documento": {
+          "name": "vendas_fatura_documento",
+          "value": "\"vendas\".\"fatura_documento\" ~ '^(\\d{11}|\\d{14})$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.versoes_precificacao": {
+      "name": "versoes_precificacao",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "numero": {
+          "name": "numero",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_versao",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'aguardando'"
+        },
+        "snapshot": {
+          "name": "snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "preco": {
+          "name": "preco",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forma": {
+          "name": "forma",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dias": {
+          "name": "dias",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "regras_versao_id": {
+          "name": "regras_versao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rateio": {
+          "name": "rateio",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resultado": {
+          "name": "resultado",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "alteracao": {
+          "name": "alteracao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enviado_por": {
+          "name": "enviado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enviado_em": {
+          "name": "enviado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "decidido_por": {
+          "name": "decidido_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decidido_em": {
+          "name": "decidido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "comentario": {
+          "name": "comentario",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "versoes_precificacao_viagem_id_viagens_id_fk": {
+          "name": "versoes_precificacao_viagem_id_viagens_id_fk",
+          "tableFrom": "versoes_precificacao",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "versoes_precificacao_regras_versao_id_regras_versoes_id_fk": {
+          "name": "versoes_precificacao_regras_versao_id_regras_versoes_id_fk",
+          "tableFrom": "versoes_precificacao",
+          "tableTo": "regras_versoes",
+          "columnsFrom": [
+            "regras_versao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "versoes_precificacao_enviado_por_usuarios_id_fk": {
+          "name": "versoes_precificacao_enviado_por_usuarios_id_fk",
+          "tableFrom": "versoes_precificacao",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "enviado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "versoes_precificacao_decidido_por_usuarios_id_fk": {
+          "name": "versoes_precificacao_decidido_por_usuarios_id_fk",
+          "tableFrom": "versoes_precificacao",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "decidido_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "versoes_viagem_numero_unico": {
+          "name": "versoes_viagem_numero_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "viagem_id",
+            "numero"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.viagem_passageiros": {
+      "name": "viagem_passageiros",
+      "schema": "",
+      "columns": {
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pessoa_id": {
+          "name": "pessoa_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "viagem_passageiros_viagem_id_viagens_id_fk": {
+          "name": "viagem_passageiros_viagem_id_viagens_id_fk",
+          "tableFrom": "viagem_passageiros",
+          "tableTo": "viagens",
+          "columnsFrom": [
+            "viagem_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "viagem_passageiros_pessoa_id_pessoas_id_fk": {
+          "name": "viagem_passageiros_pessoa_id_pessoas_id_fk",
+          "tableFrom": "viagem_passageiros",
+          "tableTo": "pessoas",
+          "columnsFrom": [
+            "pessoa_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "viagem_passageiros_viagem_id_pessoa_id_pk": {
+          "name": "viagem_passageiros_viagem_id_pessoa_id_pk",
+          "columns": [
+            "viagem_id",
+            "pessoa_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.viagens": {
+      "name": "viagens",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "cliente_id": {
+          "name": "cliente_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "seq": {
+          "name": "seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destino": {
+          "name": "destino",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "inicio": {
+          "name": "inicio",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fim": {
+          "name": "fim",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "filial": {
+          "name": "filial",
+          "type": "filial",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "consultor_id": {
+          "name": "consultor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_orcamento",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'em_edicao'"
+        },
+        "versao_aprovada_id": {
+          "name": "versao_aprovada_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "internacional": {
+          "name": "internacional",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "nota_cliente": {
+          "name": "nota_cliente",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "vendida_em": {
+          "name": "vendida_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conciliada_em": {
+          "name": "conciliada_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observacoes": {
+          "name": "observacoes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "excluido_em": {
+          "name": "excluido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "viagens_cliente_id_clientes_id_fk": {
+          "name": "viagens_cliente_id_clientes_id_fk",
+          "tableFrom": "viagens",
+          "tableTo": "clientes",
+          "columnsFrom": [
+            "cliente_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "viagens_consultor_id_usuarios_id_fk": {
+          "name": "viagens_consultor_id_usuarios_id_fk",
+          "tableFrom": "viagens",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "consultor_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "viagens_cliente_seq_unico": {
+          "name": "viagens_cliente_seq_unico",
+          "nullsNotDistinct": false,
+          "columns": [
+            "cliente_id",
+            "seq"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "viagens_fim_apos_inicio": {
+          "name": "viagens_fim_apos_inicio",
+          "value": "\"viagens\".\"fim\" >= \"viagens\".\"inicio\""
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.categoria_tarefa": {
+      "name": "categoria_tarefa",
+      "schema": "public",
+      "values": [
+        "ingressos",
+        "transfers_passeios",
+        "restaurantes",
+        "hoteis_carro_voos",
+        "conferir",
+        "envio"
+      ]
+    },
+    "public.centro_custo": {
+      "name": "centro_custo",
+      "schema": "public",
+      "values": [
+        "MT",
+        "RS"
+      ]
+    },
+    "public.comissao_tipo": {
+      "name": "comissao_tipo",
+      "schema": "public",
+      "values": [
+        "descontada",
+        "a_receber"
+      ]
+    },
+    "public.estado_daily": {
+      "name": "estado_daily",
+      "schema": "public",
+      "values": [
+        "pendente",
+        "gerado",
+        "revisado",
+        "enviado"
+      ]
+    },
+    "public.filial": {
+      "name": "filial",
+      "schema": "public",
+      "values": [
+        "Rondon\u00f3polis",
+        "RS"
+      ]
+    },
+    "public.forma_devolucao": {
+      "name": "forma_devolucao",
+      "schema": "public",
+      "values": [
+        "pix",
+        "transferencia",
+        "abatimento",
+        "credito"
+      ]
+    },
+    "public.forma_financeiro": {
+      "name": "forma_financeiro",
+      "schema": "public",
+      "values": [
+        "a_prazo",
+        "boleto",
+        "cartao_credito",
+        "cartao_debito",
+        "debito_conta",
+        "deposito",
+        "dinheiro",
+        "pix",
+        "transferencia"
+      ]
+    },
+    "public.forma_pagamento_fornecedor": {
+      "name": "forma_pagamento_fornecedor",
+      "schema": "public",
+      "values": [
+        "a_vista",
+        "parcelado",
+        "cartao_corporativo"
+      ]
+    },
+    "public.idioma_destino": {
+      "name": "idioma_destino",
+      "schema": "public",
+      "values": [
+        "italiano",
+        "espanhol",
+        "frances",
+        "ingles",
+        "alemao",
+        "portugues"
+      ]
+    },
+    "public.integracao_fila": {
+      "name": "integracao_fila",
+      "schema": "public",
+      "values": [
+        "trello",
+        "drive"
+      ]
+    },
+    "public.lado_financeiro": {
+      "name": "lado_financeiro",
+      "schema": "public",
+      "values": [
+        "pagar",
+        "receber"
+      ]
+    },
+    "public.meio_recebimento": {
+      "name": "meio_recebimento",
+      "schema": "public",
+      "values": [
+        "pix",
+        "boleto",
+        "cartao_credito",
+        "cartao_fornecedor"
+      ]
+    },
+    "public.modalidade_fornecedor": {
+      "name": "modalidade_fornecedor",
+      "schema": "public",
+      "values": [
+        "net",
+        "comissionado"
+      ]
+    },
+    "public.moeda": {
+      "name": "moeda",
+      "schema": "public",
+      "values": [
+        "BRL",
+        "USD",
+        "EUR",
+        "GBP",
+        "CHF"
+      ]
+    },
+    "public.origem_tarefa": {
+      "name": "origem_tarefa",
+      "schema": "public",
+      "values": [
+        "manual",
+        "venda",
+        "roteiro"
+      ]
+    },
+    "public.perfil_usuario": {
+      "name": "perfil_usuario",
+      "schema": "public",
+      "values": [
+        "diretor",
+        "consultor",
+        "operacional",
+        "fin_operacional",
+        "fin_estrategico"
+      ]
+    },
+    "public.prazo_tarefa": {
+      "name": "prazo_tarefa",
+      "schema": "public",
+      "values": [
+        "data",
+        "dias_antes"
+      ]
+    },
+    "public.situacao_caixa": {
+      "name": "situacao_caixa",
+      "schema": "public",
+      "values": [
+        "rascunho",
+        "confirmada",
+        "cancelada"
+      ]
+    },
+    "public.situacao_chat_acao": {
+      "name": "situacao_chat_acao",
+      "schema": "public",
+      "values": [
+        "pendente",
+        "executando",
+        "feita",
+        "falhou",
+        "cancelada",
+        "expirada"
+      ]
+    },
+    "public.situacao_envio": {
+      "name": "situacao_envio",
+      "schema": "public",
+      "values": [
+        "pendente",
+        "enviando",
+        "enviado",
+        "falhou"
+      ]
+    },
+    "public.situacao_extrato": {
+      "name": "situacao_extrato",
+      "schema": "public",
+      "values": [
+        "pendente",
+        "conciliada",
+        "ignorada"
+      ]
+    },
+    "public.status_comissao": {
+      "name": "status_comissao",
+      "schema": "public",
+      "values": [
+        "prevista",
+        "recebida",
+        "nao_recebida",
+        "cancelada"
+      ]
+    },
+    "public.status_conta": {
+      "name": "status_conta",
+      "schema": "public",
+      "values": [
+        "a_pagar",
+        "paga",
+        "cancelada"
+      ]
+    },
+    "public.status_lancamento": {
+      "name": "status_lancamento",
+      "schema": "public",
+      "values": [
+        "em_aberto",
+        "baixado",
+        "cancelado"
+      ]
+    },
+    "public.status_orcamento": {
+      "name": "status_orcamento",
+      "schema": "public",
+      "values": [
+        "em_edicao",
+        "aguardando_aprovacao",
+        "aprovado",
+        "devolvido",
+        "vendida"
+      ]
+    },
+    "public.status_pagamento": {
+      "name": "status_pagamento",
+      "schema": "public",
+      "values": [
+        "a_pagar",
+        "pago"
+      ]
+    },
+    "public.status_parcela": {
+      "name": "status_parcela",
+      "schema": "public",
+      "values": [
+        "a_receber",
+        "recebida",
+        "cancelada"
+      ]
+    },
+    "public.status_roteiro": {
+      "name": "status_roteiro",
+      "schema": "public",
+      "values": [
+        "rascunho",
+        "aguardando_cliente",
+        "aprovado"
+      ]
+    },
+    "public.status_versao": {
+      "name": "status_versao",
+      "schema": "public",
+      "values": [
+        "aguardando",
+        "aprovada",
+        "aprovada_com_ajuste",
+        "devolvida"
+      ]
+    },
+    "public.tipo_cliente": {
+      "name": "tipo_cliente",
+      "schema": "public",
+      "values": [
+        "familia",
+        "casal",
+        "individual",
+        "grupo"
+      ]
+    },
+    "public.tipo_item": {
+      "name": "tipo_item",
+      "schema": "public",
+      "values": [
+        "Hotelaria",
+        "Trem",
+        "Transfer",
+        "Carro",
+        "Passeio",
+        "Ingresso",
+        "Seguro",
+        "Outro",
+        "Taxa",
+        "A\u00e9reo"
+      ]
+    },
+    "public.tipo_movimento_estoque": {
+      "name": "tipo_movimento_estoque",
+      "schema": "public",
+      "values": [
+        "entrada",
+        "saida",
+        "ajuste",
+        "caixa",
+        "devolucao_caixa"
+      ]
+    },
+    "public.tipo_servico": {
+      "name": "tipo_servico",
+      "schema": "public",
+      "values": [
+        "Hotelaria",
+        "Transfer",
+        "Trem",
+        "Carro",
+        "Ingresso",
+        "Passeio guiado",
+        "Seguro",
+        "Restaurante",
+        "Operadora",
+        "A\u00e9reo",
+        "Taxa",
+        "Outro"
+      ]
+    },
+    "public.uso_estoque": {
+      "name": "uso_estoque",
+      "schema": "public",
+      "values": [
+        "caixa_experiencia",
+        "papelaria"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {
+    "public.cliente_codigo_seq": {
+      "name": "cliente_codigo_seq",
+      "schema": "public",
+      "increment": "1",
+      "startWith": "1",
+      "minValue": "1",
+      "maxValue": "9223372036854775807",
+      "cache": "1",
+      "cycle": false
+    }
+  },
+  "roles": {},
+  "policies": {},
+  "views": {
+    "public.lancamentos_financeiros": {
+      "columns": {
+        "origem": {
+          "name": "origem",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lado": {
+          "name": "lado",
+          "type": "lado_financeiro",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vencimento": {
+          "name": "vencimento",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "competencia": {
+          "name": "competencia",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_previsto": {
+          "name": "valor_previsto",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_baixado": {
+          "name": "valor_baixado",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "baixado_em": {
+          "name": "baixado_em",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status_base": {
+          "name": "status_base",
+          "type": "status_lancamento",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "categoria_id": {
+          "name": "categoria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "centro": {
+          "name": "centro",
+          "type": "centro_custo",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conta_bancaria_id": {
+          "name": "conta_bancaria_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pessoa": {
+          "name": "pessoa",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descricao": {
+          "name": "descricao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "parcela_numero": {
+          "name": "parcela_numero",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "parcela_total": {
+          "name": "parcela_total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "viagem_id": {
+          "name": "viagem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "viagem_codigo": {
+          "name": "viagem_codigo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fatura_numero": {
+          "name": "fatura_numero",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "transita_caixa": {
+          "name": "transita_caixa",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "taxa": {
+          "name": "taxa",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "forma": {
+          "name": "forma",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exige_individual": {
+          "name": "exige_individual",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "repasse": {
+          "name": "repasse",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_caixa_previsto": {
+          "name": "valor_caixa_previsto",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_caixa_baixado": {
+          "name": "valor_caixa_baixado",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data_caixa": {
+          "name": "data_caixa",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fatura_cartao_id": {
+          "name": "fatura_cartao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estoque_movimento_id": {
+          "name": "estoque_movimento_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reembolso_id": {
+          "name": "reembolso_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "name": "lancamentos_financeiros",
+      "schema": "public",
+      "isExisting": true,
+      "materialized": false
+    }
+  },
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

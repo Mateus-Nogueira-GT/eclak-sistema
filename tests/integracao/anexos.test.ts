@@ -156,6 +156,7 @@ describe("anexos: envio, link assinado e remoção", () => {
     expect(await enviar("manual", "nao-e-uuid")).toEqual(NAO);
     expect(await enviar("parcela", c.manual)).toEqual(NAO);
     expect(await enviar("fatura_cartao", c.manual)).toEqual({ ok: false, erro: "Fatura do cartão não encontrada" });
+    expect(await enviar("reembolso", "00000000-0000-4000-8000-000000000000")).toEqual({ ok: false, erro: "Reembolso não encontrado" });
     expect(await enviar("qualquer", c.manual)).toEqual(NAO);
     expect(await db.select().from(anexos)).toEqual([]);
   });

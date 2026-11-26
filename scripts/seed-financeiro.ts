@@ -126,15 +126,12 @@ async function emitirFaturas(sql: Sql): Promise<number> {
   const [dir] = await sql`select id from usuarios where email = 'diretor@eclak.local'`;
   // Imports dinâmicos: o cliente do app lê DATABASE_URL no carregamento (o dotenv já rodou) e `server-only`
   // exige a condição `react-server` (ver o script `seed:local`).
-  const { db, sql: appSql } = await import("../src/server/db/client");
+  // O cliente do app é fechado no fim do `seed-local` (o seed da 5b usa o mesmo).
+  const { db } = await import("../src/server/db/client");
   const { emitirFaturaNa } = await import("../src/server/financeiro/faturas");
-  try {
-    const r = await db.transaction((tx) => emitirFaturaNa(tx, dir.id as string, v.id as string));
-    if (!r.ok) throw new Error(`Fatura do seed recusada: ${JSON.stringify(r)}`);
-    return 1;
-  } finally {
-    await appSql.end();
-  }
+  const r = await db.transaction((tx) => emitirFaturaNa(tx, dir.id as string, v.id as string));
+  if (!r.ok) throw new Error(`Fatura do seed recusada: ${JSON.stringify(r)}`);
+  return 1;
 }
 
 /** Um cartão corporativo com três compras manuais no ciclo atual; cada compra aponta para a fatura do seu ciclo. */

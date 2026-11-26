@@ -583,6 +583,9 @@ export function ViagemVendidaView({
   hoje,
   contasBancarias,
   cartoes = [],
+  caixa,
+  reembolsos,
+  margemAlteradaPorReembolso = false,
 }: {
   v: ViagemVendida;
   ficha: FichaPrecificacao | null;
@@ -597,6 +600,12 @@ export function ViagemVendidaView({
   contasBancarias: ContaBancariaOpcao[];
   /** Cartões corporativos ativos para a forma "cartão corporativo" (vazio para quem não age). */
   cartoes?: CartaoOpcao[];
+  /** Bloco da caixa de experiência (montado pela página), acima das abas. */
+  caixa?: ReactNode;
+  /** Bloco dos reembolsos (montado pela página, só para Diretor e financeiros), abaixo da caixa. */
+  reembolsos?: ReactNode;
+  /** Conciliada com caso de reembolso registrado depois da conciliação: a margem real mudou. */
+  margemAlteradaPorReembolso?: boolean;
 }) {
   const [aba, setAba] = useState<Aba>("entradas");
   const [painel, setPainel] = useState<Painel | null>(null);
@@ -671,6 +680,7 @@ export function ViagemVendidaView({
                 </p>
                 <p className="num text-[13px] text-cinza">{diferencaPP(est.real.finalPct, est.planejada.finalPct)}</p>
                 {margem && <div className="mt-1.5"><Semaforo margemPct={est.real.finalPct} alvoPct={margem.alvoPct} referenciaPct={margem.referenciaPct} /></div>}
+                {margemAlteradaPorReembolso && <AvisoMargemAlterada className="mt-2" />}
               </>
             )}
           </Card>
@@ -687,6 +697,9 @@ export function ViagemVendidaView({
           {ehDiretor && <span className="ml-3 inline-block align-middle"><AcaoDireta rotulo="Desfazer conciliação" mini executar={() => desfazerConciliacao(v.id)} /></span>}
         </p>
       )}
+
+      {caixa}
+      {reembolsos}
 
       <div className="mb-4">
         <Tabs value={aba} onChange={(a) => { setAba(a); setPainel(null); }} options={abas} />
@@ -711,7 +724,7 @@ export function ViagemVendidaView({
 
       {aba === "entradas" && <Entradas v={v} agir={agir} abrir={abrir} />}
       {aba === "saidas" && <Saidas v={v} agir={agir} verCartoes={podeAgir} abrir={abrir} />}
-      {aba === "conciliacao" && <Conciliacao v={v} agir={agir} abrir={abrir} />}
+      {aba === "conciliacao" && <Conciliacao v={v} agir={agir} abrir={abrir} margemAlteradaPorReembolso={margemAlteradaPorReembolso} />}
       {aba === "precificacao" && (
         <div>
           <p className="mb-4 text-[13.5px] text-cinza">Somente leitura: viagem vendida não aceita mudança de itens ou cotações. Ajustes de valor vão em Saídas, na conta do fornecedor.</p>
@@ -981,7 +994,11 @@ function Ponte({ linhas }: { linhas: LinhaPonte[] }) {
   );
 }
 
-function Conciliacao({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abrir: (p: Painel) => void }) {
+function AvisoMargemAlterada({ className }: { className?: string }) {
+  return <p className={`rounded-[3px] bg-ouro/30 px-1.5 py-0.5 text-[12.5px] font-semibold text-texto ${className ?? ""}`}>Margem alterada por reembolso depois da conciliação</p>;
+}
+
+function Conciliacao({ v, agir, abrir, margemAlteradaPorReembolso }: { v: ViagemVendida; agir: boolean; abrir: (p: Painel) => void; margemAlteradaPorReembolso: boolean }) {
   const est = v.estrategico;
   const contas = v.contas.filter((c) => c.status !== "cancelada");
   const pendentes = v.comissoes.filter((c) => c.pendente);
@@ -1005,6 +1022,7 @@ function Conciliacao({ v, agir, abrir }: { v: ViagemVendida; agir: boolean; abri
                 Margem planejada de <b>{pct1(est.planejada.finalPct)}</b> ({formatarReais(est.planejada.final)}), margem real de <b>{pct1(est.real.finalPct)}</b> ({formatarReais(est.real.final)}).
               </p>
             )}
+            {margemAlteradaPorReembolso && <AvisoMargemAlterada className="mt-2 inline-block" />}
             <div className="mt-4">
               <Eyebrow className="mb-2">Ponte da margem</Eyebrow>
               {"erro" in est.ponte ? (

@@ -1,6 +1,7 @@
 /**
- * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores, os clientes fictícios do protótipo, três orçamentos (aguardando, aprovado e devolvido) e duas viagens vendidas (Ribeiro, em viagem; e uma conciliada), duas contas bancárias, lançamentos manuais do protótipo, a fatura da Ribeiro, um cartão corporativo com três compras, uma nota fiscal, as tarefas da venda, um roteiro aprovado, dois dailies e um extrato sintético (confere, diferença e tarifa pendente).
- * Recusa rodar se DATABASE_URL ou NEXT_PUBLIC_SUPABASE_URL não forem locais. Idempotente: o que já existe é pulado.
+ * Seed local (npm run seed:local): um usuário por perfil (senha eclak-local), os fornecedores, os clientes fictícios do protótipo, três orçamentos (aguardando, aprovado e devolvido) e três viagens vendidas (Ribeiro, em viagem; uma conciliada; e Teixeira, da filial RS, embarcando em 20 dias), duas contas bancárias, lançamentos manuais do protótipo, a fatura da Ribeiro, um cartão corporativo com três compras, uma nota fiscal, as tarefas da venda, um roteiro aprovado, dois dailies, um extrato sintético (confere, diferença e tarifa pendente) e a fatia 5b (seed-5b.ts: estoque, caixas de experiência, reembolsos e comunicados).
+ * Recusa rodar se DATABASE_URL ou NEXT_PUBLIC_SUPABASE_URL não forem locais. Idempotente: o que já existe é pulado; nada é apagado
+ * (os testes de integração truncam o banco; o que um teste deixou fica: `supabase db reset` e o seed para começar limpo).
  */
 import { config } from "dotenv";
 import { createClient } from "@supabase/supabase-js";
@@ -11,6 +12,7 @@ import { semearFinanceiro } from "./seed-financeiro";
 import { semearConciliacao } from "./seed-conciliacao";
 import { semearVendas } from "./seed-vendas";
 import { semearOperacao } from "./seed-operacao";
+import { semear5b } from "./seed-5b";
 
 config({ path: ".env.local", quiet: true });
 
@@ -211,6 +213,7 @@ async function main() {
   const admin = createClient(NEXT_PUBLIC_SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+  let erroOriginal: unknown;
   try {
     let usuariosNovos = 0;
     for (const u of USUARIOS) {
@@ -261,10 +264,28 @@ async function main() {
     const fin = await semearFinanceiro(sql);
     const op = await semearOperacao(sql);
     const conciliadas = await semearConciliacao(sql);
-    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s), ${vendasNovas} viagem(ns) vendida(s), ${fin.lancamentos} lançamento(s), ${fin.faturas} fatura(s), ${fin.cartoes} cartão(ões) com ${fin.compras} compra(s), ${fin.notas} nota(s) fiscal(is), ${op.tarefas} tarefa(s), ${op.roteiros} roteiro(s) e ${op.dailies} daily(ies) e ${conciliadas} transação(ões) de extrato criados.`);
+    const b = await semear5b(sql);
+    console.log(`Seed local: ${usuariosNovos} usuário(s), ${fornecedoresNovos} fornecedor(es), ${clientesNovos} cliente(s), ${orcamentosNovos} orçamento(s), ${vendasNovas} viagem(ns) vendida(s), ${fin.lancamentos} lançamento(s), ${fin.faturas} fatura(s), ${fin.cartoes} cartão(ões) com ${fin.compras} compra(s), ${fin.notas} nota(s) fiscal(is), ${op.tarefas} tarefa(s), ${op.roteiros} roteiro(s) e ${op.dailies} daily(ies), ${conciliadas} transação(ões) de extrato, ${b.produtos} produto(s) de estoque, ${b.entradas} entrada(s) de estoque, ${b.caixas} caixa(s) de experiência, ${b.reembolsos} reembolso(s) e ${b.comunicados} comunicado(s) criados.`);
     console.log(`Logins: ${USUARIOS.map((u) => u.email).join(", ")} (senha ${SENHA})`);
+  } catch (e) {
+    erroOriginal = e;
+    throw e;
   } finally {
-    await sql.end();
+    // Fecha as duas conexões sem esconder o erro original: com ele, a falha ao fechar só é registrada; sem ele, a
+    // primeira falha ao fechar é o erro do seed. O cliente do app (núcleo usado pela fatura e pela 5b) é carregado só
+    // aqui no fim se ainda não foi.
+    const falhas: unknown[] = [];
+    for (const fechar of [() => sql.end(), async () => (await import("../src/server/db/client")).sql.end()]) {
+      try {
+        await fechar();
+      } catch (e) {
+        falhas.push(e);
+      }
+    }
+    if (falhas.length > 0) {
+      if (erroOriginal === undefined) throw falhas[0];
+      for (const f of falhas) console.error("Falha ao fechar a conexão (o erro do seed segue abaixo):", f instanceof Error ? f.message : f);
+    }
   }
 }
 

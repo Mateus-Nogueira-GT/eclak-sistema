@@ -1,7 +1,7 @@
 // Anexos (comprovantes, boletos, notas): qualquer linha da lista e notas fiscais. Só PDF, PNG ou JPEG até 10 MB,
 // conferidos no servidor pelos bytes iniciais (a extensão e o tipo declarado pelo navegador não valem).
 
-export const DONOS_ANEXO = ["manual", "parcela", "pagamento", "comissao", "fatura_cartao", "nota_fiscal"] as const;
+export const DONOS_ANEXO = ["manual", "parcela", "pagamento", "comissao", "fatura_cartao", "nota_fiscal", "reembolso"] as const;
 export type DonoAnexo = (typeof DONOS_ANEXO)[number];
 
 export const TAMANHO_MAXIMO_ANEXO = 10 * 1024 * 1024;

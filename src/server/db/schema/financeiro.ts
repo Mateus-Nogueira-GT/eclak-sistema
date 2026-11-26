@@ -22,7 +22,9 @@ import { CATEGORIAS_SISTEMA, type CategoriaSistema, type Origem } from "@/domain
 import { cartoesCorporativos, faturasCartao } from "./cartoes";
 import { clientes } from "./clientes";
 import { centroCustoEnum, formaFinanceiroEnum, ladoFinanceiroEnum, statusLancamentoEnum } from "./financeiro-enums";
+import { estoqueMovimentos } from "./estoque";
 import { fornecedores } from "./fornecedores";
+import { reembolsos } from "./reembolsos";
 import { usuarios } from "./usuarios";
 import { vendas } from "./vendas";
 
@@ -104,6 +106,10 @@ export const lancamentos = pgTable(
     cartaoId: uuid("cartao_id").references((): AnyPgColumn => cartoesCorporativos.id, { onDelete: "restrict" }),
     /** Fatura do ciclo da compra (pelo vencimento = data da compra); nula se cancelada ou fora do cartão. */
     faturaCartaoId: uuid("fatura_cartao_id"),
+    /** Entrada de estoque que originou a conta (fatia 5b): na lista única só se baixa, não se edita nem cancela. */
+    estoqueMovimentoId: uuid("estoque_movimento_id").references((): AnyPgColumn => estoqueMovimentos.id, { onDelete: "restrict" }),
+    /** Caso de reembolso que originou a conta (fatia 5b): na lista única só se baixa. */
+    reembolsoId: uuid("reembolso_id").references((): AnyPgColumn => reembolsos.id, { onDelete: "restrict" }),
     criadoPor: uuid("criado_por")
       .notNull()
       .references(() => usuarios.id),
@@ -132,6 +138,8 @@ export const lancamentos = pgTable(
     // A fatura é do mesmo cartão da compra (FK composta; sem fatura, nada a conferir).
     foreignKey({ name: "lancamentos_fatura_cartao_fk", columns: [t.faturaCartaoId, t.cartaoId], foreignColumns: [faturasCartao.id, faturasCartao.cartaoId] }).onDelete("restrict"),
     index("lancamentos_fatura_cartao_idx").on(t.faturaCartaoId),
+    index("lancamentos_estoque_movimento_idx").on(t.estoqueMovimentoId),
+    index("lancamentos_reembolso_idx").on(t.reembolsoId),
     index("lancamentos_em_aberto_vencimento_idx").on(t.vencimento).where(sql`${t.status} = 'em_aberto'`),
     index("lancamentos_grupo_idx").on(t.grupoId),
     index("lancamentos_categoria_idx").on(t.categoriaId),
@@ -200,7 +208,7 @@ export const faturasVersoes = pgTable(
 /**
  * Lista única (spec §6.1): lançamentos manuais, parcelas, pagamentos a fornecedor, comissões e faturas do cartão
  * corporativo, normalizados. Criada na migração custom 0021_view_lancamentos.sql; a versão vigente é a
- * 0033_view_fatura_cartao.sql. `forma` vem em slug (o rótulo é mapeado em TS).
+ * 0054_view_vinculos.sql. `forma` vem em slug (o rótulo é mapeado em TS).
  */
 export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
   origem: text("origem").$type<Origem>().notNull(),
@@ -238,4 +246,7 @@ export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
    * mostra a fatura). Nulo nas demais linhas e na própria linha da fatura (0033).
    */
   faturaCartaoId: uuid("fatura_cartao_id"),
+  /** Vínculo da conta manual (0054): entrada de estoque ou caso de reembolso; nulos nas outras origens. */
+  estoqueMovimentoId: uuid("estoque_movimento_id"),
+  reembolsoId: uuid("reembolso_id"),
 }).existing();

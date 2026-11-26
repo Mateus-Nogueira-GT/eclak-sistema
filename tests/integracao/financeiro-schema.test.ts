@@ -20,12 +20,18 @@ const categoriasNoBanco = async () =>
       select lado::text, grupo, nome, sistema, ativa from categorias_financeiras`),
   ]);
 
+const instrucoes = (arquivo: string) =>
+  readFileSync(arquivo, "utf8")
+    .split("--> statement-breakpoint")
+    .map((s) => s.replace(/^\s*--.*$/gm, "").trim())
+    .filter(Boolean);
+
 describe("esquema do financeiro: dados iniciais", () => {
   beforeEach(async () => {
     await limparBanco();
   });
 
-  it("depois de limparBanco: as 27 categorias do protótipo, as cinco do sistema marcadas", async () => {
+  it("depois de limparBanco: as 27 categorias do protótipo, as nove do sistema marcadas", async () => {
     const cats = await categoriasNoBanco();
     expect(cats).toHaveLength(27);
     expect(cats.filter((c) => c.lado === "pagar")).toHaveLength(22);
@@ -33,7 +39,11 @@ describe("esquema do financeiro: dados iniciais", () => {
     expect(cats.every((c) => c.ativa)).toBe(true);
     expect(cats.filter((c) => c.sistema).map((c) => [c.lado, c.grupo, c.nome, c.sistema])).toEqual([
       ["pagar", "Administrativo", "Cartão corporativo", "cartao_corporativo"],
+      ["pagar", "Administrativo", "Papelaria", "papelaria"],
+      ["pagar", "Viagens", "Caixa de experiência", "caixa_experiencia"],
       ["pagar", "Viagens", "Fornecedores de viagem", "fornecedores_viagem"],
+      ["pagar", "Viagens", "Reembolso a cliente", "reembolso_cliente"],
+      ["receber", "Outros", "Reembolso de fornecedor", "reembolso_fornecedor"],
       ["receber", "Vendas", "Comissões de hotel", "comissoes_hotel"],
       ["receber", "Vendas", "Comissões de operadora", "comissoes_operadora"],
       ["receber", "Vendas", "Vendas de viagem", "vendas_viagem"],
@@ -66,8 +76,48 @@ describe("esquema do financeiro: dados iniciais", () => {
       .filter((s) => /^UPDATE "categorias_financeiras"/i.test(s));
     expect(updates).toHaveLength(1);
     for (const s of updates) await sql.unsafe(s);
+    // 0052 (fatia 5b): os UPDATEs marcam as quatro categorias novas de sistema; o INSERT ... ON CONFLICT não duplica nada.
+    for (const s of instrucoes("drizzle/0052_categorias_estoque_reembolso.sql").filter((i) => /^(UPDATE|INSERT INTO) "categorias_financeiras"/i.test(i))) {
+      await sql.unsafe(s);
+    }
     expect(await categoriasNoBanco()).toEqual(ordenar(CATEGORIAS_INICIAIS.map((c) => ({ ...c, ativa: true }))));
     expect(await sql`select id, proximo from faturas_contador`).toEqual([{ id: 1, proximo: PROXIMA_FATURA_INICIAL }]);
+  });
+});
+
+describe("migração 0052: categorias de sistema do estoque e dos reembolsos", () => {
+  const aplicar = async () => {
+    for (const s of instrucoes("drizzle/0052_categorias_estoque_reembolso.sql")) await sql.unsafe(s);
+  };
+  const sistemas = async () =>
+    (await sql<{ nome: string; sistema: string }[]>`select nome, sistema from categorias_financeiras where sistema is not null`)
+      .map((c) => [c.sistema, c.nome])
+      .sort();
+
+  beforeEach(async () => {
+    await limparBanco();
+  });
+
+  it("banco já populado: marca as linhas existentes, sem duplicar; rodar de novo é inofensivo", async () => {
+    await sql`update categorias_financeiras set sistema = null where sistema in ('reembolso_cliente', 'reembolso_fornecedor', 'caixa_experiencia', 'papelaria')`;
+    await aplicar();
+    const depois = await sistemas();
+    expect(depois).toHaveLength(9);
+    expect(depois).toContainEqual(["papelaria", "Papelaria"]);
+    expect(await sql`select 1 from categorias_financeiras`).toHaveLength(27);
+    await aplicar();
+    expect(await sql`select 1 from categorias_financeiras`).toHaveLength(27);
+  });
+
+  it("linha renomeada na produção: o UPDATE não a acha e o INSERT cria a que falta (a renomeada fica como está)", async () => {
+    await sql`update categorias_financeiras set sistema = null, nome = 'Material de escritório' where nome = 'Papelaria'`;
+    await aplicar();
+    expect(await sistemas()).toContainEqual(["papelaria", "Papelaria"]);
+    expect(await sql`select sistema from categorias_financeiras where nome = 'Material de escritório'`).toEqual([{ sistema: null }]);
+  });
+
+  it("o CHECK aceita os quatro slugs novos e recusa outro", async () => {
+    await expect(sql`update categorias_financeiras set sistema = 'qualquer' where nome = 'Aluguel'`).rejects.toThrow(/categorias_financeiras_sistema/);
   });
 });
 
@@ -342,10 +392,11 @@ describe("view lancamentos_financeiros", () => {
       valorCaixaBaixado: null,
       dataCaixa: x.parcelas[0].vencimento,
     });
-    // Mesmo número de colunas que a view do banco (24 + 3 de caixa + fatura do cartão, da 4b): nenhuma coluna esquecida.
+    // Mesmo número de colunas que a view do banco (24 + 3 de caixa + fatura do cartão, da 4b, + os dois vínculos, da
+    // 5b): nenhuma coluna esquecida.
     const [cru] = await sql`select * from lancamentos_financeiros limit 1`;
     expect(Object.keys(p)).toHaveLength(Object.keys(cru).length);
-    expect(Object.keys(cru)).toHaveLength(28);
+    expect(Object.keys(cru)).toHaveLength(30);
   });
 
     it("manual: os campos do lançamento", async () => {

@@ -162,6 +162,20 @@ describe("RLS: anon não lê nada", () => {
     // IA (fatia 6c): um uso registrado.
     await sql`insert into ia_usos (usuario_id, recurso, modelo, tokens_entrada, tokens_saida)
               values (${u.id}, 'reescrever:dica', 'claude-opus-5-5', 10, 5)`;
+    // Estoque e caixa de experiência (fatia 5b).
+    const [prod] = await sql<{ id: string }[]>`insert into produtos_estoque (nome, uso) values ('Caderno', 'caixa_experiencia') returning id`;
+    await sql`insert into estoque_saldos (produto_id, filial, quantidade, custo_medio) values (${prod.id}, 'MT', 3, 1500)`;
+    await sql`insert into estoque_movimentos (produto_id, filial, tipo, quantidade, custo_unitario, custo_medio_antes, usuario_id)
+              values (${prod.id}, 'MT', 'entrada', 3, 1500, 0, ${u.id})`;
+    const [cx] = await sql<{ id: string }[]>`insert into caixas_experiencia (viagem_id, filial, criado_por) values (${v.id}, 'MT', ${u.id}) returning id`;
+    await sql`insert into caixa_itens (caixa_id, produto_id, quantidade) values (${cx.id}, ${prod.id}, 1)`;
+    // Reembolsos (fatia 5b).
+    await sql`insert into reembolsos (viagem_id, servico, ocorrido_em, ocorrido, valor_cobrar, valor_devolver, forma_devolucao, prazo_cliente, previsto_fornecedor, criado_por)
+              values (${v.id}, 'Hotel', '2027-01-05', 'O hotel cancelou a reserva.', 10000, 8000, 'pix', '2027-01-20', '2027-01-30', ${u.id})`;
+    // Avisos (fatia 5b).
+    await sql`insert into avisos_dispensados (chave, tipo, titulo, detalhe, usuario_id, justificativa)
+              values ('parcela', 'parcela', '3 parcelas de cliente vencidas', 'R$ 300,00 em aberto', ${u.id}, 'Cliente já avisou que paga amanhã')`;
+    await sql`insert into avisos_comunicados (setor, texto, criado_por) values ('Operacional', 'Conferir os vouchers da semana', ${u.id})`;
     // Agente do chat (Trello e Drive): uma ação e um anexo.
     await sql`insert into chat_acoes (usuario_id, tipo, viagem_id, alvo, dados, expira_em)
               values (${u.id}, 'trello_criar_cartao', null, '{}', '{}', now() + interval '15 minutes')`;
@@ -204,6 +218,14 @@ describe("RLS: anon não lê nada", () => {
     "extrato_transacoes",
     "integracao_envios",
     "ia_usos",
+    "produtos_estoque",
+    "estoque_saldos",
+    "estoque_movimentos",
+    "caixas_experiencia",
+    "caixa_itens",
+    "reembolsos",
+    "avisos_dispensados",
+    "avisos_comunicados",
     "chat_acoes",
     "chat_anexos",
   ]) {
@@ -229,6 +251,20 @@ describe("RLS: anon não lê nada", () => {
 
   it("tabelas das integrações com RLS ligado", async () => {
     const tabelas = ["integracao_envios", "ia_usos", "chat_acoes", "chat_anexos"];
+    const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
+      select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
+    expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
+  });
+
+  it("tabelas do estoque e da caixa com RLS ligado", async () => {
+    const tabelas = ["produtos_estoque", "estoque_saldos", "estoque_movimentos", "caixas_experiencia", "caixa_itens", "reembolsos"];
+    const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
+      select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
+    expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
+  });
+
+  it("tabelas dos avisos com RLS ligado", async () => {
+    const tabelas = ["avisos_dispensados", "avisos_comunicados"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());

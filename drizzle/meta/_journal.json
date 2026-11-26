@@ -344,6 +344,111 @@
       "when": 1795631979956,
       "tag": "0048_chat_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795633111904,
+      "tag": "0049_estoque_enums",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795633148073,
+      "tag": "0050_estoque_tabelas",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1795633158478,
+      "tag": "0051_estoque_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795633159230,
+      "tag": "0052_categorias_estoque_reembolso",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795633688303,
+      "tag": "0053_lancamentos_reembolso",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795633697995,
+      "tag": "0054_view_vinculos",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1795634472943,
+      "tag": "0055_estoque_movimentos_sinal",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795639117264,
+      "tag": "0056_reembolsos_enum",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1795639133816,
+      "tag": "0057_reembolsos",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795639142646,
+      "tag": "0058_reembolsos_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1795639143362,
+      "tag": "0059_anexos_dono_reembolso",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1795642790959,
+      "tag": "0060_avisos",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795642795985,
+      "tag": "0061_avisos_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795647111998,
+      "tag": "0062_categorias_sistema_ativas",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1795647123125,
+      "tag": "0063_estoque_movimentos_seq",
+      "breakpoints": true
     }
   ]
 }

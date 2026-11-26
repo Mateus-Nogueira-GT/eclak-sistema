@@ -1,6 +1,7 @@
 /**
- * Viagens vendidas do seed local: Família Ribeiro (Portugal e Espanha, em viagem, caso do protótipo) e Casal
- * Vasconcelos (Roma e Amalfi, conciliada). Idempotente por cliente + destino. Usa as mesmas funções de domínio
+ * Viagens vendidas do seed local: Família Ribeiro (Portugal e Espanha, em viagem, caso do protótipo), Casal
+ * Vasconcelos (Roma e Amalfi, conciliada) e Família Teixeira (Orlando, filial RS, embarque em 20 dias: a caixa de
+ * experiência em rascunho do seed da fatia 5b). Idempotente por cliente + destino. Usa as mesmas funções de domínio
  * do fechamento da venda (src/domain/venda.ts), sem imports de servidor.
  */
 import type postgres from "postgres";
@@ -326,6 +327,47 @@ async function semearConciliada(sql: Sql, ctx: Contexto, contaBancariaId: string
   return r !== null;
 }
 
+const LINHAS_TEIXEIRA = (inicio: string): Linha[] => [
+  hotel(inicio, 0, 7, "Orlando", "Resort Ilha Serena", 14800),
+  ["Transfer", "Orlando", "Aeroporto-resort e volta", null, null, null, 1200, null, null, "TransEuropa Transfers"],
+  ["Seguro", null, "Seguro viagem Estados Unidos, 5 pessoas", null, null, null, 1650, null, null, "Proteção Viagem Corretora"],
+  ["Taxa", null, "Taxa de roteiro", null, null, null, 250, null, null],
+];
+
+/** Família Teixeira (RS): vendida há 3 dias, à vista em Pix ainda a receber, embarque daqui a 20 dias. */
+async function semearTeixeira(sql: Sql, ctx: Contexto, contaBancariaId: string): Promise<boolean> {
+  const hoje = hojeEmCuiaba();
+  const inicio = somarDias(hoje, 20);
+  const fim = somarDias(inicio, 7);
+  const [cli] = await sql`select id from clientes where grupo = 'Família Teixeira' and excluido_em is null`;
+  const r = await inserirOrcamento(
+    sql,
+    ctx,
+    {
+      cliente: "Família Teixeira",
+      destino: "Orlando",
+      inicio,
+      fim,
+      linhas: LINHAS_TEIXEIRA(inicio),
+      forma: { tipo: "pix", parcelas: 1 },
+      desfecho: "aprovada",
+      alteracao: "Primeira versão do roteiro.",
+    },
+    async (tx, c) => {
+      await fechar(tx, ctx, c, cli.id, {
+        aceiteEm: somarDias(hoje, -3),
+        faturaNome: "Marcelo Teixeira",
+        comprovante: "Aceite por WhatsApp.",
+        observacao: "À vista em Pix, com vencimento em 5 dias.",
+        entrada: 0n,
+        primeiroVencimento: somarDias(hoje, 5),
+        baixarTudo: false,
+      }, contaBancariaId);
+    },
+  );
+  return r !== null;
+}
+
 const CONTA_SEED = "Sicredi";
 
 /** Conta bancária ativa das baixas do seed (toda baixa nova tem conta); cria se não existe. */
@@ -346,5 +388,6 @@ export async function semearVendas(sql: Sql): Promise<number> {
   let n = 0;
   if (await semearRibeiro(sql, ctx, contaBancariaId)) n++;
   if (await semearConciliada(sql, ctx, contaBancariaId)) n++;
+  if (await semearTeixeira(sql, ctx, contaBancariaId)) n++;
   return n;
 }

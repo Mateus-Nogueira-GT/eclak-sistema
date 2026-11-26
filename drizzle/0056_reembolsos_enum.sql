@@ -1,0 +1,1 @@
+CREATE TYPE "public"."forma_devolucao" AS ENUM('pix', 'transferencia', 'abatimento', 'credito');

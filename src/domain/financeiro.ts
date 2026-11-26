@@ -46,7 +46,17 @@ export const STATUS_LANCAMENTO = ["em_aberto", "baixado", "cancelado"] as const;
 export type StatusLancamento = (typeof STATUS_LANCAMENTO)[number];
 
 /** Categorias fixas usadas pelas linhas de viagem (`categorias_financeiras.sistema`). */
-export const CATEGORIAS_SISTEMA = ["vendas_viagem", "fornecedores_viagem", "comissoes_hotel", "comissoes_operadora", "cartao_corporativo"] as const;
+export const CATEGORIAS_SISTEMA = [
+  "vendas_viagem",
+  "fornecedores_viagem",
+  "comissoes_hotel",
+  "comissoes_operadora",
+  "cartao_corporativo",
+  "reembolso_cliente",
+  "reembolso_fornecedor",
+  "caixa_experiencia",
+  "papelaria",
+] as const;
 export type CategoriaSistema = (typeof CATEGORIAS_SISTEMA)[number];
 
 export const LADOS = ["pagar", "receber"] as const;
