@@ -176,6 +176,11 @@ describe("RLS: anon não lê nada", () => {
     await sql`insert into avisos_dispensados (chave, tipo, titulo, detalhe, usuario_id, justificativa)
               values ('parcela', 'parcela', '3 parcelas de cliente vencidas', 'R$ 300,00 em aberto', ${u.id}, 'Cliente já avisou que paga amanhã')`;
     await sql`insert into avisos_comunicados (setor, texto, criado_por) values ('Operacional', 'Conferir os vouchers da semana', ${u.id})`;
+    // Agente do chat (Trello e Drive): uma ação e um anexo.
+    await sql`insert into chat_acoes (usuario_id, tipo, viagem_id, alvo, dados, expira_em)
+              values (${u.id}, 'trello_criar_cartao', null, '{}', '{}', now() + interval '15 minutes')`;
+    await sql`insert into chat_anexos (usuario_id, nome, mime, tamanho, caminho, expira_em)
+              values (${u.id}, 'rls.pdf', 'application/pdf', 10, ${`chat/${u.id}/rls`}, now() + interval '60 minutes')`;
     const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from lancamentos_financeiros`;
     expect(n).toBeGreaterThan(0);
   });
@@ -221,6 +226,8 @@ describe("RLS: anon não lê nada", () => {
     "reembolsos",
     "avisos_dispensados",
     "avisos_comunicados",
+    "chat_acoes",
+    "chat_anexos",
   ]) {
     it(`anon não enxerga linhas de ${tabela}`, async () => {
       const { data, error } = await anon().from(tabela).select("*");
@@ -243,7 +250,7 @@ describe("RLS: anon não lê nada", () => {
   });
 
   it("tabelas das integrações com RLS ligado", async () => {
-    const tabelas = ["integracao_envios", "ia_usos"];
+    const tabelas = ["integracao_envios", "ia_usos", "chat_acoes", "chat_anexos"];
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
@@ -261,6 +268,34 @@ describe("RLS: anon não lê nada", () => {
     const rs = await sql<{ relname: string; relrowsecurity: boolean }[]>`
       select relname, relrowsecurity from pg_class where relnamespace = 'public'::regnamespace and relname in ${sql(tabelas)}`;
     expect(rs.map((r) => [r.relname, r.relrowsecurity]).sort()).toEqual(tabelas.map((t) => [t, true]).sort());
+  });
+
+  it("chat_acoes e chat_anexos: authenticated não lê nem grava", async () => {
+    const u = await criarUsuarioTeste("consultor");
+    const aut = anon();
+    const login = await aut.auth.signInWithPassword({ email: u.email, password: u.senha });
+    expect(login.error).toBeNull();
+    for (const tabela of ["chat_acoes", "chat_anexos"] as const) {
+      const sel = await aut.from(tabela).select("*");
+      expect(sel.error ? [] : sel.data).toEqual([]);
+    }
+    const insAcao = await aut.from("chat_acoes").insert({
+      usuario_id: u.id,
+      tipo: "trello_criar_cartao",
+      alvo: {},
+      dados: {},
+      expira_em: new Date(Date.now() + 60_000).toISOString(),
+    });
+    expect(insAcao.error).not.toBeNull();
+    const insAnexo = await aut.from("chat_anexos").insert({
+      usuario_id: u.id,
+      nome: "x.pdf",
+      mime: "application/pdf",
+      tamanho: 10,
+      caminho: `chat/${u.id}/tentativa`,
+      expira_em: new Date(Date.now() + 60_000).toISOString(),
+    });
+    expect(insAnexo.error).not.toBeNull();
   });
 
   it("view lancamentos_financeiros: security_invoker e sem privilégio para anon/authenticated", async () => {

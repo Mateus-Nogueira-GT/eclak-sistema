@@ -125,11 +125,11 @@ describe("esquema do estoque e da caixa de experiência", () => {
     }
   });
 
-  it("0059: reativa as quatro categorias de sistema da 5b que estavam desativadas; as outras ficam como estão", async () => {
+  it("0062: reativa as quatro categorias de sistema da 5b que estavam desativadas; as outras ficam como estão", async () => {
     const quatro = ["reembolso_cliente", "reembolso_fornecedor", "caixa_experiencia", "papelaria"];
     const [comum] = await sql<{ id: string }[]>`select id from categorias_financeiras where sistema is null limit 1`;
     await sql`update categorias_financeiras set ativa = false where sistema in ${sql(quatro)} or id = ${comum.id}`;
-    const instrucoes = readFileSync("drizzle/0059_categorias_sistema_ativas.sql", "utf8")
+    const instrucoes = readFileSync("drizzle/0062_categorias_sistema_ativas.sql", "utf8")
       .split("--> statement-breakpoint")
       .map((i) => i.replace(/^\s*--.*$/gm, "").trim())
       .filter(Boolean);

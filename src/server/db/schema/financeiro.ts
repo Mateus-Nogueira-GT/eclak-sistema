@@ -208,7 +208,7 @@ export const faturasVersoes = pgTable(
 /**
  * Lista única (spec §6.1): lançamentos manuais, parcelas, pagamentos a fornecedor, comissões e faturas do cartão
  * corporativo, normalizados. Criada na migração custom 0021_view_lancamentos.sql; a versão vigente é a
- * 0051_view_vinculos.sql. `forma` vem em slug (o rótulo é mapeado em TS).
+ * 0054_view_vinculos.sql. `forma` vem em slug (o rótulo é mapeado em TS).
  */
 export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
   origem: text("origem").$type<Origem>().notNull(),
@@ -246,7 +246,7 @@ export const lancamentosFinanceiros = pgView("lancamentos_financeiros", {
    * mostra a fatura). Nulo nas demais linhas e na própria linha da fatura (0033).
    */
   faturaCartaoId: uuid("fatura_cartao_id"),
-  /** Vínculo da conta manual (0051): entrada de estoque ou caso de reembolso; nulos nas outras origens. */
+  /** Vínculo da conta manual (0054): entrada de estoque ou caso de reembolso; nulos nas outras origens. */
   estoqueMovimentoId: uuid("estoque_movimento_id"),
   reembolsoId: uuid("reembolso_id"),
 }).existing();

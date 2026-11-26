@@ -1,0 +1,1 @@
+CREATE TYPE "public"."situacao_chat_acao" AS ENUM('pendente', 'executando', 'feita', 'falhou', 'cancelada', 'expirada');

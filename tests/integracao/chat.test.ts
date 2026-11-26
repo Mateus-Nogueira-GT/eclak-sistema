@@ -18,6 +18,12 @@ import { vendida, type Fixture } from "../helpers/venda";
 beforeEach(() => {
   vi.stubEnv("ANTHROPIC_API_KEY", "");
   vi.stubEnv("IA_MODELO", "");
+  vi.stubEnv("TRELLO_API_KEY", "");
+  vi.stubEnv("TRELLO_TOKEN", "");
+  vi.stubEnv("TRELLO_LISTA_ID", "");
+  vi.stubEnv("GOOGLE_SA_EMAIL", "");
+  vi.stubEnv("GOOGLE_SA_CHAVE", "");
+  vi.stubEnv("GOOGLE_DRIVE_PASTA_RAIZ_ID", "");
 });
 afterEach(() => {
   definirProvedorIAParaTestes(null);
@@ -86,7 +92,7 @@ describe("conversar: resumo_da_viagem e o perfil", () => {
   it("consultor: o tool_result não tem custo nem margem; a resposta volta e o uso é gravado sem texto", async () => {
     const pedidos = provedorFalso([pedeFerramenta(1, usoDe("t1", "resumo_da_viagem", { codigo })), responde("A viagem é para a Itália.")]);
     const r = await comSessao(f.u.id, () => conversar(pergunta(`Resumo da ${codigo}`)));
-    expect(r).toEqual({ ok: true, texto: "A viagem é para a Itália." });
+    expect(r).toEqual({ ok: true, texto: "A viagem é para a Itália.", propostas: [] });
     expect(pedidos).toHaveLength(2);
 
     const [res] = resultados(pedidos[1]);
@@ -112,7 +118,7 @@ describe("conversar: resumo_da_viagem e o perfil", () => {
   it.each(["diretor", "fin_operacional", "fin_estrategico"] as Perfil[])("%s: o tool_result tem custo e margem", async (perfil) => {
     const pedidos = provedorFalso([pedeFerramenta(1, usoDe("t1", "resumo_da_viagem", { codigo })), responde("Ok.")]);
     const u = perfil === "diretor" ? f.d : perfil === "fin_operacional" ? f.fin : await criarUsuarioTeste(perfil);
-    expect(await comSessao(u.id, () => conversar(pergunta("Qual a margem?")))).toEqual({ ok: true, texto: "Ok." });
+    expect(await comSessao(u.id, () => conversar(pergunta("Qual a margem?")))).toEqual({ ok: true, texto: "Ok.", propostas: [] });
     const [res] = resultados(pedidos[1]);
     expect(res.is_error).toBeFalsy();
     const dados = JSON.parse(res.content);
@@ -133,7 +139,7 @@ describe("conversar: resumo_da_viagem e o perfil", () => {
 
   it("código inexistente: tool_result com is_error e a conversa segue", async () => {
     const pedidos = provedorFalso([pedeFerramenta(1, usoDe("t1", "resumo_da_viagem", { codigo: "ECL-9999-01" })), responde("Não achei essa viagem.")]);
-    expect(await comSessao(f.u.id, () => conversar(pergunta("Resumo da ECL-9999-01")))).toEqual({ ok: true, texto: "Não achei essa viagem." });
+    expect(await comSessao(f.u.id, () => conversar(pergunta("Resumo da ECL-9999-01")))).toEqual({ ok: true, texto: "Não achei essa viagem.", propostas: [] });
     const [res] = resultados(pedidos[1]);
     expect(res).toMatchObject({ type: "tool_result", tool_use_id: "t1", is_error: true });
     expect(res.content).toContain("não encontrada");
@@ -144,7 +150,7 @@ describe("conversar: resumo_da_viagem e o perfil", () => {
       pedeFerramenta(1, usoDe("a", "apagar_viagem", { codigo }), usoDe("b", "buscar_viagens", { busca: 3 })),
       responde("Não posso."),
     ]);
-    expect(await comSessao(f.u.id, () => conversar(pergunta("Apague")))).toEqual({ ok: true, texto: "Não posso." });
+    expect(await comSessao(f.u.id, () => conversar(pergunta("Apague")))).toEqual({ ok: true, texto: "Não posso.", propostas: [] });
     const rs = resultados(pedidos[1]);
     expect(rs.map((x) => [x.tool_use_id, x.is_error])).toEqual([
       ["a", true],
@@ -190,14 +196,14 @@ describe("conversar: o laço", () => {
     expect(FERRAMENTAS_CHAT).toHaveLength(4);
   });
 
-  it("para em 6 voltas com mensagem; o uso soma as 6", async () => {
+  it("para em 8 voltas com mensagem; o uso soma as 8", async () => {
     const pedidos = provedorFalso([pedeFerramenta(1, usoDe("t", "minhas_tarefas", {}))]);
     const r = await comSessao(f.u.id, () => conversar(pergunta("Loop")));
     expect(r).toEqual({ ok: false, erro: "Não consegui terminar a resposta com as consultas permitidas. Tente uma pergunta mais específica." });
-    expect(pedidos).toHaveLength(6);
+    expect(pedidos).toHaveLength(8);
     const usos = await db.select().from(iaUsos);
     expect(usos).toHaveLength(1);
-    expect(usos[0]).toMatchObject({ recurso: "chat", tokensEntrada: 600, tokensSaida: 60 });
+    expect(usos[0]).toMatchObject({ recurso: "chat", tokensEntrada: 800, tokensSaida: 80 });
   });
 
   it("recusa: mensagem e uso gravado", async () => {

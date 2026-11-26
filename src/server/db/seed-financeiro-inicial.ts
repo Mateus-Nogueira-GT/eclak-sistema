@@ -1,7 +1,7 @@
 import type { CategoriaSistema, Lado } from "@/domain/financeiro";
 
 // Dados iniciais do financeiro: a migração drizzle/0020_financeiro.sql os insere em produção (replica esta lista, com
-// `sistema` nulo nas linhas que as migrações 0032 e 0049 marcam depois) e `limparBanco` (tests/helpers/db.ts) os reinsere depois de truncar. O teste
+// `sistema` nulo nas linhas que as migrações 0032 e 0052 marcam depois) e `limparBanco` (tests/helpers/db.ts) os reinsere depois de truncar. O teste
 // tests/integracao/financeiro-schema.test.ts executa os INSERTs da 0020 e confere que dão exatamente estes dados.
 
 export type CategoriaInicial = { lado: Lado; grupo: string; nome: string; sistema: CategoriaSistema | null };

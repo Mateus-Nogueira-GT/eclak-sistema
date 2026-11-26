@@ -1,13 +1,17 @@
 import "server-only";
 import { createSign } from "node:crypto";
 import type { ConfigDrive } from "./config";
-import { chamar, ErroIntegracao, type Buscar } from "./http";
+import { chamar, ErroIntegracao, urlDeTeste, type Buscar } from "./http";
 
 // Token de acesso do Google para a conta de serviço: JWT RS256 assinado com `node:crypto` (sem biblioteca do
 // Google) trocado no endpoint de token. O token fica só em memória, nunca em banco, log ou URL.
 
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 export const ESCOPO_DRIVE = "https://www.googleapis.com/auth/drive";
+
+export function baseTokenGoogle(env: Record<string, string | undefined> = process.env): string {
+  return urlDeTeste(env.GOOGLE_TOKEN_URL, GOOGLE_TOKEN_URL);
+}
 const GRANT_JWT = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 /** Validade pedida no JWT (o máximo que o Google aceita). */
 const VALIDADE_JWT_S = 3600;
@@ -50,14 +54,21 @@ export function descartarTokenGoogle(email: string): void {
 }
 
 /** Token de acesso (Bearer) da conta de serviço, reaproveitado até 60 s antes de expirar. */
-export async function tokenGoogle(cfg: Pick<ConfigDrive, "email" | "chave">, buscar: Buscar, agora: Date = new Date()): Promise<string> {
+export async function tokenGoogle(
+  cfg: Pick<ConfigDrive, "email" | "chave">,
+  buscar: Buscar,
+  agora: Date = new Date(),
+  opcoes: { timeoutMs?: number; prazoAte?: number } = {},
+): Promise<string> {
   const guardado = tokens.get(cfg.email);
   if (guardado && agora.getTime() < guardado.expiraEm - MARGEM_S * 1000) return guardado.token;
   const corpo = new URLSearchParams({ grant_type: GRANT_JWT, assertion: jwtGoogle(cfg, agora) }).toString();
-  const r = await chamar(buscar, GOOGLE_TOKEN_URL, {
+  const r = await chamar(buscar, baseTokenGoogle(), {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
     body: corpo,
+    timeoutMs: opcoes.timeoutMs,
+    prazoAte: opcoes.prazoAte,
   });
   // No endpoint de token, 400 e 401 são credencial recusada (`invalid_grant`, `invalid_client`: chave revogada,
   // conta apagada, relógio errado): `autenticacao`, não `recusado`. Os dois vão direto a `falhou` (repetir não resolve).

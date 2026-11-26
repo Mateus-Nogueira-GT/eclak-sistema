@@ -130,9 +130,9 @@ function CorpoDoCartao({ c, site }: { c: CartaoIntegracao; site: string }) {
 /** O "Testar conexão" do Trello e do Drive só lê: passar não prova que o envio (que escreve) vai funcionar. */
 const SO_LEITURA: Partial<Record<CartaoIntegracao["integracao"], string>> = {
   trello:
-    "O teste só lê a lista. Para os envios, o token do Trello precisa ter permissão de escrita (read,write) no quadro.",
+    "O teste só lê a lista. Para os envios e ações pelo chat, o token do Trello precisa ter permissão de leitura e escrita (read,write) no quadro.",
   drive:
-    "O teste só lê a pasta raiz. Para os envios, a conta de serviço precisa ser Editor (ou Gerente de conteúdo) do drive compartilhado.",
+    "O teste só lê a pasta raiz. Para os envios e ações pelo chat, a conta de serviço precisa ser Editor (ou Gerente de conteúdo) do drive compartilhado.",
 };
 
 function Cartao({ c, site }: { c: CartaoIntegracao; site: string }) {

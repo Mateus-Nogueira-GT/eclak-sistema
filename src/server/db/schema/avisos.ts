@@ -4,7 +4,7 @@ import { SETORES } from "@/domain/avisos";
 import { usuarios } from "./usuarios";
 
 // Central de avisos (fatia 5b, spec §8.4). Os avisos automáticos são calculados na hora; só a dispensa e os comunicados
-// são gravados. RLS (só service role) na migração custom 0058.
+// são gravados. RLS (só service role) na migração custom 0061.
 
 const listaSetores = sql.raw(SETORES.map((s) => `'${s}'`).join(", "));
 

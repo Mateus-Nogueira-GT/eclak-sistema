@@ -12,7 +12,7 @@ const centavos = (nome: string) => bigint(nome, { mode: "bigint" });
 
 // Caso de reembolso (fatia 5b): a ECLAK cobra o fornecedor e devolve ao cliente. O caso lê as contas, não as copia
 // (spec §14): não guarda situação, data nem valor das baixas; o estado vem das contas ligadas por
-// `lancamentos.reembolso_id`. `reembolsado_em` só vale nas formas sem conta (abatimento e crédito). RLS na 0055.
+// `lancamentos.reembolso_id`. `reembolsado_em` só vale nas formas sem conta (abatimento e crédito). RLS na 0058.
 export const reembolsos = pgTable(
   "reembolsos",
   {

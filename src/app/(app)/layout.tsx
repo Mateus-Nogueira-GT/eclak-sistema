@@ -9,7 +9,14 @@ export default async function LayoutApp({ children }: { children: ReactNode }) {
   const u = await usuarioAtual();
   if (!u) redirect("/login");
   return (
-    <Shell perfil={u.perfil} nome={u.nome} perfilNome={PERFIS[u.perfil].nome} iaLigada={estadoIntegracao("ia").configurada}>
+    <Shell
+      perfil={u.perfil}
+      nome={u.nome}
+      perfilNome={PERFIS[u.perfil].nome}
+      iaLigada={estadoIntegracao("ia").configurada}
+      trelloLigado={estadoIntegracao("trello").configurada}
+      driveLigado={estadoIntegracao("drive").configurada}
+    >
       {children}
     </Shell>
   );

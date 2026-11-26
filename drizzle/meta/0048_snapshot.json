@@ -1,6 +1,6 @@
 {
-  "id": "99ee1ab0-09e5-437f-bd68-020259bc5c50",
-  "prevId": "2fc50230-25b5-4663-8126-77eabbab2b38",
+  "id": "562d9d2d-dd1c-4d91-a55c-7144b5d5bb3b",
+  "prevId": "f739f97b-3f71-46db-9f26-48525289d23c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2720,12 +2720,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "estoque_movimento_id": {
-          "name": "estoque_movimento_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "criado_por": {
           "name": "criado_por",
           "type": "uuid",
@@ -2746,21 +2740,6 @@
           "columns": [
             {
               "expression": "fatura_cartao_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
-        "lancamentos_estoque_movimento_idx": {
-          "name": "lancamentos_estoque_movimento_idx",
-          "columns": [
-            {
-              "expression": "estoque_movimento_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2891,19 +2870,6 @@
             "cartao_id"
           ],
           "tableTo": "cartoes_corporativos",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "lancamentos_estoque_movimento_id_estoque_movimentos_id_fk": {
-          "name": "lancamentos_estoque_movimento_id_estoque_movimentos_id_fk",
-          "tableFrom": "lancamentos",
-          "columnsFrom": [
-            "estoque_movimento_id"
-          ],
-          "tableTo": "estoque_movimentos",
           "columnsTo": [
             "id"
           ],
@@ -4724,8 +4690,8 @@
       },
       "isRLSEnabled": false
     },
-    "public.caixa_itens": {
-      "name": "caixa_itens",
+    "public.chat_acoes": {
+      "name": "chat_acoes",
       "schema": "",
       "columns": {
         "id": {
@@ -4735,157 +4701,43 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "caixa_id": {
-          "name": "caixa_id",
+        "usuario_id": {
+          "name": "usuario_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "produto_id": {
-          "name": "produto_id",
-          "type": "uuid",
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "quantidade": {
-          "name": "quantidade",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "custo_unitario": {
-          "name": "custo_unitario",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "caixa_itens_caixa_id_caixas_experiencia_id_fk": {
-          "name": "caixa_itens_caixa_id_caixas_experiencia_id_fk",
-          "tableFrom": "caixa_itens",
-          "columnsFrom": [
-            "caixa_id"
-          ],
-          "tableTo": "caixas_experiencia",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "caixa_itens_produto_id_produtos_estoque_id_fk": {
-          "name": "caixa_itens_produto_id_produtos_estoque_id_fk",
-          "tableFrom": "caixa_itens",
-          "columnsFrom": [
-            "produto_id"
-          ],
-          "tableTo": "produtos_estoque",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "caixa_itens_caixa_produto_unico": {
-          "name": "caixa_itens_caixa_produto_unico",
-          "columns": [
-            "caixa_id",
-            "produto_id"
-          ],
-          "nullsNotDistinct": false
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "caixa_itens_quantidade": {
-          "name": "caixa_itens_quantidade",
-          "value": "\"caixa_itens\".\"quantidade\" >= 1"
-        },
-        "caixa_itens_custo_unitario": {
-          "name": "caixa_itens_custo_unitario",
-          "value": "\"caixa_itens\".\"custo_unitario\" IS NULL OR \"caixa_itens\".\"custo_unitario\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.caixas_experiencia": {
-      "name": "caixas_experiencia",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
         },
         "viagem_id": {
           "name": "viagem_id",
           "type": "uuid",
           "primaryKey": false,
+          "notNull": false
+        },
+        "alvo": {
+          "name": "alvo",
+          "type": "jsonb",
+          "primaryKey": false,
           "notNull": true
         },
-        "filial": {
-          "name": "filial",
-          "type": "centro_custo",
-          "typeSchema": "public",
+        "dados": {
+          "name": "dados",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },
         "situacao": {
           "name": "situacao",
-          "type": "situacao_caixa",
+          "type": "situacao_chat_acao",
           "typeSchema": "public",
           "primaryKey": false,
           "notNull": true,
-          "default": "'rascunho'"
-        },
-        "custo_total": {
-          "name": "custo_total",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "confirmada_em": {
-          "name": "confirmada_em",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "confirmada_por": {
-          "name": "confirmada_por",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancelada_em": {
-          "name": "cancelada_em",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancelada_por": {
-          "name": "cancelada_por",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "motivo_cancelamento": {
-          "name": "motivo_cancelamento",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "criado_por": {
-          "name": "criado_por",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
+          "default": "'pendente'"
         },
         "criado_em": {
           "name": "criado_em",
@@ -4894,79 +4746,96 @@
           "notNull": true,
           "default": "now()"
         },
-        "atualizado_em": {
-          "name": "atualizado_em",
+        "expira_em": {
+          "name": "expira_em",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": true
+        },
+        "decidido_em": {
+          "name": "decidido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tomado_em": {
+          "name": "tomado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resultado": {
+          "name": "resultado",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
-        "caixas_experiencia_viagem_ativa_unico": {
-          "name": "caixas_experiencia_viagem_ativa_unico",
+        "chat_acoes_usuario_situacao_idx": {
+          "name": "chat_acoes_usuario_situacao_idx",
           "columns": [
             {
-              "expression": "viagem_id",
+              "expression": "usuario_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "situacao",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
-          "isUnique": true,
+          "isUnique": false,
           "with": {},
           "method": "btree",
-          "where": "\"caixas_experiencia\".\"situacao\" <> 'cancelada'",
+          "concurrently": false
+        },
+        "chat_acoes_situacao_expira_idx": {
+          "name": "chat_acoes_situacao_expira_idx",
+          "columns": [
+            {
+              "expression": "situacao",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "expira_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
           "concurrently": false
         }
       },
       "foreignKeys": {
-        "caixas_experiencia_viagem_id_viagens_id_fk": {
-          "name": "caixas_experiencia_viagem_id_viagens_id_fk",
-          "tableFrom": "caixas_experiencia",
+        "chat_acoes_usuario_id_usuarios_id_fk": {
+          "name": "chat_acoes_usuario_id_usuarios_id_fk",
+          "tableFrom": "chat_acoes",
+          "columnsFrom": [
+            "usuario_id"
+          ],
+          "tableTo": "usuarios",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "restrict"
+        },
+        "chat_acoes_viagem_id_viagens_id_fk": {
+          "name": "chat_acoes_viagem_id_viagens_id_fk",
+          "tableFrom": "chat_acoes",
           "columnsFrom": [
             "viagem_id"
           ],
           "tableTo": "viagens",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "caixas_experiencia_confirmada_por_usuarios_id_fk": {
-          "name": "caixas_experiencia_confirmada_por_usuarios_id_fk",
-          "tableFrom": "caixas_experiencia",
-          "columnsFrom": [
-            "confirmada_por"
-          ],
-          "tableTo": "usuarios",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "caixas_experiencia_cancelada_por_usuarios_id_fk": {
-          "name": "caixas_experiencia_cancelada_por_usuarios_id_fk",
-          "tableFrom": "caixas_experiencia",
-          "columnsFrom": [
-            "cancelada_por"
-          ],
-          "tableTo": "usuarios",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "caixas_experiencia_criado_por_usuarios_id_fk": {
-          "name": "caixas_experiencia_criado_por_usuarios_id_fk",
-          "tableFrom": "caixas_experiencia",
-          "columnsFrom": [
-            "criado_por"
-          ],
-          "tableTo": "usuarios",
           "columnsTo": [
             "id"
           ],
@@ -4978,23 +4847,23 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "caixas_experiencia_custo_total": {
-          "name": "caixas_experiencia_custo_total",
-          "value": "\"caixas_experiencia\".\"custo_total\" IS NULL OR \"caixas_experiencia\".\"custo_total\" >= 0"
+        "chat_acoes_tipo": {
+          "name": "chat_acoes_tipo",
+          "value": "\"chat_acoes\".\"tipo\" IN ('trello_comentar', 'trello_marcar_item', 'trello_adicionar_item', 'trello_mover_cartao', 'trello_definir_prazo', 'trello_criar_cartao', 'drive_enviar_arquivo', 'drive_criar_pasta', 'drive_renomear', 'drive_mover')"
         },
-        "caixas_experiencia_confirmacao": {
-          "name": "caixas_experiencia_confirmacao",
-          "value": "(\"caixas_experiencia\".\"situacao\" = 'confirmada' AND \"caixas_experiencia\".\"custo_total\" IS NOT NULL AND \"caixas_experiencia\".\"confirmada_em\" IS NOT NULL AND \"caixas_experiencia\".\"confirmada_por\" IS NOT NULL)\n        OR (\"caixas_experiencia\".\"situacao\" = 'rascunho' AND \"caixas_experiencia\".\"custo_total\" IS NULL AND \"caixas_experiencia\".\"confirmada_em\" IS NULL AND \"caixas_experiencia\".\"confirmada_por\" IS NULL)\n        OR \"caixas_experiencia\".\"situacao\" = 'cancelada'"
+        "chat_acoes_viagem_coerente": {
+          "name": "chat_acoes_viagem_coerente",
+          "value": "(\"chat_acoes\".\"tipo\" = 'trello_criar_cartao') = (\"chat_acoes\".\"viagem_id\" IS NULL)"
         },
-        "caixas_experiencia_cancelamento": {
-          "name": "caixas_experiencia_cancelamento",
-          "value": "(\"caixas_experiencia\".\"situacao\" = 'cancelada' AND \"caixas_experiencia\".\"cancelada_em\" IS NOT NULL AND \"caixas_experiencia\".\"cancelada_por\" IS NOT NULL AND \"caixas_experiencia\".\"motivo_cancelamento\" IS NOT NULL)\n        OR (\"caixas_experiencia\".\"situacao\" <> 'cancelada' AND \"caixas_experiencia\".\"cancelada_em\" IS NULL AND \"caixas_experiencia\".\"cancelada_por\" IS NULL AND \"caixas_experiencia\".\"motivo_cancelamento\" IS NULL)"
+        "chat_acoes_executando_coerente": {
+          "name": "chat_acoes_executando_coerente",
+          "value": "\"chat_acoes\".\"situacao\" <> 'executando' OR \"chat_acoes\".\"tomado_em\" IS NOT NULL"
         }
       },
       "isRLSEnabled": false
     },
-    "public.estoque_movimentos": {
-      "name": "estoque_movimentos",
+    "public.chat_anexos": {
+      "name": "chat_anexos",
       "schema": "",
       "columns": {
         "id": {
@@ -5004,77 +4873,33 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "produto_id": {
-          "name": "produto_id",
+        "usuario_id": {
+          "name": "usuario_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
-        "filial": {
-          "name": "filial",
-          "type": "centro_custo",
-          "typeSchema": "public",
+        "nome": {
+          "name": "nome",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "tipo": {
-          "name": "tipo",
-          "type": "tipo_movimento_estoque",
-          "typeSchema": "public",
+        "mime": {
+          "name": "mime",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "quantidade": {
-          "name": "quantidade",
+        "tamanho": {
+          "name": "tamanho",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "custo_unitario": {
-          "name": "custo_unitario",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "custo_medio_antes": {
-          "name": "custo_medio_antes",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fornecedor_id": {
-          "name": "fornecedor_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "fornecedor_texto": {
-          "name": "fornecedor_texto",
+        "caminho": {
+          "name": "caminho",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "lancamento_id": {
-          "name": "lancamento_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "caixa_id": {
-          "name": "caixa_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "motivo": {
-          "name": "motivo",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "usuario_id": {
-          "name": "usuario_id",
-          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -5084,41 +4909,32 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "expira_em": {
+          "name": "expira_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "usado_em": {
+          "name": "usado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
-        "estoque_movimentos_produto_filial_idx": {
-          "name": "estoque_movimentos_produto_filial_idx",
+        "chat_anexos_usuario_expira_idx": {
+          "name": "chat_anexos_usuario_expira_idx",
           "columns": [
             {
-              "expression": "produto_id",
+              "expression": "usuario_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             },
             {
-              "expression": "filial",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "criado_em",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "with": {},
-          "method": "btree",
-          "concurrently": false
-        },
-        "estoque_movimentos_caixa_idx": {
-          "name": "estoque_movimentos_caixa_idx",
-          "columns": [
-            {
-              "expression": "caixa_id",
+              "expression": "expira_em",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5131,61 +4947,9 @@
         }
       },
       "foreignKeys": {
-        "estoque_movimentos_produto_id_produtos_estoque_id_fk": {
-          "name": "estoque_movimentos_produto_id_produtos_estoque_id_fk",
-          "tableFrom": "estoque_movimentos",
-          "columnsFrom": [
-            "produto_id"
-          ],
-          "tableTo": "produtos_estoque",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "estoque_movimentos_fornecedor_id_fornecedores_id_fk": {
-          "name": "estoque_movimentos_fornecedor_id_fornecedores_id_fk",
-          "tableFrom": "estoque_movimentos",
-          "columnsFrom": [
-            "fornecedor_id"
-          ],
-          "tableTo": "fornecedores",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "estoque_movimentos_lancamento_id_lancamentos_id_fk": {
-          "name": "estoque_movimentos_lancamento_id_lancamentos_id_fk",
-          "tableFrom": "estoque_movimentos",
-          "columnsFrom": [
-            "lancamento_id"
-          ],
-          "tableTo": "lancamentos",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "estoque_movimentos_caixa_id_caixas_experiencia_id_fk": {
-          "name": "estoque_movimentos_caixa_id_caixas_experiencia_id_fk",
-          "tableFrom": "estoque_movimentos",
-          "columnsFrom": [
-            "caixa_id"
-          ],
-          "tableTo": "caixas_experiencia",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        },
-        "estoque_movimentos_usuario_id_usuarios_id_fk": {
-          "name": "estoque_movimentos_usuario_id_usuarios_id_fk",
-          "tableFrom": "estoque_movimentos",
+        "chat_anexos_usuario_id_usuarios_id_fk": {
+          "name": "chat_anexos_usuario_id_usuarios_id_fk",
+          "tableFrom": "chat_anexos",
           "columnsFrom": [
             "usuario_id"
           ],
@@ -5198,182 +4962,20 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "estoque_movimentos_quantidade": {
-          "name": "estoque_movimentos_quantidade",
-          "value": "\"estoque_movimentos\".\"quantidade\" <> 0"
-        },
-        "estoque_movimentos_custos": {
-          "name": "estoque_movimentos_custos",
-          "value": "\"estoque_movimentos\".\"custo_unitario\" >= 0 AND \"estoque_movimentos\".\"custo_medio_antes\" >= 0"
-        },
-        "estoque_movimentos_um_fornecedor": {
-          "name": "estoque_movimentos_um_fornecedor",
-          "value": "num_nonnulls(\"estoque_movimentos\".\"fornecedor_id\", \"estoque_movimentos\".\"fornecedor_texto\") <= 1"
-        },
-        "estoque_movimentos_fornecedor_so_entrada": {
-          "name": "estoque_movimentos_fornecedor_so_entrada",
-          "value": "\"estoque_movimentos\".\"tipo\" = 'entrada' OR num_nonnulls(\"estoque_movimentos\".\"fornecedor_id\", \"estoque_movimentos\".\"fornecedor_texto\") = 0"
-        },
-        "estoque_movimentos_motivo": {
-          "name": "estoque_movimentos_motivo",
-          "value": "\"estoque_movimentos\".\"tipo\" NOT IN ('saida', 'ajuste') OR (\"estoque_movimentos\".\"motivo\" IS NOT NULL AND char_length(\"estoque_movimentos\".\"motivo\") BETWEEN 5 AND 200)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.estoque_saldos": {
-      "name": "estoque_saldos",
-      "schema": "",
-      "columns": {
-        "produto_id": {
-          "name": "produto_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "filial": {
-          "name": "filial",
-          "type": "centro_custo",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quantidade": {
-          "name": "quantidade",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "custo_medio": {
-          "name": "custo_medio",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "0"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "estoque_saldos_produto_id_produtos_estoque_id_fk": {
-          "name": "estoque_saldos_produto_id_produtos_estoque_id_fk",
-          "tableFrom": "estoque_saldos",
-          "columnsFrom": [
-            "produto_id"
-          ],
-          "tableTo": "produtos_estoque",
-          "columnsTo": [
-            "id"
-          ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
-        }
-      },
-      "compositePrimaryKeys": {
-        "estoque_saldos_pk": {
-          "name": "estoque_saldos_pk",
+      "uniqueConstraints": {
+        "chat_anexos_caminho_unique": {
+          "name": "chat_anexos_caminho_unique",
           "columns": [
-            "produto_id",
-            "filial"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "estoque_saldos_quantidade": {
-          "name": "estoque_saldos_quantidade",
-          "value": "\"estoque_saldos\".\"quantidade\" >= 0"
-        },
-        "estoque_saldos_custo_medio": {
-          "name": "estoque_saldos_custo_medio",
-          "value": "\"estoque_saldos\".\"custo_medio\" >= 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.produtos_estoque": {
-      "name": "produtos_estoque",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "nome": {
-          "name": "nome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "uso": {
-          "name": "uso",
-          "type": "uso_estoque",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "minimo_mt": {
-          "name": "minimo_mt",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "minimo_rs": {
-          "name": "minimo_rs",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "ativo": {
-          "name": "ativo",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "criado_em": {
-          "name": "criado_em",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "produtos_estoque_nome_ativo_unico": {
-          "name": "produtos_estoque_nome_ativo_unico",
-          "columns": [
-            {
-              "expression": "lower(\"nome\")",
-              "isExpression": true,
-              "asc": true,
-              "nulls": "last"
-            }
+            "caminho"
           ],
-          "isUnique": true,
-          "with": {},
-          "method": "btree",
-          "where": "\"produtos_estoque\".\"ativo\"",
-          "concurrently": false
+          "nullsNotDistinct": false
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
-        "produtos_estoque_minimos": {
-          "name": "produtos_estoque_minimos",
-          "value": "\"produtos_estoque\".\"minimo_mt\" >= 0 AND \"produtos_estoque\".\"minimo_rs\" >= 0"
+        "chat_anexos_tamanho": {
+          "name": "chat_anexos_tamanho",
+          "value": "\"chat_anexos\".\"tamanho\" BETWEEN 1 AND 5242880"
         }
       },
       "isRLSEnabled": false
@@ -5384,7 +4986,7 @@
       "name": "filial",
       "schema": "public",
       "values": [
-        "Rondonópolis",
+        "Rondon\u00f3polis",
         "RS"
       ]
     },
@@ -5420,7 +5022,7 @@
         "Seguro",
         "Restaurante",
         "Operadora",
-        "Aéreo",
+        "A\u00e9reo",
         "Taxa",
         "Outro"
       ]
@@ -5480,7 +5082,7 @@
         "Seguro",
         "Outro",
         "Taxa",
-        "Aéreo"
+        "A\u00e9reo"
       ]
     },
     "public.comissao_tipo": {
@@ -5673,32 +5275,16 @@
         "falhou"
       ]
     },
-    "public.situacao_caixa": {
-      "name": "situacao_caixa",
+    "public.situacao_chat_acao": {
+      "name": "situacao_chat_acao",
       "schema": "public",
       "values": [
-        "rascunho",
-        "confirmada",
-        "cancelada"
-      ]
-    },
-    "public.tipo_movimento_estoque": {
-      "name": "tipo_movimento_estoque",
-      "schema": "public",
-      "values": [
-        "entrada",
-        "saida",
-        "ajuste",
-        "caixa",
-        "devolucao_caixa"
-      ]
-    },
-    "public.uso_estoque": {
-      "name": "uso_estoque",
-      "schema": "public",
-      "values": [
-        "caixa_experiencia",
-        "papelaria"
+        "pendente",
+        "executando",
+        "feita",
+        "falhou",
+        "cancelada",
+        "expirada"
       ]
     }
   },

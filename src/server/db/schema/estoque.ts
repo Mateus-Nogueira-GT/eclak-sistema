@@ -15,7 +15,7 @@ const centavos = (nome: string) => bigint(nome, { mode: "bigint" });
 
 // Estoque e caixa de experiência (fatia 5b). Dinheiro em centavos. A filial usa o enum de centro (MT, RS).
 // `lancamentos.estoque_movimento_id` aponta para cá (FK em função, por causa do import circular com financeiro.ts).
-// RLS (só service role) na migração custom 0048.
+// RLS (só service role) na migração custom 0051.
 
 export const produtosEstoque = pgTable(
   "produtos_estoque",

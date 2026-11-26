@@ -1,5 +1,5 @@
 {
-  "id": "8ac3fc7b-c64b-4d33-a607-cd7bd603d026",
+  "id": "f278f381-c485-4ac3-b27d-a55e5932c62f",
   "prevId": "97bed93e-507d-4379-8f64-2bb52f2a29c2",
   "version": "7",
   "dialect": "postgresql",
@@ -4696,7 +4696,7 @@
       "name": "filial",
       "schema": "public",
       "values": [
-        "Rondonópolis",
+        "Rondon\u00f3polis",
         "RS"
       ]
     },
@@ -4732,7 +4732,7 @@
         "Seguro",
         "Restaurante",
         "Operadora",
-        "Aéreo",
+        "A\u00e9reo",
         "Taxa",
         "Outro"
       ]
@@ -4792,7 +4792,7 @@
         "Seguro",
         "Outro",
         "Taxa",
-        "Aéreo"
+        "A\u00e9reo"
       ]
     },
     "public.comissao_tipo": {
@@ -4985,32 +4985,16 @@
         "falhou"
       ]
     },
-    "public.situacao_caixa": {
-      "name": "situacao_caixa",
+    "public.situacao_chat_acao": {
+      "name": "situacao_chat_acao",
       "schema": "public",
       "values": [
-        "rascunho",
-        "confirmada",
-        "cancelada"
-      ]
-    },
-    "public.tipo_movimento_estoque": {
-      "name": "tipo_movimento_estoque",
-      "schema": "public",
-      "values": [
-        "entrada",
-        "saida",
-        "ajuste",
-        "caixa",
-        "devolucao_caixa"
-      ]
-    },
-    "public.uso_estoque": {
-      "name": "uso_estoque",
-      "schema": "public",
-      "values": [
-        "caixa_experiencia",
-        "papelaria"
+        "pendente",
+        "executando",
+        "feita",
+        "falhou",
+        "cancelada",
+        "expirada"
       ]
     }
   },

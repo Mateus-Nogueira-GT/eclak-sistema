@@ -76,8 +76,8 @@ describe("esquema do financeiro: dados iniciais", () => {
       .filter((s) => /^UPDATE "categorias_financeiras"/i.test(s));
     expect(updates).toHaveLength(1);
     for (const s of updates) await sql.unsafe(s);
-    // 0049 (fatia 5b): os UPDATEs marcam as quatro categorias novas de sistema; o INSERT ... ON CONFLICT não duplica nada.
-    for (const s of instrucoes("drizzle/0049_categorias_estoque_reembolso.sql").filter((i) => /^(UPDATE|INSERT INTO) "categorias_financeiras"/i.test(i))) {
+    // 0052 (fatia 5b): os UPDATEs marcam as quatro categorias novas de sistema; o INSERT ... ON CONFLICT não duplica nada.
+    for (const s of instrucoes("drizzle/0052_categorias_estoque_reembolso.sql").filter((i) => /^(UPDATE|INSERT INTO) "categorias_financeiras"/i.test(i))) {
       await sql.unsafe(s);
     }
     expect(await categoriasNoBanco()).toEqual(ordenar(CATEGORIAS_INICIAIS.map((c) => ({ ...c, ativa: true }))));
@@ -85,9 +85,9 @@ describe("esquema do financeiro: dados iniciais", () => {
   });
 });
 
-describe("migração 0049: categorias de sistema do estoque e dos reembolsos", () => {
+describe("migração 0052: categorias de sistema do estoque e dos reembolsos", () => {
   const aplicar = async () => {
-    for (const s of instrucoes("drizzle/0049_categorias_estoque_reembolso.sql")) await sql.unsafe(s);
+    for (const s of instrucoes("drizzle/0052_categorias_estoque_reembolso.sql")) await sql.unsafe(s);
   };
   const sistemas = async () =>
     (await sql<{ nome: string; sistema: string }[]>`select nome, sistema from categorias_financeiras where sistema is not null`)
